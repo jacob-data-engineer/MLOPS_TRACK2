@@ -148,92 +148,94 @@ function TrainingForm({
           {error}
         </div>
       )}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="flex flex-col gap-3">
-          <label className="block">
-            <span className="mb-1 block text-xs text-ink-muted">Size (YOLO{GENERATION})</span>
-            <select className="w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={size} onChange={(e) => setSelection({ size: e.target.value })}>
-              {sizes.map((s) => (
-                <option key={s} value={s}>{data.size_labels[s] ?? s}</option>
-              ))}
-            </select>
-          </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Epochs</span>
-              <input type="number" className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={epochs} onChange={(e) => setSelection({ epochs: Number(e.target.value) })} />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Image size</span>
-              <input type="number" className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={imgSize} onChange={(e) => setSelection({ imgSize: Number(e.target.value) })} />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Batch</span>
-              <input type="number" className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={batch} onChange={(e) => setSelection({ batch: Number(e.target.value) })} />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Seed</span>
-              <input type="number" className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={seed} onChange={(e) => setSelection({ seed: Number(e.target.value) })} />
-            </label>
-          </div>
-          <label className="block">
-            <span className="mb-1 block text-xs text-ink-muted">Notes</span>
-            <textarea
-              className="w-full resize-vertical rounded-md border border-black/15 bg-page px-3 py-2 text-sm"
-              rows={10}
-              value={notes}
-              onChange={(e) => setSelection({ notes: e.target.value })}
-              maxLength={2048}
-            />
-          </label>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <label className="col-span-2 block sm:col-span-1">
+          <span className="mb-1 block text-xs text-ink-muted">Size (YOLO{GENERATION})</span>
+          <select className="w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={size} onChange={(e) => setSelection({ size: e.target.value })}>
+            {sizes.map((s) => (
+              <option key={s} value={s}>{data.size_labels[s] ?? s}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-muted">Epochs</span>
+          <input type="number" className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={epochs} onChange={(e) => setSelection({ epochs: Number(e.target.value) })} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-muted">Image size</span>
+          <input type="number" className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={imgSize} onChange={(e) => setSelection({ imgSize: Number(e.target.value) })} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-muted">Batch</span>
+          <input type="number" className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={batch} onChange={(e) => setSelection({ batch: Number(e.target.value) })} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-muted">Seed</span>
+          <input type="number" className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={seed} onChange={(e) => setSelection({ seed: Number(e.target.value) })} />
+        </label>
+      </div>
+
+      {/* Both pickers sit side by side across the full card, the same shape
+          as Deploy & Inference. Each column is min-w-0 so a long S3 path
+          truncates inside its own pane instead of widening the grid track
+          and squeezing the other browser. */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="min-w-0">
+          <span className="mb-1 block text-xs text-ink-muted">Dataset folder</span>
+          <Track2S3FolderBrowser
+            prefix={datasetPrefix}
+            folders={datasetFolders}
+            onNavigate={setDatasetPrefix}
+            onSelect={(folder) => setSelection({ datasetFolder: folder })}
+            selected={datasetFolder}
+            allowCreate
+          />
         </div>
 
-        <div className="flex flex-col gap-3">
-          <div>
-            <span className="mb-1 block text-xs text-ink-muted">Dataset folder</span>
+        <div className="min-w-0">
+          <span className="mb-1 block text-xs text-ink-muted">Base model .pt file (browse the whole bucket)</span>
+          <div className={noBaseModel ? "pointer-events-none opacity-40" : ""}>
             <Track2S3FolderBrowser
-              prefix={datasetPrefix}
-              folders={datasetFolders}
-              onNavigate={setDatasetPrefix}
-              onSelect={(folder) => setSelection({ datasetFolder: folder })}
-              selected={datasetFolder}
+              prefix={weightsPrefix}
+              folders={weightsFolders}
+              onNavigate={setWeightsPrefix}
+              onSelect={(folder) => setSelection({ baseModelFolder: folder })}
+              selected={baseModelFolder}
               allowCreate
             />
           </div>
-          <div>
-            <span className="mb-1 block text-xs text-ink-muted">Base model .pt file (browse the whole bucket)</span>
-            <div className={noBaseModel ? "pointer-events-none opacity-40" : ""}>
-              <Track2S3FolderBrowser
-                prefix={weightsPrefix}
-                folders={weightsFolders}
-                onNavigate={setWeightsPrefix}
-                onSelect={(folder) => setSelection({ baseModelFolder: folder })}
-                selected={baseModelFolder}
-                allowCreate
-              />
-            </div>
-            <label className="mt-1.5 flex items-center gap-1.5 text-xs font-normal text-ink-secondary">
-              <input
-                type="checkbox"
-                checked={noBaseModel}
-                onChange={(e) => setSelection({ noBaseModel: e.target.checked })}
-              />
-              No .pt file available -- use the registry's latest Approved package instead
-            </label>
-            {noBaseModel && (
-              latestApproved ? (
-                <p className="tabular mt-1 text-xs text-ink-muted">
-                  Latest Approved: {latestApproved.group} v{latestApproved.version}
-                </p>
-              ) : (
-                <p className="mt-1 text-xs text-critical">
-                  No Approved package in yolo{GENERATION}{size}-detector yet -- training will fail until one is approved.
-                </p>
-              )
-            )}
-          </div>
+          <label className="mt-1.5 flex items-center gap-1.5 text-xs font-normal text-ink-secondary">
+            <input
+              type="checkbox"
+              checked={noBaseModel}
+              onChange={(e) => setSelection({ noBaseModel: e.target.checked })}
+            />
+            No .pt file available -- use the registry's latest Approved package instead
+          </label>
+          {noBaseModel && (
+            latestApproved ? (
+              <p className="tabular mt-1 text-xs text-ink-muted">
+                Latest Approved: {latestApproved.group} v{latestApproved.version}
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-critical">
+                No Approved package in yolo{GENERATION}{size}-detector yet -- training will fail until one is approved.
+              </p>
+            )
+          )}
         </div>
       </div>
+
+      <label className="mt-4 block">
+        <span className="mb-1 block text-xs text-ink-muted">Notes <span className="text-ink-muted/70">(optional -- notes about this run)</span></span>
+        <textarea
+          className="w-full resize-y rounded-md border border-black/15 bg-page px-3 py-2 text-sm"
+          rows={3}
+          value={notes}
+          onChange={(e) => setSelection({ notes: e.target.value })}
+          maxLength={2048}
+        />
+      </label>
 
       <div className="mt-4 flex gap-2">
         <button type="button" onClick={handleStart} disabled={busy || !datasetFolder} className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40">
