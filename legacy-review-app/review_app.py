@@ -1867,26 +1867,48 @@ def _render_page(
             refresh_qs += f"&selected_weights={quote(selected_weights)}"
         refresh_html = f'<meta http-equiv="refresh" content="15;url=/?{refresh_qs}">'
 
+    # Sidebar rail rather than the old horizontal tab strip, matching the
+    # 8501 app's shell: ten destinations in a row wrapped badly and left no
+    # room for names to grow. Preconnect + the display face are the same
+    # ones that frontend loads; if the request is blocked the stack falls
+    # back to a real monospace and nothing else changes.
+    nav_links = "".join(
+        f'<a href="/?tab={slug}" class="tab {"active" if active_tab == slug else ""}">{label}</a>'
+        for slug, label in (
+            # Slug stays "models" though the label reads Training: existing
+            # links and bookmarks are all ?tab=models, and renaming the
+            # label is not worth breaking them. Matches what the 8501 app
+            # calls the same screen ("Track2 Training").
+            ("models", "Training"),
+            ("review", "Review Queue"),
+            ("schedule", "Scheduling &amp; Automation"),
+            ("lineage", "Lineage"),
+            ("metrics", "Metrics"),
+            ("deploy", "Deploy"),
+            ("inference", "Inference"),
+            ("notifications", "Notifications"),
+            ("export", "Export Weights"),
+            ("help", "Help"),
+        )
+    )
+
     return f"""<!doctype html>
 <html><head><meta charset="utf-8">{refresh_html}<title>MLOps Control</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Special+Elite&display=swap" rel="stylesheet">
 <style>{_CSS}</style>
 </head>
 <body>
-<header class="topbar">
-  <div class="brand"><span class="brand-dot"></span> MLOps Control</div>
-  <nav class="tabs">
-    <a href="/?tab=review" class="tab {'active' if active_tab == 'review' else ''}">Review Queue</a>
-    <a href="/?tab=models" class="tab {'active' if active_tab == 'models' else ''}">Models</a>
-    <a href="/?tab=schedule" class="tab {'active' if active_tab == 'schedule' else ''}">Scheduling &amp; Automation</a>
-    <a href="/?tab=lineage" class="tab {'active' if active_tab == 'lineage' else ''}">Lineage</a>
-    <a href="/?tab=metrics" class="tab {'active' if active_tab == 'metrics' else ''}">Metrics</a>
-    <a href="/?tab=deploy" class="tab {'active' if active_tab == 'deploy' else ''}">Deploy</a>
-    <a href="/?tab=inference" class="tab {'active' if active_tab == 'inference' else ''}">Inference</a>
-    <a href="/?tab=notifications" class="tab {'active' if active_tab == 'notifications' else ''}">Notifications</a>
-    <a href="/?tab=help" class="tab {'active' if active_tab == 'help' else ''}">Help</a>
-    <a href="/?tab=export" class="tab {'active' if active_tab == 'export' else ''}">Export Weights</a>
-  </nav>
-</header>
+<div class="layout">
+<aside class="sidebar">
+  <div class="brand">
+    <span class="brand-name">MLOps Control</span>
+    <span class="brand-sub">Jurong Port &middot; Track2</span>
+  </div>
+  <nav class="tabs">{nav_links}</nav>
+</aside>
 <main>
 {message_html}
 {_render_review_tab(counts, registries) if active_tab == 'review' else ''}
@@ -1900,6 +1922,7 @@ def _render_page(
 {inference_html}
 {export_html}
 </main>
+</div>
 </body></html>"""
 
 
@@ -2215,7 +2238,6 @@ def _render_queue_panel(queue_snapshot: dict) -> str:
 
 
 def _render_models_tab(browse_prefix, selected_dataset, weights_browse_prefix, selected_weights, training_progress, queue_snapshot=None, pending_message=None, registries=None, automated_queues=None, editing_id="") -> str:
-    generation_options = "".join(f'<option value="{g}">{GENERATION_LABELS[g]}</option>' for g in YOLO_GENERATIONS)
     # Size options for whichever generation happens to be first in the
     # dropdown -- just the initial render; updateSizeOptions() below
     # rebuilds this from GENERATION_SIZES the moment the page loads and
@@ -2253,51 +2275,64 @@ def _render_models_tab(browse_prefix, selected_dataset, weights_browse_prefix, s
     add_to_queue_disabled = not selected_dataset or queue_full
 
     return f"""
-    <h1>Models</h1>
+    <h1>Track2 Training</h1>
+    <p class="page-sub">Dataset/weights browsing, GPU status, training progress, and the training queue for the Track2 YOLO pipeline.</p>
 
-    {gpu_status_html}
-    {training_progress_html}
+    <div class="grid-2">
+      {gpu_status_html}
+      {training_progress_html}
+    </div>
 
     <div class="panel">
-      <div class="section-title">Train a New Candidate</div>
-      <p class="card-meta">Registers the result into that generation/size's Model Package Group (created automatically if it doesn't exist yet).</p>
+      <div class="section-title">Start training</div>
+      <p class="card-meta" style="margin-bottom:14px">Registers the result into that generation/size's Model Package Group (created automatically if it doesn't exist yet).</p>
       <form method="post" action="/train/dataset">
-        <div class="field-grid">
+       <div class="form-2col">
+        <div>
+          <!-- Generation is a hidden field, not a dropdown: GENERATION_SIZES
+               has exactly one entry, so the select offered a single option
+               and cost a whole row to say nothing. The size label carries
+               the generation instead. Kept as an input (not removed) so the
+               form still posts it and the size-options script, which reads
+               .value off this id, keeps working untouched. -->
+          <input type="hidden" name="generation" id="train-generation" value="{default_generation}">
           <div class="field">
-            <label>Generation</label>
-            <select name="generation" id="train-generation" required>{generation_options}</select>
-          </div>
-          <div class="field">
-            <label>Size</label>
+            <label>Size ({GENERATION_LABELS[default_generation]})</label>
             <select name="size" id="train-size" required>{size_options}</select>
           </div>
-          <div class="field">
-            <label>Epochs</label>
-            <input type="number" name="epochs" value="50" min="1" max="1000" required>
+          <div class="field-row-2">
+            <div class="field">
+              <label>Epochs</label>
+              <input type="number" name="epochs" value="50" min="1" max="1000" required>
+            </div>
+            <div class="field">
+              <label>Image size</label>
+              <input type="number" name="img_size" value="640" min="32" max="4096" step="32" required>
+            </div>
+          </div>
+          <div class="field-row-2">
+            <div class="field">
+              <label>Batch</label>
+              <input type="number" name="batch" value="16" min="1" max="512" required>
+            </div>
+            <div class="field">
+              <label>Seed</label>
+              <input type="number" name="seed" value="42" required>
+            </div>
           </div>
           <div class="field">
-            <label>Image Size</label>
-            <input type="number" name="img_size" value="640" min="32" max="4096" step="32" required>
-          </div>
-          <div class="field">
-            <label>Batch Size</label>
-            <input type="number" name="batch" value="16" min="1" max="512" required>
-          </div>
-          <div class="field">
-            <label>Seed</label>
-            <input type="number" name="seed" value="42" required>
-          </div>
-          <div class="field">
-            <label>Training Strategy</label>
-            <input type="text" value="Full" disabled title="Fixed for now -- transfer-learning strategies aren't offered here yet.">
+            <label>Notes</label>
+            <textarea name="notes" rows="12" placeholder="e.g. re-running with the corrected data.yaml after last week's mislabeled class fix" style="width:100%;resize:vertical;font-family:inherit;"></textarea>
           </div>
         </div>
+
+        <div>
         <div class="field">
           <label>Dataset folder (browse the whole bucket)</label>
           <input type="hidden" name="dataset_folder" value="{selected_dataset}">
           {dataset_browser_html}
         </div>
-        <div class="field">
+        <div class="field" style="margin-top:14px">
           <label>Base model .pt file (browse the whole bucket)</label>
           <input type="hidden" name="base_model_folder" id="base-model-hidden" value="{selected_weights}">
           {weights_browser_html}
@@ -2308,14 +2343,20 @@ def _render_models_tab(browse_prefix, selected_dataset, weights_browse_prefix, s
           </label>
           <div id="latest-approved-info" class="card-meta" style="margin-top:6px"></div>
         </div>
-        <div class="field">
-          <label>Notes (what was done / why -- optional, saved on the registered model package)</label>
-          <textarea name="notes" rows="3" placeholder="e.g. re-running with the corrected data.yaml after last week's mislabeled class fix" style="width:100%;resize:vertical;font-family:inherit;"></textarea>
         </div>
-        <button class="btn btn-approve" type="submit" style="margin-top:14px" {"disabled" if start_disabled else ""}>Start Training</button>
-        <button class="btn" type="submit" formaction="/queue/add" formmethod="post" style="margin-top:14px;margin-left:8px" {"disabled" if add_to_queue_disabled else ""}>Add to Queue</button>
-        {f'<p class="card-meta" style="margin-top:6px;color:var(--text-muted)">{html.escape(already_running)}</p>' if already_running else ""}
-        {f'<p class="card-meta" style="margin-top:6px;color:var(--text-muted)">Queue is full ({MAX_QUEUE_SIZE} max) -- remove an entry below before adding another.</p>' if queue_full and not already_running else ""}
+       </div>
+
+        <div class="form-actions">
+          <button class="btn btn-approve" type="submit" {"disabled" if start_disabled else ""}>Start Training</button>
+          <button class="btn btn-secondary" type="submit" formaction="/queue/add" formmethod="post" {"disabled" if add_to_queue_disabled else ""}>Add to Queue</button>
+        </div>
+        <!-- No Stop Training button here, unlike the 8501 screen this is
+             modelled on: that app has an endpoint for it and this one does
+             not (only /train/dataset and /train/now exist). A control that
+             posts to a route the server has never heard of is worse than
+             an absent one. -->
+        {f'<p class="card-meta" style="margin-top:8px;color:var(--text-muted)">{html.escape(already_running)}</p>' if already_running else ""}
+        {f'<p class="card-meta" style="margin-top:8px;color:var(--text-muted)">Queue is full ({MAX_QUEUE_SIZE} max) -- remove an entry below before adding another.</p>' if queue_full and not already_running else ""}
 
         <div class="section-title" style="margin-top:24px">Automated Schedule (for "Add to Automated Pipeline" below)</div>
         <p class="card-meta" style="margin-bottom:8px">Runs the parameters above on a repeating schedule of its own -- keeps firing even while this review app's own server is stopped overnight/on weekends, unlike the ad-hoc queue below.</p>
@@ -2796,83 +2837,224 @@ def _render_schedule_tab(schedule, training_progress=None, automated_queues=None
 
 
 _CSS = """
+/* Ported from the JP_UI frontend's design tokens (web/src/index.css) so
+   this app and the one on 8501 read as the same product rather than two
+   tools that happen to share a host. Plain CSS, no Tailwind: the class
+   names below are the ones review_app.py already emits, so this is a
+   restyle, not a rewrite of the markup.
+
+   DIRECTION: customs case-file & manifest stamps. Manila/kraft neutrals
+   are the ground for every surface, hairline and body of text. One real
+   saturated hue exists -- alarm red -- spent only on destructive actions
+   and things that need a human's eyes. Verdict inks (red/green/blue) are
+   the one exception, and they are three dark pigments of one family, not
+   a status-light triad. */
 :root {
-  --bg: #0b0f14;
-  --panel: #131a24;
-  --panel-2: #1a2330;
-  --border: #223047;
-  --text: #e8edf4;
-  --text-muted: #7c8ba1;
-  --accent: #14e0b4;
-  --accent-dim: #0c3b34;
-  --ok: #2fd97c;
-  --ok-dim: #123825;
-  --warn: #f5a623;
-  --warn-dim: #3a2a0d;
-  --reject: #ff5d7a;
-  --reject-dim: #3a1420;
-  --info: #3987e5;
+  color-scheme: light;
+
+  /* Manila/kraft ground -- warm off-white paper, not cool SaaS gray. */
+  --bg: #efe7d4;
+  --panel: #f8f2e4;
+  --panel-2: #e8dfc8;
+  --border: #cdbfa0;
+  --baseline: #b0a07c;
+  --text: #241d16;
+  --text-secondary: #5b5142;
+  --text-muted: #736a58;
+
+  /* "Primary action ink" -- a deep umber, not a second hue. */
+  --accent: #2e2417;
+  --accent-hover: #1a130a;
+  --accent-dim: #e4d6b3;
+
+  /* Verdict inks. Each is a dark, desaturated pigment chosen to sit on
+     the cream paper at the same weight, so they read as one physical set
+     of dies. Colour is never the only carrier -- every badge says its
+     state in words. */
+  --ok: #1f6b3a;
+  --ok-dim: #dde7dc;
+  --warn: #7a5a1e;
+  --warn-dim: #ece0c4;
+  --reject: #9c1c17;
+  --reject-dim: #f1ddd4;
+  --info: #1c4f9c;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  /* Header-only display face: a real manual-typewriter face, reserved for
+     page titles and top-level section headers. Degrades to a monospace
+     stack with zero network if the font request is blocked. */
+  --font-display: "Special Elite", ui-monospace, "Courier New", monospace;
+
+  /* Paper grain -- inline SVG fractal noise, no image bytes. The surface
+     grain is roughly half strength: a case-file sheet reads as slightly
+     less textured than the desk it sits on, never more. */
+  --texture-page: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --texture-surface: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.018 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 * { box-sizing: border-box; }
-body { background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", sans-serif; margin: 0; }
+body {
+  background-color: var(--bg);
+  background-image: var(--texture-page);
+  color: var(--text);
+  font-family: var(--font-sans);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
 a { color: var(--accent); text-decoration: none; }
 a:visited { color: var(--accent); }
-a.btn { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
-a.btn.btn-approve { background: var(--accent); color: #06110d; border: none; }
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; border-bottom: 1px solid var(--border); background: var(--panel); }
-.brand { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; }
-.brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-.tabs { display: flex; gap: 6px; background: var(--panel-2); padding: 4px; border-radius: 10px; }
-.tab { color: var(--text-muted); text-decoration: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; }
-.tab.active { background: var(--accent); color: #06110d; }
-main { max-width: 1000px; margin: 0 auto; padding: 28px; }
-h1 { font-size: 20px; margin: 0 0 20px; }
-.banner { background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent); padding: 10px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }
+a:hover { text-decoration: underline; }
+a.btn { display: inline-block; background: var(--panel); border: 1px solid var(--border); color: var(--text); text-decoration: none; }
+a.btn:hover { text-decoration: none; background: var(--panel-2); }
+a.btn.btn-approve { background: var(--accent); color: var(--panel); border: 1px solid var(--accent); }
+
+/* Synthetic bold on a single-weight display face renders poorly, so
+   headers carry no extra weight -- the face's own ink jitter is enough. */
+h1, h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.02em; }
+h1 { font-size: 22px; margin: 0 0 20px; }
+h2 { font-size: 16px; }
+
+/* Left sidebar, matching 8501's shell. The old horizontal tab strip put
+   ten destinations in a row that wrapped awkwardly and gave no room for
+   names to grow; a rail reads as a filing cabinet, which is the point. */
+.layout { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 248px; flex-shrink: 0;
+  background-color: var(--panel); background-image: var(--texture-surface);
+  border-right: 1px solid var(--border);
+  padding: 20px 12px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.brand { display: flex; flex-direction: column; gap: 2px; padding: 0 10px 18px; }
+.brand-name { font-family: var(--font-display); font-size: 17px; letter-spacing: 0.02em; }
+.brand-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.tabs { display: flex; flex-direction: column; gap: 2px; }
+.tab {
+  display: block; color: var(--text-secondary); text-decoration: none;
+  padding: 8px 10px; border-radius: 3px; font-size: 13px; font-weight: 500;
+  border-left: 2px solid transparent;
+}
+.tab:hover { background: rgba(0,0,0,0.04); text-decoration: none; }
+.tab.active { background: var(--accent-dim); color: var(--text); font-weight: 600; border-left-color: var(--accent); }
+
+main { flex: 1; min-width: 0; max-width: 1240px; padding: 28px 32px; }
+
+/* Ruled hairlines and square-ish corners throughout -- ledger stock, not
+   rounded SaaS cards. */
+.banner { background: var(--accent-dim); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 3px; margin-bottom: 20px; font-size: 13px; }
 .banner-error { background: var(--reject-dim); border-color: var(--reject); color: var(--reject); }
-.section-title { text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; color: var(--text-muted); margin: 28px 0 12px; font-weight: 700; }
+.section-title { text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--text-muted); margin: 28px 0 12px; font-weight: 700; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
-.stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-.stat-label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
-.stat-value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+.stat-card { background-color: var(--panel); background-image: var(--texture-surface); border: 1px solid var(--border); border-radius: 3px; padding: 16px; }
+.stat-label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+/* Counts and measurements are data: typewriter face, tabular figures. */
+.stat-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 25px; font-weight: 700; margin-top: 6px; }
 .stat-value.accent { color: var(--accent); }
 .stat-value.ok { color: var(--ok); }
 .review-list { display: flex; flex-direction: column; gap: 14px; }
-.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; display: flex; gap: 16px; align-items: flex-start; }
-.thumb { width: 140px; height: 100px; object-fit: cover; border-radius: 8px; background: var(--panel-2); }
-.card-body { flex: 1; }
+.card { background-color: var(--panel); background-image: var(--texture-surface); border: 1px solid var(--border); border-radius: 3px; padding: 16px; display: flex; gap: 16px; align-items: flex-start; }
+.thumb { width: 140px; height: 100px; object-fit: cover; border-radius: 2px; background: var(--panel-2); border: 1px solid var(--border); }
+.card-body { flex: 1; min-width: 0; }
 .card-title-row { display: flex; align-items: center; gap: 10px; }
 .card-title { font-weight: 700; font-size: 14px; }
-.card-meta { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
-.boxes { background: var(--panel-2); border-radius: 6px; padding: 8px; font-size: 11px; max-height: 90px; overflow: auto; margin-top: 8px; }
+.card-meta { color: var(--text-muted); font-size: 12px; margin-top: 4px; font-family: var(--font-mono); }
+.boxes { background: var(--panel-2); border: 1px solid var(--border); border-radius: 2px; padding: 8px; font-size: 11px; font-family: var(--font-mono); max-height: 90px; overflow: auto; margin-top: 8px; }
 .card-actions { display: flex; flex-direction: column; gap: 8px; }
-.btn { border: none; border-radius: 8px; padding: 9px 18px; font-weight: 700; font-size: 12.5px; cursor: pointer; }
-.btn-approve { background: var(--accent); color: #06110d; }
+.btn { border: 1px solid var(--accent); background: var(--accent); color: var(--panel); border-radius: 3px; padding: 8px 16px; font-weight: 600; font-size: 12.5px; cursor: pointer; font-family: inherit; }
+.btn:hover { background: var(--accent-hover); }
+.btn-approve { background: var(--accent); color: var(--panel); }
+/* Secondary action: outlined, so the primary one stays the only filled
+   thing in the row and reads as the default. */
+.btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-secondary:hover { background: var(--panel-2); }
+.btn:disabled, .btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+.btn:disabled:hover, .btn[disabled]:hover { background: var(--accent); }
+.btn-secondary:disabled:hover { background: transparent; }
+/* Destructive actions get the one alarm red, outlined rather than filled
+   -- it should read as a warning, not as the primary thing to click. */
 .btn-reject { background: transparent; border: 1px solid var(--reject); color: var(--reject); }
-.badge { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.03em; }
-.badge-pending { background: var(--warn-dim); color: var(--warn); }
-.badge-ok { background: var(--ok-dim); color: var(--ok); }
-.badge-reject { background: var(--reject-dim); color: var(--reject); }
-.empty { color: var(--text-muted); font-size: 13px; padding: 24px; text-align: center; background: var(--panel); border-radius: 12px; border: 1px dashed var(--border); }
-.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+.btn-reject:hover { background: var(--reject-dim); }
+.badge { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 2px; letter-spacing: 0.05em; text-transform: uppercase; border: 1px solid transparent; }
+.badge-pending { background: var(--warn-dim); color: var(--warn); border-color: var(--warn); }
+.badge-ok { background: var(--ok-dim); color: var(--ok); border-color: var(--ok); }
+.badge-reject { background: var(--reject-dim); color: var(--reject); border-color: var(--reject); }
+.empty { color: var(--text-muted); font-size: 13px; padding: 24px; text-align: center; background: var(--panel); border-radius: 3px; border: 1px dashed var(--border); }
+.panel { background-color: var(--panel); background-image: var(--texture-surface); border: 1px solid var(--border); border-radius: 3px; padding: 18px 20px; margin-bottom: 16px; }
 .registry-row { display: flex; align-items: center; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-.progress-stages { display: flex; gap: 10px; }
-.progress-segment { flex: 1; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; text-align: center; }
-.progress-segment-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); margin-bottom: 6px; }
-.epoch-bar { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; height: 10px; overflow: hidden; margin-top: 6px; }
-.epoch-bar-fill { background: var(--accent); height: 100%; transition: width 0.4s ease; }
 .registry-row:last-child { border-bottom: none; }
-.registry-version { font-weight: 700; width: 60px; }
-.registry-date { color: var(--text-muted); margin-left: auto; font-size: 11px; }
+.registry-version { font-weight: 700; width: 60px; font-family: var(--font-mono); }
+.registry-date { color: var(--text-muted); margin-left: auto; font-size: 11px; font-family: var(--font-mono); }
+.progress-stages { display: flex; gap: 10px; }
+.progress-segment { flex: 1; background: var(--panel-2); border: 1px solid var(--border); border-radius: 3px; padding: 10px 12px; text-align: center; }
+.progress-segment-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 6px; }
+.epoch-bar { background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; height: 9px; overflow: hidden; margin-top: 6px; }
+.epoch-bar-fill { background: var(--accent); height: 100%; transition: width 0.4s ease; }
 .strategy-row { display: flex; gap: 8px; margin-top: 8px; }
-.strategy-chip { flex: 1; text-align: center; padding: 10px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-muted); font-size: 12.5px; font-weight: 600; }
-.strategy-chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.strategy-chip { flex: 1; text-align: center; padding: 10px; border-radius: 3px; border: 1px solid var(--border); color: var(--text-muted); font-size: 12.5px; font-weight: 600; }
+.strategy-chip.active { border-color: var(--accent); color: var(--text); background: var(--accent-dim); }
 .freq-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; }
-select, input[type="text"], input[type="number"], input[type="file"], textarea { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px; }
-code { background: var(--panel-2); padding: 2px 6px; border-radius: 4px; font-size: 11px; }
+select, input[type="text"], input[type="number"], input[type="file"], textarea {
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 3px; padding: 6px 8px; font-size: 13px; font-family: inherit;
+}
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code { background: var(--panel-2); border: 1px solid var(--border); padding: 1px 5px; border-radius: 2px; font-size: 11px; font-family: var(--font-mono); }
+pre { font-family: var(--font-mono); }
+table { border-collapse: collapse; }
+th { text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; color: var(--text-muted); font-weight: 700; }
+td { font-variant-numeric: tabular-nums; }
+/* Standfirst under a page title -- says what the screen is for, in the
+   body face, so the typewriter h1 stays a title rather than an
+   explanation. */
+.page-sub { color: var(--text-secondary); font-size: 13px; line-height: 1.5; margin: -10px 0 22px; max-width: 76ch; }
+
+/* A panel's own leading section-title becomes a card header with a rule
+   under it, matching the 8501 Card component. Done here rather than in
+   each renderer so every panel in the app picks it up from one rule --
+   the section-titles that appear mid-panel keep the small uppercase
+   label treatment they already had. */
+.panel > .section-title:first-child {
+  font-size: 14px; font-weight: 600; text-transform: none; letter-spacing: 0;
+  color: var(--text); margin: -18px -20px 16px; padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+/* Two cards abreast (GPU resource / latest run), collapsing to one
+   column before they get too narrow to read. */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.grid-2 > .panel { margin-bottom: 0; }
+/* Parameters on the left, the two S3 browsers on the right: the browsers
+   are tall, and stacking them under the fields pushed the submit buttons
+   far below the fold. */
+.form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.form-2col .field-grid { margin-bottom: 14px; }
+/* Standalone fields need their own rhythm here -- inside .field-grid the
+   grid gap supplied it. */
+.form-2col .field { margin-bottom: 14px; }
+.form-2col .field:last-child { margin-bottom: 0; }
+/* Exactly two per row (Epochs/Image size, Batch/Seed) rather than
+   auto-fit, which reflows to three-up on a wide screen and breaks the
+   pairing that makes them readable. */
+.field-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.field-row-2 .field { margin-bottom: 14px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 18px; }
+.form-actions .btn { margin: 0; }
+@media (max-width: 1100px) {
+  .grid-2, .form-2col { grid-template-columns: 1fr; }
+}
+
 .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
+.field label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
 .field select, .field input { width: 100%; }
+
+@media (max-width: 900px) {
+  .layout { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--border); }
+  .tabs { flex-direction: row; flex-wrap: wrap; }
+  .tab { border-left: none; border-bottom: 2px solid transparent; }
+  .tab.active { border-left: none; border-bottom-color: var(--accent); }
+  main { padding: 20px 16px; }
+}
 """
 
 

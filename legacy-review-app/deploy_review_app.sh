@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # The infra this reads its settings from stays where it is; only the app
 # and this script moved here. Override if the terraform lives elsewhere.
-INFRA_DIR="${INFRA_DIR:-$SCRIPT_DIR/../jurong-port/terraform/infra}"
+INFRA_DIR="${INFRA_DIR:-$SCRIPT_DIR/../../jurong-port/terraform/infra}"
 
 if [ ! -d "$INFRA_DIR" ]; then
   echo "No terraform infra at $INFRA_DIR — set INFRA_DIR to point at it." >&2

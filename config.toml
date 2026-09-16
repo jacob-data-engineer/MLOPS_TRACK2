@@ -1,0 +1,309 @@
+# PPE pipeline tunable parameters. Edit and re-run — no code changes needed.
+# Every value here matches the built-in default in src/ppe_pipeline/config.py;
+# delete a section (or the whole file) to fall back to those defaults.
+# Loaded once per process — restart after editing.
+
+[merge]
+# Containment-ratio threshold (intersection area / smaller box's area) for
+# treating two detector boxes as the same physical person. Lower = merges
+# more aggressively (risk: two nearby people collapse into one); higher =
+# merges less (risk: one person's glove/helmet/plane detections stay split).
+overlap_threshold = 0.3
+
+[cropping]
+# Padding factor applied to each violation's own crop box, expressed as a
+# multiple of that box's own width/height (see cropping.py).
+# Glove/Helmet pad the hand/head region box; dangerous_plane and
+# suspended_load pad the full person box (no tight object box available for
+# either); forklift_union_pad pads the person+forklift union box.
+glove_helmet_pad = 0.3
+dangerous_plane_pad = 3.5
+suspended_load_pad = 3.5
+forklift_union_pad = 0.25
+
+[forklift]
+# Too-near-forklift geometric proxy (forklift_rule.py): both boxes are
+# expanded by expand_pct before checking overlap_threshold coverage.
+# operator_containment_threshold is the containment ratio above which a
+# person is flagged as a possible forklift operator (ambiguous) and sent
+# to the judge with extra context, rather than excluded.
+# expand_pct/overlap_threshold retuned 2026-08-05 by grid search against
+# eval/combined_eval_dataset.json's 75 human-adjudicated too_near_forklift
+# cases (best F1 on a wide, non-degenerate plateau; old 0.2/0.3 scored
+# F1=0.48, letting only 9/75 cases reach the judge at all).
+expand_pct = 0.3
+overlap_threshold = 0.06
+operator_containment_threshold = 0.8
+
+[batching]
+# Session-window gap, in seconds: frames from the same fixed camera within
+# this gap of the previous frame join the same processing batch; a larger
+# gap closes the batch and starts the next one.
+gap_seconds = 2.0
+
+[few_shot]
+# Max few-shot example crops shown per violation type, per judge call.
+max_examples_per_type = 5
+# helmet's promoted-with-reasoning library has 72 examples — the 10 curated
+# ones from scripts/promote_gold_cases_to_fewshot.py, plus the 62
+# (31 violation + 31 no_violation) that used to be Gold Set v2's balanced
+# helmet eval slice, appended by scripts/promote_helmet_62_to_fewshot.py and
+# removed from the eval sets in the same step.
+#
+# ALL 72 (CEO, 2 Sep: "seems vlm couldnt see some crops were wearing helmet.
+# bring back the full 72 examples for few shot").
+#
+# This was briefly 50, which cost the judge the 10 curated examples entirely:
+# truncation is from the front and move_to_back_override had rotated them
+# behind the 62 balanced ones. Missed helmets are the symptom that instruction
+# was meant to fix, so the whole library is shown again.
+#
+# WHAT IT COSTS, since it is the opposite of a saving: the prefix is 11,427
+# tokens of a ~14,370-token call, re-sent every time (the endpoint does not
+# cache -- cache_read_input_tokens: 0 on three identical calls). Going back to
+# 72 puts ~3.5k tokens back on EVERY judge call, about 24% more per call.
+#
+# THE MANIFEST'S OWN ORDER (CEO, 2 Sep): the 10 curated examples lead, the 62
+# balanced ones follow, which is how the library was built. Rotation is off.
+#
+# It is kept as a knob rather than deleted because ORDER DECIDES WHAT A LIMIT
+# KEEPS -- `build_few_shot_messages` truncates from the front -- and that
+# coupling is what made a 50 cap silently drop the curated examples. Anyone
+# lowering the limit again needs this to hand.
+#
+# Accuracy against prefix size is still unmeasured, and it is now measurable:
+# `temperature = 0` means two runs of the same prompt are comparable, which
+# they were not before. That is the experiment that would say whether 72 is
+# right, rather than 50 or 30.
+max_examples_per_type_override = { helmet = 72 }
+move_to_back_override = { }
+
+[rewriter]
+# Claude on Bedrock, used by rationale_rewrite to turn terse reviewer notes
+# (and the "Reviewer A: ... Reviewer B: ..." concatenation) into one
+# professional paragraph. Deliberately NOT the same client or region as
+# [judge]:
+#   * [judge] reaches Bedrock over the OpenAI-compatible chat-completions
+#     endpoint, and Bedrock rejects the Claude models there ("does not
+#     support the '/v1/chat/completions' API") - Claude is only reachable
+#     via the Messages API client.
+#   * judge.bedrock.region (us-west-2) carries only claude-haiku-4-5; the
+#     full Claude lineup is in us-east-1.
+#   * Keeping the rewriter's model distinct from the judge's means the model
+#     under evaluation is not also writing the ground-truth reasoning it is
+#     scored against.
+# Same AWS_BEARER_TOKEN_BEDROCK credential as [judge].
+#
+# claude-haiku-4-5 was evaluated as a cheaper/faster swap (2.2x faster per
+# call, ~$17 less over a full backfill) and REJECTED: on a 30-note sample it
+# fabricated reasoning the reviewer never wrote - inventing a justification
+# for a verdict ("the violation stands based on the worker's location and
+# circumstances at the time of observation" from a note that said only
+# "worker is not near edge of any fall zones"), a "proximity threshold" that
+# does not exist, and safety judgments nobody made. That text would become
+# ground_truth_rationale and the reasoning-alignment scorer would grade the
+# judge against it. Re-run scripts/compare_rewriter_models.py before
+# reconsidering. Note the aggregate word-overlap stats mildly FAVOURED
+# haiku - the finding is only visible by reading the sampled rewrites, so
+# read the script's sampled output, not just its summary table.
+region = "us-east-1"
+model = "anthropic.claude-opus-5"
+max_tokens = 1024
+# Rewriting a two-sentence note is not reasoning-heavy; "low" keeps per-save
+# latency and cost down (low | medium | high | xhigh | max).
+# Set to "" for a model with no effort control - output_config is then not
+# sent at all. Required for claude-haiku-4-5, which rejects the request that
+# carries it; because a failed rewrite is swallowed to protect the reviewer's
+# save, leaving effort set on such a model means every rewrite silently
+# stops happening. See scripts/compare_rewriter_models.py before swapping.
+effort = "low"
+# Whether a reviewer's save triggers a rewrite. False leaves the human text
+# untouched and defers everything to scripts/backfill_rationale_rewrites.py.
+rewrite_on_save = true
+
+[judge]
+# Amazon Bedrock's OpenAI-compatible `bedrock-mantle` endpoint
+# (AWS_BEARER_TOKEN_BEDROCK, in .env or your environment) — not boto3/the
+# Converse API. The only accepted value: the direct-Anthropic, OpenRouter
+# and on-GPU "local" providers were removed once Bedrock became the sole
+# deployed judge.
+provider = "bedrock"
+# A bedrock-mantle model ID. Note this can differ from the
+# bedrock-runtime/Converse model ID for the same model.
+model = "qwen.qwen3-vl-235b-a22b-instruct"
+max_tokens = 2048
+# MEASURED 1 Sep: with no temperature set, the judge asked twice about the SAME
+# crop -- one crop per call, no batching -- answered differently on 3 of 6
+# crops of an ambiguous frame (TP then FP, FP then uncertain), and on 0 of 5 of
+# an unambiguous one. A safety verdict is not a place for sampling variety, and
+# no agreement study is readable while the floor is a coin flip: batched vs
+# per-crop, prefix size vs accuracy, and any re-judge of the corpus were all
+# measuring sampling noise.
+#
+# It makes the number reproducible, not correct: a deterministic wrong answer
+# on an unreadable crop is still wrong.
+temperature = 0.0
+# Violation types where an "uncertain" judge verdict is auto-resolved to
+# "FP" (suppressed, no human review) instead of going to the review queue.
+# Glove crops are ambiguous often enough that defaulting to "not a real
+# violation" beats routing every ambiguous one to a human.
+uncertain_as_fp = ["glove"]
+
+[helmet_box]
+# Where the helmet is, on a detection the judge cleared as "helmet_worn" —
+# a stage-2 single-class YOLO11s detector run locally on the CPU, not a
+# field on the verdict and not a model call. Localization only: nothing
+# here can change a verdict.
+#
+# This replaced a VLM grounding call that asked the judge model for
+# coordinates twice and scored the two answers against each other, because
+# no single answer carried usable confidence. A purpose-trained detector
+# answers directly and reports a real score, so `asks` and the
+# agreement/IoU machinery are gone.
+enabled = true
+# Relative paths resolve against the repo root, so this works whatever
+# directory the app is started from.
+weights = "weights/stage2_helmet_yolo11s_f1ba29e683661e8a.pt"
+# Detections below this are discarded outright — no box is drawn and the
+# judge's own inline helmet_box is used instead.
+#
+# NOT RE-VALIDATED SINCE THE MODEL SWAP. 0.25 was tuned against the YOLOv8s
+# checkpoint this replaced. The two are interface-identical (task=detect,
+# names={0: "helmet"}), so swapping the file is safe, but a different
+# architecture does not necessarily put its confidence scores on the same
+# scale — and this number also sets the floor that review_confidence sits
+# above, so a shift changes how many boxes a human is asked to check, not
+# only how many get drawn. Re-measure against a labelled set before trusting
+# either. Left as-is rather than retuned by guess.
+min_confidence = 0.25
+# Confidence floor for treating a box as a retraining-label candidate
+# rather than something a human should place. A box below this is still
+# drawn and still does not affect the verdict; the UI just flags it as
+# likely needing human review. Kept in sync with
+# HELMET_BOX_REVIEW_CONFIDENCE in web/src/lib/api.ts, which only drives the
+# wording next to the number.
+review_confidence = 0.5
+# The deployed container has no GPU and torch is pinned to CPU wheels.
+device = "cpu"
+
+[helmet_cv]
+# An offline emulation of the PRODUCTION helmet gate — the cascade in
+# pj.jpsai.postprocessing_logic's postprocess/PPE/Helmet/v1_0 — run over
+# frames extracted from the raw UAT alarm clips. Not part of the live path
+# and not a second helmet detector: it exists so CV's gate and the judge's
+# verdict can be scored against the same human decision on the same frame.
+#
+# NO PERSON DETECTOR LIVES HERE ANY MORE. Removed 2 Sep on the CEO's call
+# ("Totally remove using YOLO for person detection, stick to this current
+# method"). Person boxes now come from the vendor CV's own annotated
+# snapshots, recovered by `helmet_cv/snapshot_boxes.py` — the boxes that
+# actually raised each alarm, rather than our guess at the same people.
+#
+# WHY THE DETECTOR WENT, in the order it was learned:
+#
+#   `experimental_full_frame_yolo11s` was a 50-epoch fine-tune of stock COCO
+#   yolo11s on a small two-class set, and it had forgotten how to find a
+#   person. Across six real alarms it produced SIX person boxes and not one
+#   was on a person; every box sat at roughly (284, 1030), a static object at
+#   the bottom-left of the frame, alarm after alarm. One was verified by eye
+#   to be a blue hose lying on concrete. It missed eight people that stock
+#   COCO finds at 0.51-0.86. IoU between the two models' boxes: ZERO.
+#
+#   Stock COCO was better and still not good enough. Measured 2 Sep on an
+#   overhead view of a ship's hold: the vendor's snapshot marks SEVEN people
+#   and COCO finds ONE on the clean frame of the same moment. Detector
+#   quality swings by camera; the vendor's boxes do not.
+#
+# WHAT THIS GIVES UP: the old checkpoint also counted helmets, which fed
+# `helmets_in_frame` — context on a record, never a verdict. That count is
+# now absent. The helmet BOX a verdict rests on comes from `helmet_box`
+# (stage 2) and is unaffected: it finds helmets, not people.
+# Where `python -m ppe_pipeline.helmet_cv.cli extract` wrote its frames.
+# A local directory, not a storage key — the helmet corpus at a 1s stride is
+# ~1.6M jpegs and never goes through `storage`.
+frames_dir = "eval/helmet_frames"
+# 1 in N candidates go to the judge, picked by md5(candidate_id) so the
+# choice is stable across runs and cannot depend on whether the gate fired.
+# 1 means "every candidate"; the pilot sets this from the CLI to land ~200.
+sample_rate = 1
+# Frames judged at once in the judge pass. Threads, not processes: the pass
+# spends its time waiting for Bedrock, not on the CPU. Work is grouped by
+# FRAME rather than by candidate, so this counts frames in flight and a frame
+# holding four people is still read from disk once. Bounded deliberately -
+# an unbounded fan-out at the judge's rate limit turns a slow pass into a
+# failed one, and a 429 costs more than the wait it saved.
+max_workers = 4
+# NO FIRST-PASS PERSON GATE. Removed 2 Sep (CEO: "just direct send crops for
+# judge now. i think the bounding box extraction is accurate enough now").
+#
+# It had been off since 1 Sep, so removing it saved no calls -- it was making
+# none. What it was doing was blocking the full-frame dataset: the export
+# would not certify a frame whose boxes carried no gate answer, so with the
+# gate off it shipped nothing at all (measured: 0 of 37 live frames).
+#
+# The measurements that turned it off are worth keeping, because they say what
+# a gate CAN and cannot do on this footage. On alarm 00e90bfd (12 detector
+# boxes, 2 real workers):
+#
+#   yes/no prompt, tie-break "if you cannot tell, say a person IS present"
+#     -> kept 12 of 12. A yes/no question about a 43x43 crop can only be
+#        guessed, and the tie-break made every guess a yes.
+#   three-way prompt, `person` / `unclear` / `no_person`
+#     -> named the one real 182x359 crop correctly and called the other
+#        eleven `unclear` -- exactly the frame's truth, and still no saving,
+#        because an `unclear` crop is judged anyway.
+#
+# Both of those were about a DETECTOR's boxes. Boxes now come from the vendor
+# CV's own annotation, which is already a claim that a person is there, and a
+# bad one is struck out by the auditor on the crop strip.
+
+[judge.bedrock]
+region = "us-west-2"
+
+[judge.retry]
+# Longer-patience retry layer on top of the SDK's own built-in retries
+# (max_retries=2, sub-second backoff) — for AWS Bedrock's on-demand-capacity
+# 503s, which need tens of seconds to clear. Not a call-rate throttle.
+max_attempts = 5
+base_delay_seconds = 10.0
+max_delay_seconds = 120.0
+
+[judge.model_options]
+# Starter list for the UI's model dropdown — edit freely. Still keyed by
+# provider because the web UI looks options up by the selected provider.
+bedrock = ["qwen.qwen3-vl-235b-a22b-instruct", "nvidia.nemotron-nano-12b-v2"]
+
+[person_detector]
+# Finding people in a clean alarm frame, as an ALTERNATIVE to the vendor CV's
+# own boxes. Nothing uses it unless a run asks for it: the run screen offers
+# both sources and every row records which produced it.
+#
+# A detector was removed from this repo on 2 Sep and the reasons are in
+# [helmet_cv] above. This is a different model answering the same question.
+#
+# WHAT IT IS: a SINGLE-CLASS person detector -- yolo11m, 60 epochs, trained at
+# imgsz 1536. Built for this footage's small workers rather than adapted to
+# them, which is what the removed two-class checkpoint had been.
+#
+# MEASURED 2 Sep, on five annotated snapshots (a capability check, not a fair
+# score -- a fair one runs on the clean frame):
+#
+#   vendor 4 boxes, this model 8, all 4 vendor boxes matched  (the ship's hold
+#     where stock COCO found ONE of seven)
+#   vendor 2/3/3/2, this model 1/8/4/7
+#
+# So it is clearly stronger than the COCO model on the hard camera. Whether
+# the extra boxes are workers the vendor missed or false positives is the
+# thing to look at, and it is why this is an option rather than the default.
+weights = "weights/best.pt"
+# What the model was TRAINED at. Ultralytics' default of 640 would scale this
+# corpus's ~83px workers to ~35px, and inferring at a different size than
+# training is its own silent penalty on top of that.
+imgsz = 1536
+# Deliberately untuned: nothing has been measured against this model yet, so
+# this is a starting point and every row records it.
+confidence = 0.25
+# No GPU in the deployed container. At imgsz 1536 on a CPU this measured
+# 4.5-6.8 seconds a frame, before any judge call -- which is the real cost of
+# choosing this option and is stated on the run screen.
+device = "cpu"

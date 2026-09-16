@@ -1,0 +1,80 @@
+[project]
+name = "ppe-pipeline"
+version = "0.1.0"
+description = "PPE & safety violation verification pipeline: merges CV detections, crops per-violation regions, and uses a Bedrock-hosted vision model as a second-stage judge."
+readme = "README.md"
+authors = [
+    { name = "Hanster", email = "shalihan.othman@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiops-pipeline",
+    # Not the judge — the judge reaches Bedrock over the OpenAI-compatible
+    # endpoint via the `openai` SDK below. This is `AnthropicBedrockMantle`
+    # for the rationale rewriter, which needs Bedrock's Messages API (see
+    # rationale_rewrite.build_client).
+    "anthropic>=0.120.0",
+    # 1.35.2 is the first version whose put_object supports the
+    # IfMatch/IfNoneMatch conditional-write parameters storage.S3Storage
+    # relies on for its ETag-based compare-and-swap.
+    "boto3>=1.35.2",
+    # The React frontend's backend (ppe_pipeline_api) — previously only a
+    # transitive dependency (pulled in via aiops-pipeline's own sagemaker
+    # extras), now called directly, so pinned explicitly at the versions
+    # already resolved in uv.lock.
+    "fastapi>=0.141.1",
+    "filelock>=3.32.2",
+    # Required by FastAPI to parse the multipart/form-data uploads the
+    # /track1 endpoints take (File/Form params). Previously present only as
+    # a transitive dependency of streamlit; declared explicitly now that
+    # streamlit is gone.
+    "python-multipart>=0.0.32",
+    "openai>=2.49.0",
+    "pandas>=3.0.5",
+    "pillow>=12.3.0",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    # Stage-2 helmet localization (helmet_detector.py) runs a YOLOv8s model
+    # locally on the CPU. torch/torchvision are pinned to the CPU wheel index
+    # in [tool.uv.sources] below -- the default PyPI torch on Linux is the
+    # CUDA build, which would add gigabytes to an image that has no GPU.
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+    "ultralytics>=8.3.0",
+    "uvicorn>=0.51.0",
+]
+
+[project.scripts]
+ppe-pipeline = "ppe_pipeline:main"
+ppe-pipeline-eval = "ppe_pipeline.eval.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+# Pinned to a commit (not a branch) so CI/Docker builds are reproducible —
+# bump this `rev` manually when picking up new Track2 changes. Track2 is a
+# private repo, so any environment running `uv sync`/`uv lock` (including CI
+# and the Docker build) needs git credentials with read access to it — see
+# deploy.yml/Dockerfile.
+#
+# Track1 (hazard-validation) used to be a second git dependency here. It is
+# gone: the only thing left importing it was one enum in rolling_metrics.py,
+# now inlined, so this repo builds without any access to SNAIC-JP/Track1.
+aiops-pipeline = { git = "https://github.com/SNAIC-JP/Track2.git", rev = "8f6b1d7e9987aa9208206d756da045204551aa30" }
+
+[[tool.uv.index]]
+# CPU-only torch wheels. The judge runs on Bedrock and the helmet detector is
+# a small YOLOv8s on the CPU, so nothing in this stack wants CUDA -- and the
+# default Linux torch wheel would bloat the deployed image for no benefit.
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PPE Safety Judge</title>
+
+    <!--
+      Header display face: a real typewriter face for page titles and
+      section headers only (see --font-display in src/index.css) -- the
+      case-file world's own material (a manual typewriter stamping out
+      customs paperwork), not a generic system-sans fallback pretending to
+      be one. preconnect + a single weight keeps this cheap; the fallback
+      stack in --font-display degrades to ui-monospace/Courier New with
+      zero network if this request fails or is blocked.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Special+Elite&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

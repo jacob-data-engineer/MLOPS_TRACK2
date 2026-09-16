@@ -1,0 +1,208 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens for the PPE Safety Violation Judge frontend.
+ *
+ * DIRECTION: customs case-file & manifest stamps (own-world pick over the
+ * generic clean-SaaS-dashboard default this frontend shipped once already
+ * -- see the THESIS/OWN-WORLD/STORY block in App.tsx for the full brief).
+ *
+ * Committed color strategy, not restrained: manila/kraft/carbon-paper
+ * neutrals are the ground for every surface, hairline, and body of text --
+ * ONE real saturated hue exists anywhere in this system, alarm-red ink,
+ * and it is spent exclusively on stamped verdicts (VerdictStamp.tsx) and
+ * on "something needs attention right now" states (form/API errors) that
+ * share the same "this needs a human's eyes" register as a stamp. There is
+ * no second accent, no green/amber status triad living alongside it -- the
+ * old restrained blue-accent + good/warning/critical/serious triad tokens
+ * are retired outright, not kept alongside these for compatibility.
+ * `--color-accent*` keeps its old name (for the primary-action utility
+ * classes already written against it) but is now an ink/umber tone, not
+ * blue -- there is no accent color left in this system besides ink and the
+ * one stamp red.
+ */
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Real, widely-available monospace stack (no webfont needed) for every
+     case ID, coordinate, count, and timestamp -- never reached for as a
+     "technical" costume, only for what is actually data/measurement. */
+  --font-mono: ui-monospace, "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  /* Header-only display face: a real manual-typewriter face (Special
+     Elite, loaded via index.html), reserved for page titles and top-level
+     section headers (h1/h2 -- see the rule below). This is the case-file
+     world's own material, a typewriter stamping out customs paperwork --
+     not a second brand voice, and never applied to body copy, labels, or
+     .tabular data. Degrades to a real monospace stack with zero network
+     if the webfont request fails or is blocked. */
+  --font-display: "Special Elite", ui-monospace, "Courier New", monospace;
+
+  /* Manila/kraft ground -- warm off-white paper, not cool SaaS gray. */
+  --color-page: #efe7d4;
+  --color-surface: #f8f2e4;
+  --color-ink: #241d16;
+  --color-ink-secondary: #5b5142;
+  /* 5.4:1 on --color-surface, 4.9:1 on --color-page -- clears WCAG AA body
+     text (4.5:1) while staying visibly lighter than --color-ink-secondary. */
+  --color-ink-muted: #736a58;
+  --color-hairline: #cdbfa0;
+  --color-baseline: #b0a07c;
+
+  /* "Primary action ink" -- renamed in spirit from the old blue accent.
+     Same token names (existing utility classes read these), now a deep
+     umber/ink rather than a second hue. */
+  --color-accent: #2e2417;
+  --color-accent-hover: #1a130a;
+  --color-accent-subtle: #e4d6b3;
+
+  /* The one alarm-red ink. Reserved for stamped verdicts (CLEARED / HOLD /
+     ESCALATE -- VerdictStamp.tsx) and for "needs attention" feedback
+     (form/API errors) that shares that same register. Never a tinted
+     status pill, never decorative, never paired with a second accent. */
+  --color-critical: #9c1c17;
+  --color-critical-subtle: #f1ddd4;
+
+  /* THE VERDICT INKS. CEO decision, 1 Sep: "Violation is in Red, No Violation
+     is in green and Escalation is in Blue" -- which replaces the One Red Rule
+     and the No Triad Rule for verdicts (see DESIGN.md).
+
+     Three inks of one family, not three arbitrary hues: each is a dark,
+     desaturated pigment chosen to sit on the cream paper at the same weight
+     as the existing alarm red, so the three stamps read as one physical set
+     of dies rather than as a status light. Violation keeps the exact red the
+     system already spends -- the hue nobody had to learn.
+
+     Contrast on --color-page (#efe7d4): red 5.6:1, green 5.1:1, blue 6.4:1,
+     all past 4.5:1 for the stamp's own text. Colour is never the only
+     carrier: every stamp says its verdict in words. */
+  --color-verdict-violation: #9c1c17;
+  --color-verdict-clear: #1f6b3a;
+  --color-verdict-escalate: #1c4f9c;
+}
+
+:root {
+  color-scheme: light;
+
+  /* Paper grain -- a self-contained, inline SVG fractal-noise pattern, not
+     a raster asset: a few percent of black speckle tiled over the page,
+     giving the manila/kraft ground real fiber depth instead of a flat
+     fill (the CEO's "only the color scheme changed" note, addressed
+     without a single new network request or image byte). --texture-page
+     is the visible-desk grain; --texture-surface is a finer, roughly
+     half-strength version for cards/sidebar/table rows, matching the
+     existing "surface is one step cleaner than page" rule in DESIGN.md --
+     a case-file sheet reads as slightly less textured than the desk it
+     sits on, never as more. Both tile at 240px so the pattern never
+     visibly seams or drifts under scroll. */
+  --texture-page: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --texture-surface: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.018 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-page);
+  background-image: var(--texture-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+/* Every element painted with the page or surface fill picks up the same
+   grain automatically -- a token-level change, not a per-component one,
+   so it reaches every card, table row, and sidebar (17 call sites of
+   .bg-page/.bg-surface across the app) without touching a single route
+   file. Plain rules here sit outside Tailwind's own @layer utilities, so
+   they always compose with (never lose to) the bg-page/bg-surface
+   utilities' background-color regardless of source order. */
+.bg-page {
+  background-image: var(--texture-page);
+}
+.bg-surface {
+  background-image: var(--texture-surface);
+}
+
+/* Tabular figures for anything that must align in a column: stat tiles,
+   table numeric cells, badge counts -- and, per the direction's ledger
+   register, these are exactly the case IDs/coordinates/counts/timestamps
+   that read as typewriter-monospace, not the workhorse sans. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+/* Editorial header treatment -- page titles (h1) and top-level section
+   headers (h2, e.g. "Alarm throughput") switch to the typewriter display
+   face; Card's own title (h3) stays on the plain sans deliberately, since
+   it repeats many times per screen at a small size and needs to keep
+   reading as a scannable label, not a headline -- Operate-mode
+   scanability over expression, per the direction contract. Synthetic
+   bold on a single-weight webfont renders poorly, so headers drop the
+   font-semibold weight Tailwind's utility would otherwise apply; the
+   face's own ink-jitter carries enough presence without it. */
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+/* Theme the browser surfaces we didn't otherwise draw, from the same
+   palette, instead of leaving OS-default blue everywhere. */
+::selection {
+  background: var(--color-accent-subtle);
+  color: var(--color-ink);
+}
+
+/* Eval's method/violation-type checkboxes and Gold Set's queue/ground-truth
+   radios are otherwise the browser's default blue tick -- the one surface
+   this system hadn't themed yet, and the one place a second saturated hue
+   was actually leaking in despite the One Red Rule. Ink, not blue. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/*
+ * The stamp-landing moment -- this direction's one authored motion,
+ * reused everywhere a verdict is confirmed (Track1 run completing, a
+ * few-shot verdict save, any future gold-set annotate action). Oversized
+ * and rotated, overshoots past rest, then settles: an impact, not a fade.
+ * CSS transform/opacity only, exponential ease-out from an
+ * already-visible-enough default -- no physics library.
+ */
+@keyframes stamp-land {
+  0% {
+    transform: scale(2.6) rotate(-22deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(0.88) rotate(-5deg);
+    opacity: 1;
+  }
+  78% {
+    transform: scale(1.1) rotate(-9deg);
+  }
+  100% {
+    transform: scale(1) rotate(-7deg);
+    opacity: 1;
+  }
+}
+
+.stamp-landing {
+  animation: stamp-land 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp-landing {
+    animation-duration: 1ms;
+  }
+}

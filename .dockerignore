@@ -1,0 +1,12 @@
+.venv/
+.git/
+.github/
+.pytest_cache/
+__pycache__/
+*.py[oc]
+eval_runs/
+.env
+.agents/
+.claude/
+*.log
+reports/
