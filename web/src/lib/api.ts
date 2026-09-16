@@ -3346,28 +3346,6 @@ export interface Track2QueueSnapshot {
   max_size: number;
 }
 
-export interface Track2AutomatedQueue {
-  id: string;
-  generation: string;
-  size: string;
-  epochs: number;
-  img_size: number;
-  batch: number;
-  seed: number;
-  dataset_folder: string;
-  base_model_folder: string;
-  base_model_s3_uri: string | null;
-  notes: string;
-  schedule_mode: "daily" | "weekly" | "monthly";
-  schedule_hour: number;
-  schedule_day: string | null;
-  schedule_dom: number | null;
-  schedule_expression: string;
-  schedule_summary: string;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface Track2ModelsResponse {
   registries: Track2RegistriesBrief;
   latest_approved: Record<string, Record<string, { group: string; version: string } | null>>;
@@ -3379,7 +3357,6 @@ export interface Track2ModelsResponse {
   pending_message: string | null;
   gpu_jobs: Track2GpuJob[];
   queue: Track2QueueSnapshot;
-  automated_queues: Track2AutomatedQueue[];
   dataset_browser: { prefix: string; folders: string[] };
   weights_browser: { prefix: string; folders: string[] };
   eval_browser: { prefix: string; folders: string[] };
@@ -3479,36 +3456,11 @@ export function stopTrack2Queue(): Promise<{ message: string }> {
   return apiPost("/track2/models/queue/stop");
 }
 
-export interface Track2AutomatedQueueParams extends Track2TrainingParams {
-  mode: "daily" | "weekly" | "monthly";
-  daily_hour?: number;
-  weekly_day?: string;
-  weekly_hour?: number;
-  monthly_day?: number;
-  monthly_hour?: number;
-}
-
-export function addTrack2AutomatedQueue(params: Track2AutomatedQueueParams): Promise<{ message: string; queue: Track2AutomatedQueue }> {
-  return apiPost("/track2/models/automated-queue/add", params);
-}
-
-export function updateTrack2AutomatedQueue(
-  queueId: string,
-  params: Track2AutomatedQueueParams,
-): Promise<{ message: string; queue: Track2AutomatedQueue }> {
-  return apiPost(`/track2/models/automated-queue/update/${encodeURIComponent(queueId)}`, params);
-}
-
-export function deleteTrack2AutomatedQueue(queueId: string): Promise<{ deleted: boolean }> {
-  return apiPost(`/track2/models/automated-queue/delete/${encodeURIComponent(queueId)}`);
-}
-
 // --- Schedule ----------------------------------------------------------------
 
 export interface Track2ScheduleResponse {
   schedule: { enabled: boolean; expression: string };
   training_progress: Track2TrainingProgress | null;
-  automated_queues: Track2AutomatedQueue[];
 }
 
 export function getTrack2Schedule(): Promise<Track2ScheduleResponse> {

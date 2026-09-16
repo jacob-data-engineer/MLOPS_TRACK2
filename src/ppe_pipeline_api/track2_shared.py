@@ -76,9 +76,6 @@ COMPUTE_REQUIREMENTS = {
 # just "s" alone.
 REGISTRY_SIZES = tuple(COMPUTE_REQUIREMENTS)
 
-AUTOMATED_QUEUES_TABLE_NAME = "track2-yolo-automated-queues"
-AUTOMATED_QUEUE_LAMBDA_NAME = "track2-yolo-automated-queue-trigger"
-AUTOMATED_QUEUE_RULE_PREFIX = "track2-yolo-auto-queue-"
 # Pre-existing, reused table (hash key "id") -- see pipeline_definition.py's
 # DYNAMODB_LINEAGE_TABLE / _write_run_metadata and
 # register_baseline_model.py's _write_baseline_lineage, which write here.
@@ -137,9 +134,6 @@ def lineage_table():
     return _dynamodb().Table(LINEAGE_TABLE_NAME)
 
 
-def automated_queues_table():
-    return _dynamodb().Table(AUTOMATED_QUEUES_TABLE_NAME)
-
 
 # Resolved lazily (not at import time) so importing this module never
 # makes a network call on its own -- tests can mock boto3 first.
@@ -152,9 +146,6 @@ def account_id() -> str:
         _account_id_cache = boto3.client("sts", region_name=REGION).get_caller_identity()["Account"]
     return _account_id_cache
 
-
-def automated_queue_lambda_arn() -> str:
-    return f"arn:aws:lambda:{REGION}:{account_id()}:function:{AUTOMATED_QUEUE_LAMBDA_NAME}"
 
 
 def reviewer_notifications_topic_arn() -> str:
@@ -2221,69 +2212,6 @@ def _reconcile_one_audit(audit: dict) -> None:
         ExpressionAttributeNames={f"#{k}": k for k in updates},
         ExpressionAttributeValues={f":{k}": v for k, v in updates.items()},
     )
-
-
-# --- automated (persistent, DynamoDB-backed) training queues ------------------
-
-def rule_name_for_queue(queue_id: str) -> str:
-    return f"{AUTOMATED_QUEUE_RULE_PREFIX}{queue_id}"
-
-
-def _automated_queue_payload(queue: dict) -> str:
-    """The exact JSON this queue's EventBridge rule hands the shared
-    Lambda (automated_queue_trigger.py) as its fixed Input on every
-    firing."""
-    return json.dumps({
-        "queue_id": queue["id"],
-        "generation": queue["generation"],
-        "size": queue["size"],
-        "epochs": queue["epochs"],
-        "img_size": queue["img_size"],
-        "batch": queue["batch"],
-        "seed": queue["seed"],
-        "train_data_s3_uri": f"s3://{BUCKET}/{queue['dataset_folder']}/",
-        "base_model_s3_uri": queue.get("base_model_s3_uri") or None,
-        "notes": queue.get("notes") or None,
-    })
-
-
-def put_automated_queue_rule(queue: dict) -> None:
-    """Creates (or, on an edit, replaces) the one EventBridge rule backing
-    this queue -- put_rule/put_targets are both idempotent upserts by
-    name/id."""
-    rule_name = rule_name_for_queue(queue["id"])
-    events.put_rule(Name=rule_name, ScheduleExpression=queue["schedule_expression"], State="ENABLED")
-    events.put_targets(
-        Rule=rule_name,
-        Targets=[{"Id": "trigger", "Arn": automated_queue_lambda_arn(), "Input": _automated_queue_payload(queue)}],
-    )
-
-
-def delete_automated_queue_rule(queue_id: str) -> None:
-    rule_name = rule_name_for_queue(queue_id)
-    try:
-        events.remove_targets(Rule=rule_name, Ids=["trigger"])
-    except events.exceptions.ResourceNotFoundException:
-        pass
-    try:
-        events.delete_rule(Name=rule_name)
-    except events.exceptions.ResourceNotFoundException:
-        pass
-
-
-def scan_automated_queues() -> list:
-    """Every Automated Training Queue, newest first."""
-    items = []
-    kwargs: dict = {}
-    while True:
-        response = automated_queues_table().scan(**kwargs)
-        items.extend(response.get("Items", []))
-        last_key = response.get("LastEvaluatedKey")
-        if not last_key:
-            break
-        kwargs["ExclusiveStartKey"] = last_key
-    items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
-    return items
 
 
 # --- evaluation queue (bring-your-own-weights or registry, against a chosen

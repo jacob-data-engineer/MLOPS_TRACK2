@@ -25,7 +25,6 @@ def get_schedule(session=Depends(require_session)) -> dict:
     return {
         "schedule": t2.current_schedule(),
         "training_progress": t2.get_training_progress(),
-        "automated_queues": t2.scan_automated_queues(),
     }
 
 

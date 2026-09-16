@@ -185,7 +185,6 @@ def test_review_model_delete_failure_returns_400(client, monkeypatch):
 def test_schedule_manual_by_default(client, monkeypatch):
     fake_events = FakeEventsClient()
     monkeypatch.setattr(t2, "events", fake_events)
-    monkeypatch.setattr(t2, "scan_automated_queues", lambda: [])
     monkeypatch.setattr(t2, "get_training_progress", lambda: None)
 
     body = client.get("/track2/schedule").json()
@@ -220,13 +219,12 @@ def test_queue_add_remove_start_stop(client, monkeypatch):
     monkeypatch.setattr(t2, "_queue_started", False, raising=False)
     monkeypatch.setattr(t2, "training_already_running_reason", lambda progress: "busy, stay queued")
     monkeypatch.setattr(t2, "get_training_progress", lambda: None)
-    # GET /track2/models also fetches registries/S3 browse/GPU usage/
-    # automated queues -- none of that is what this test is about, so it's
-    # all stubbed out rather than hitting real AWS.
+    # GET /track2/models also fetches registries, the S3 browsers and GPU
+    # usage -- none of that is what this test is about, so it is all
+    # stubbed out rather than hitting real AWS.
     monkeypatch.setattr(t2, "all_model_registries", lambda: {})
     monkeypatch.setattr(t2, "list_s3_folders", lambda prefix: [])
     monkeypatch.setattr(t2, "get_gpu_resource_usage", lambda: [])
-    monkeypatch.setattr(t2, "scan_automated_queues", lambda: [])
 
     add = client.post("/track2/models/queue/add", json={
         "generation": "11", "size": "s", "dataset_folder": "data/x",

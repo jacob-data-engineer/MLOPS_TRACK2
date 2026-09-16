@@ -1,8 +1,7 @@
-"""Track2 training control -- dataset/weights S3 browsing, GPU status,
-training progress, the ad-hoc training queue, and persistent Automated
-Training Queues (EventBridge-scheduled recipes). Backs
-`/track2/models` (labelled "Track2 Training" in nav to avoid colliding
-with the existing PPE `/models` page).
+"""Track2 training control -- dataset/evaluation/weights S3 browsing, GPU
+status, training progress, the ad-hoc training queue, and the per-run
+training audit. Backs `/track2/models` (labelled "Track2 Training" in nav
+to avoid colliding with the existing PPE `/models` page).
 
 This is the largest single piece ported from the old review app's Models
 tab -- see `track2_shared.py` for the underlying business logic; this
@@ -55,7 +54,6 @@ def get_models(
         "pending_message": pending_message,
         "gpu_jobs": t2.get_gpu_resource_usage(),
         "queue": t2.queue_snapshot(),
-        "automated_queues": t2.scan_automated_queues(),
         "dataset_browser": {
             "prefix": dataset_prefix,
             "folders": t2.list_s3_folders(dataset_prefix),
@@ -170,97 +168,3 @@ def stop_queue(session=Depends(require_session)) -> dict:
     t2.queue_stop()
     return {"message": "Queue stopped -- any run already in progress will finish; remaining entries stay queued."}
 
-
-class AutomatedQueueRequest(BaseModel):
-    generation: str
-    size: str
-    epochs: int = 50
-    img_size: int = 640
-    batch: int = 16
-    seed: int = 42
-    dataset_folder: str = ""
-    base_model_folder: str = ""
-    notes: str = ""
-    mode: str = "weekly"  # "daily" | "weekly" | "monthly"
-    daily_hour: int | None = None
-    weekly_day: str | None = None
-    weekly_hour: int | None = None
-    monthly_day: int | None = None
-    monthly_hour: int | None = None
-
-
-def _schedule_form(payload: AutomatedQueueRequest) -> dict:
-    return {k: str(v) for k, v in payload.model_dump().items() if v is not None}
-
-
-@router.post("/automated-queue/add")
-def add_automated_queue(payload: AutomatedQueueRequest, session=Depends(require_session)) -> dict:
-    try:
-        epochs, img_size, batch, seed = t2.validate_training_params(
-            payload.epochs, payload.dataset_folder, payload.img_size, payload.batch, payload.seed,
-        )
-        form = _schedule_form(payload)
-        schedule_expression, schedule_summary = t2.cron_and_summary_from_schedule_form(payload.mode, form)
-        base_model_s3_uri = t2.resolve_base_model_s3_uri(payload.base_model_folder) if payload.base_model_folder else None
-        now = datetime.now(timezone.utc).isoformat()
-        queue = {
-            "id": uuid.uuid4().hex[:12],
-            "generation": payload.generation, "size": payload.size,
-            "epochs": epochs, "img_size": img_size, "batch": batch, "seed": seed,
-            "dataset_folder": payload.dataset_folder, "base_model_folder": payload.base_model_folder,
-            "base_model_s3_uri": base_model_s3_uri, "notes": payload.notes[:2048],
-            "schedule_mode": payload.mode,
-            "schedule_hour": form.get(f"{payload.mode}_hour"),
-            "schedule_day": payload.weekly_day if payload.mode == "weekly" else None,
-            "schedule_dom": payload.monthly_day if payload.mode == "monthly" else None,
-            "schedule_expression": schedule_expression,
-            "schedule_summary": schedule_summary,
-            "created_at": now, "updated_at": now,
-        }
-        t2.automated_queues_table().put_item(Item=queue)
-        t2.put_automated_queue_rule(queue)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Add automated queue failed: {exc}")
-    return {"message": f"Automated queue added (YOLO{payload.generation}-{payload.size}, {schedule_summary})", "queue": queue}
-
-
-@router.post("/automated-queue/update/{queue_id}")
-def update_automated_queue(queue_id: str, payload: AutomatedQueueRequest, session=Depends(require_session)) -> dict:
-    try:
-        existing = t2.automated_queues_table().get_item(Key={"id": queue_id}).get("Item")
-        if not existing:
-            raise ValueError(f"Automated queue {queue_id} not found (already deleted?).")
-        epochs, img_size, batch, seed = t2.validate_training_params(
-            payload.epochs, payload.dataset_folder, payload.img_size, payload.batch, payload.seed,
-        )
-        form = _schedule_form(payload)
-        schedule_expression, schedule_summary = t2.cron_and_summary_from_schedule_form(payload.mode, form)
-        base_model_s3_uri = t2.resolve_base_model_s3_uri(payload.base_model_folder) if payload.base_model_folder else None
-        queue = {
-            **existing,
-            "generation": payload.generation, "size": payload.size,
-            "epochs": epochs, "img_size": img_size, "batch": batch, "seed": seed,
-            "dataset_folder": payload.dataset_folder, "base_model_folder": payload.base_model_folder,
-            "base_model_s3_uri": base_model_s3_uri, "notes": payload.notes[:2048],
-            "schedule_mode": payload.mode,
-            "schedule_hour": form.get(f"{payload.mode}_hour"),
-            "schedule_day": payload.weekly_day if payload.mode == "weekly" else None,
-            "schedule_dom": payload.monthly_day if payload.mode == "monthly" else None,
-            "schedule_expression": schedule_expression,
-            "schedule_summary": schedule_summary,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        t2.automated_queues_table().put_item(Item=queue)
-        # put_rule/put_targets are upserts by name -- this replaces the
-        # existing rule's schedule/payload in place.
-        t2.put_automated_queue_rule(queue)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Update automated queue failed: {exc}")
-    return {"message": f"Automated queue updated (YOLO{payload.generation}-{payload.size}, {schedule_summary})", "queue": queue}
-
-
-@router.post("/automated-queue/delete/{queue_id}")
-def delete_automated_queue(queue_id: str, session=Depends(require_session)) -> dict:
-    t2.delete_automated_queue_rule(queue_id)
-    t2.automated_queues_table().delete_item(Key={"id": queue_id})
-    return {"deleted": True}

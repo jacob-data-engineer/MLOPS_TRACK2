@@ -2,10 +2,8 @@ import { AlertCircle, CalendarClock, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
-import { Track2AutomatedQueuesPanel } from "../components/Track2AutomatedQueuesPanel";
 import {
   ApiError,
-  deleteTrack2AutomatedQueue,
   getTrack2Schedule,
   setTrack2Schedule,
   trainTrack2Now,
@@ -71,10 +69,6 @@ export function Track2SchedulePage() {
     }
   }
 
-  async function handleDeleteQueue(id: string) {
-    await deleteTrack2AutomatedQueue(id);
-    load();
-  }
 
   return (
     <div>
@@ -83,9 +77,7 @@ export function Track2SchedulePage() {
         Track2 Schedule
       </h1>
       <p className="mb-6 max-w-3xl text-sm text-ink-secondary">
-        The single global retrain schedule, plus a manual trigger. Automated
-        Training Queues (individually-scheduled recipes) are added/edited on
-        the Track2 Training page.
+        The single global retrain schedule, plus a manual trigger.
       </p>
 
       {error && (
@@ -202,7 +194,6 @@ export function Track2SchedulePage() {
             </div>
           </Card>
 
-          <Track2AutomatedQueuesPanel queues={data.automated_queues} onDelete={handleDeleteQueue} />
         </div>
       )}
     </div>

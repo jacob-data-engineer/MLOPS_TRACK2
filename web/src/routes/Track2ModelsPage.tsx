@@ -4,33 +4,26 @@ import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
 import { ProgressBar } from "../components/ProgressBar";
 import { StatTile } from "../components/StatTile";
-import { Track2AutomatedQueuesPanel } from "../components/Track2AutomatedQueuesPanel";
 import { Track2S3FolderBrowser } from "../components/Track2S3FolderBrowser";
 import { Track2TrainingAuditPanel } from "../components/Track2TrainingAuditPanel";
 import {
-  addTrack2AutomatedQueue,
   addTrack2Queue,
   ApiError,
-  deleteTrack2AutomatedQueue,
   getTrack2Models,
   removeTrack2Queue,
   startTrack2Queue,
   startTrack2Training,
   stopTrack2Queue,
   stopTrack2Training,
-  type Track2AutomatedQueueParams,
   type Track2ModelsResponse,
   type Track2TrainingParams,
 } from "../lib/api";
 
-const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const GENERATION = "11";
 
-/** Everything both the immediate training actions (Start/Add to Queue) and
- * the automated-queue form need -- lifted up to the page so the automated
- * queue reads the same generation/size/dataset/etc. the user already set
- * above it, instead of holding its own separate duplicate copy of those
- * fields. */
+/** What the training actions (Start Training / Add to Queue) submit --
+ * held at the page rather than inside the form so it survives the page's
+ * own refreshes while a run is in flight. */
 interface TrainingSelection {
   size: string;
   epochs: number;
@@ -287,91 +280,6 @@ function TrainingForm({
   );
 }
 
-function AutomatedQueueForm({
-  selection,
-  onAdded,
-}: {
-  selection: TrainingSelection;
-  onAdded: (message: string) => void;
-}) {
-  const { size, epochs, imgSize, batch, seed, datasetFolder, baseModelFolder, noBaseModel, notes } = selection;
-  const [mode, setMode] = useState<"daily" | "weekly" | "monthly">("weekly");
-  const [hour, setHour] = useState(9);
-  const [day, setDay] = useState("SUN");
-  const [dom, setDom] = useState(1);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleAdd() {
-    setBusy(true);
-    setError(null);
-    try {
-      const params: Track2AutomatedQueueParams = {
-        generation: GENERATION, size, epochs, img_size: imgSize, batch, seed,
-        dataset_folder: datasetFolder, base_model_folder: noBaseModel ? "" : baseModelFolder, notes,
-        mode,
-        daily_hour: mode === "daily" ? hour : undefined,
-        weekly_day: mode === "weekly" ? day : undefined,
-        weekly_hour: mode === "weekly" ? hour : undefined,
-        monthly_day: mode === "monthly" ? dom : undefined,
-        monthly_hour: mode === "monthly" ? hour : undefined,
-      };
-      const res = await addTrack2AutomatedQueue(params);
-      onAdded(res.message);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Add automated queue failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card title="Add an automated queue" caption="A persistent, individually-scheduled recipe -- fires via its own EventBridge rule. Uses the model size, dataset, base model, and hyperparameters set above in Start Training.">
-      {error && (
-        <div className="mb-3 flex items-center gap-2 rounded-sm border border-critical/30 bg-critical-subtle px-3 py-2 text-xs text-critical">
-          <AlertCircle size={14} />
-          {error}
-        </div>
-      )}
-      <p className="tabular mb-3 truncate text-xs text-ink-muted" title={datasetFolder}>
-        Will use: YOLO{GENERATION}-{size.toUpperCase()} &middot; {epochs} epochs &middot; {datasetFolder || "no dataset selected above"}
-      </p>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="block">
-          <span className="mb-1 block text-xs text-ink-muted">Mode</span>
-          <select className="rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-          </select>
-        </label>
-        {mode === "weekly" && (
-          <label className="block">
-            <span className="mb-1 block text-xs text-ink-muted">Day</span>
-            <select className="rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={day} onChange={(e) => setDay(e.target.value)}>
-              {WEEKDAYS.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </label>
-        )}
-        {mode === "monthly" && (
-          <label className="block">
-            <span className="mb-1 block text-xs text-ink-muted">Day of month</span>
-            <input type="number" min={1} max={28} className="tabular w-20 rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={dom} onChange={(e) => setDom(Number(e.target.value))} />
-          </label>
-        )}
-        <label className="block">
-          <span className="mb-1 block text-xs text-ink-muted">Hour (SGT)</span>
-          <input type="number" min={0} max={23} className="tabular w-20 rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={hour} onChange={(e) => setHour(Number(e.target.value))} />
-        </label>
-        <button type="button" onClick={handleAdd} disabled={busy || !datasetFolder} className="flex items-center gap-1.5 rounded-md border border-black/15 px-3 py-2 text-sm font-medium text-ink-secondary disabled:opacity-40">
-          {busy && <Loader2 size={14} className="animate-spin" />}
-          Add to Automated Queue
-        </button>
-      </div>
-    </Card>
-  );
-}
-
 export function Track2ModelsPage() {
   const [data, setData] = useState<Track2ModelsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -437,10 +345,6 @@ export function Track2ModelsPage() {
     load();
   }
 
-  async function handleDeleteAutomatedQueue(id: string) {
-    await deleteTrack2AutomatedQueue(id);
-    load();
-  }
 
   function handleSubmitted(msg: string) {
     setMessage(msg);
@@ -620,8 +524,6 @@ export function Track2ModelsPage() {
 
           <Track2TrainingAuditPanel />
 
-          <AutomatedQueueForm selection={selection} onAdded={handleSubmitted} />
-          <Track2AutomatedQueuesPanel queues={data.automated_queues} onDelete={handleDeleteAutomatedQueue} />
         </div>
       )}
     </div>
