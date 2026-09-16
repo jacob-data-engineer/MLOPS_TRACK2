@@ -53,7 +53,12 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 SAGEMAKER_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/track2-yolo-sagemaker-execution"
 SERVING_IMAGE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/track2-yolo-train"
 
-TAG="$(date -u +%Y%m%d-%H%M%S)"
+# Setting IMAGE_TAG redeploys an image that is already in ECR instead of
+# building a new one. When only the instance-side step failed -- a bad
+# pull, a container that wouldn't start -- the image from that run is
+# perfectly good, and rebuilding it to retry a `docker pull` costs five
+# minutes for nothing.
+TAG="${IMAGE_TAG:-$(date -u +%Y%m%d-%H%M%S)}"
 IMAGE="${APP_REPO}:${TAG}"
 REGISTRY="${APP_REPO%%/*}"
 
@@ -67,6 +72,15 @@ if [ "$STATE" != "running" ]; then
   echo "  aws ec2 start-instances --instance-ids $INSTANCE_ID --region $REGION" >&2
   exit 1
 fi
+
+if [ -n "${IMAGE_TAG:-}" ]; then
+  echo "IMAGE_TAG set -- redeploying an existing image, skipping build."
+  if ! aws ecr describe-images --repository-name "${APP_REPO##*/}" \
+      --image-ids "imageTag=$TAG" --region "$REGION" >/dev/null 2>&1; then
+    echo "No image tagged '$TAG' in ${APP_REPO##*/}. Drop IMAGE_TAG to build one." >&2
+    exit 1
+  fi
+else
 
 # --- 1. ship the source to S3 ------------------------------------------
 # Excludes are not just size: .venv and node_modules are host-specific
@@ -130,6 +144,7 @@ if [ "$PHASE" != "SUCCEEDED" ]; then
   exit 1
 fi
 echo "Build succeeded."
+fi
 
 # --- 3. run it on the instance -----------------------------------------
 RUN_SCRIPT="$(mktemp)"
@@ -151,10 +166,11 @@ docker pull $IMAGE
 # rm below, while the old container is still there to read it from.
 APP_PASSWORD="${PPE_APP_PASSWORD:-}"
 if [ -z "\$APP_PASSWORD" ]; then
-  # Both "|| true"s matter under set -euo pipefail: a container in the
-  # list that doesn't exist makes docker inspect fail, and pipefail would
-  # otherwise abort the whole deploy on the first name that misses rather
-  # than moving on to the next.
+  # The "|| true" is load-bearing under set -euo pipefail: a name in the
+  # list that isn't running makes docker inspect fail, pipefail fails the
+  # whole pipeline for it, and a failed command substitution in an
+  # assignment aborts the script -- so without it the deploy dies on the
+  # first name that misses instead of trying the next.
   for c in $CONTAINER track2-app ppe-pipeline-track2-test; do
     APP_PASSWORD=\$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "\$c" 2>/dev/null \\
       | sed -n 's/^PPE_APP_PASSWORD=//p' | head -1 || true)
