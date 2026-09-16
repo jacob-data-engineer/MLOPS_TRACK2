@@ -1,0 +1,19 @@
+# Everything in this repo is consumed by Linux: deploy.sh runs under bash,
+# the Python and the Dockerfile run in a container, and Terraform compares
+# its heredocs byte-for-byte against what AWS stored.
+#
+# Without this, a clone on Windows checks out CRLF and three things break
+# at once: bash fails on deploy.sh with "$'\r': command not found",
+# Terraform reports a permanent phantom diff on the CodeBuild buildspec,
+# and the image build ships \r into the container. Normalising here means
+# it cannot depend on whose machine did the clone.
+* text=auto eol=lf
+
+# Binary: never touched, never diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.pt binary
+*.tar.gz binary
+*.zip binary

@@ -1,0 +1,13 @@
+# Serving image — separate from Dockerfile (training), since AWS's
+# training and inference DLC base images differ (inference images bundle
+# a model server; training images don't). build_and_push.sh builds and
+# pushes both to the same ECR repo under different tags.
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+RUN pip install --no-cache-dir ultralytics==8.3.*
+
+COPY inference.py /opt/ml/code/inference.py
+
+ENV SAGEMAKER_PROGRAM=inference.py

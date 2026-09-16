@@ -10,3 +10,4 @@ eval_runs/
 .claude/
 *.log
 reports/
+model_training/

@@ -1,0 +1,29 @@
+# This repo was split out of a larger one whose .gitignore lived at its
+# root and did not travel with it. Without this file, `git add -A` commits
+# the Terraform provider cache (a ~600MB binary) and terraform.tfstate.
+
+# Terraform: the provider cache is re-downloadable, and state is both
+# environment-specific and a place secrets end up.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / frontend build output -- the image builds its own.
+node_modules/
+web/dist/
+
+# Local environment and editor noise
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log

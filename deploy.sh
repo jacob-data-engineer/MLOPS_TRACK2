@@ -88,13 +88,18 @@ else
 # would put the whole history in a build context for no reason, and
 # terraform/.terraform is a ~700MB provider cache with nothing to do with
 # the image -- it alone is a hundred times the size of the real source.
+#
+# model_training/ is excluded for the same reason: it holds the SageMaker
+# pipelines, evaluators and baseline checkpoints, which run in AWS, not in
+# this container. Left in, it took the build source from 824KB to 13MB and
+# put the weights inside the app image too.
 ZIP="$(mktemp -d)/track2-app.zip"
 echo "Packaging source ..."
 if command -v zip >/dev/null 2>&1; then
   ( cd "$SCRIPT_DIR" && zip -q -r "$ZIP" . \
       -x '*.venv/*' 'node_modules/*' 'web/node_modules/*' 'web/dist/*' \
          '*__pycache__/*' '*.pytest_cache/*' 'legacy-review-app/*' '*.pyc' \
-         '.git/*' 'terraform/.terraform/*' 'terraform/*.tfstate*' )
+         '.git/*' 'terraform/.terraform/*' 'terraform/*.tfstate*' 'model_training/*' )
 else
   # Git Bash on Windows ships no `zip`, so this would otherwise only run
   # from WSL/mac. The system bsdtar writes real zip archives. It is a
@@ -115,7 +120,7 @@ else
       --exclude '*/.pytest_cache/*' --exclude 'legacy-review-app/*' \
       --exclude '*.pyc' --exclude '.git/*' \
       --exclude '*/.terraform/*' --exclude '*.tfstate' \
-      --exclude '*.tfstate.backup' \
+      --exclude '*.tfstate.backup' --exclude 'model_training/*' \
       -- * )
 fi
 echo "  $(du -h "$ZIP" | cut -f1)"

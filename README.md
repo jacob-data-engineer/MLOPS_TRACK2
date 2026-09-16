@@ -1,87 +1,86 @@
-# MLOPS_TRACK2 — the review app on port 8090
+# MLOPS_TRACK2
 
-The application served at `http://<review-host>:8090`, e.g.
+The Track2 YOLO MLOps app: a FastAPI backend and a React SPA served
+together on one port, plus the training-pipeline assets behind them.
+
+Everything needed to build, deploy and change this app lives in this
+folder. It used to sit inside the JP_UI repo and no longer refers to it.
 
 ```
-http://47.129.112.197:8090/?tab=models&browse_prefix=...&selected_dataset=...
+src/ppe_pipeline_api/   FastAPI app -- routers/ per page, track2_shared.py for the logic
+web/                    React + Vite SPA, built into web/dist and served by the same process
+terraform/              this app's own stack: ECR repo, CodeBuild project, audit table, IAM
+model_training/         the SageMaker training pipelines, evaluators and dataset preparers
+deploy.sh               laptop -> S3 -> CodeBuild -> ECR -> SSM -> EC2
+tests/                  pytest
 ```
-
-It is **not** the JP_UI app. Both run on the same EC2 instance and talk to
-the same AWS resources, which is what makes them easy to confuse:
-
-| | This app (8090) | JP_UI (8501) |
-|---|---|---|
-| Code | `review_app.py`, one file | `src/` + `web/`, FastAPI + React |
-| Server | Python stdlib `http.server` | FastAPI / uvicorn |
-| Dependencies | `boto3`, nothing else | full `pyproject.toml` |
-| Image | `review-app`, built on the instance | `ppe-pipeline`, built in CI, pushed to ECR |
-| Container | `review-app-container` | `ppe-pipeline-track2-test` |
-| Deployed by | `deploy_review_app.sh`, by hand | GitHub Actions on push to `track2_ui` |
-| State in the URL | query string (`?tab=models&...`) | client-side routes (`/track2/models`) |
-
-Query-string navigation is the quickest way to tell them apart from a link
-alone: a `?tab=` URL is this app.
-
-## What's here
-
-- `review_app.py` — the whole application. Renders HTML server-side and
-  calls AWS directly; no build step, no framework.
-- `Dockerfile` — `python:3.12-slim` plus `boto3`.
-- `deploy_review_app.sh` — the deployment.
-
-## Where it deploys
-
-| | |
-|---|---|
-| Instance | `i-0eee645bac49b482a` (`track2-yolo-review-host`, ap-southeast-1) |
-| Path on host | `/opt/review-app/` |
-| Container | `review-app-container`, port 8090, `--restart unless-stopped` |
-| Image | `review-app`, built **on the instance** — never pushed to ECR |
-| Source staging | `s3://track2-s3/review-app-source/` |
-
-`deploy_review_app.sh` uploads `Dockerfile`, `review_app.py` and a generated
-`run_container.sh` to S3, then drives the instance over SSM to pull all
-three, build the image locally and restart the container. It goes through
-S3 rather than embedding the files in the SSM command because quoting a
-JSON blob inside SSM's own JSON proved too fragile.
-
-There is **no CI for this app**. It ships only when someone runs that
-script, which is worth knowing before assuming a push deployed it.
 
 ## Deploying
 
-The instance must be running (it is stopped nightly at 22:00 SGT and over
-weekends), and the terraform stack must be applied — the script reads the
-instance id, bucket, table and role ARN from its outputs:
+Nothing is built locally -- no Docker, no node, no multi-GB layers on your
+disk. The script zips the source, CodeBuild builds the image in AWS, and
+the instance is told over SSM to pull and restart.
 
 ```bash
-aws ec2 start-instances --instance-ids i-0eee645bac49b482a --region ap-southeast-1
-./MLOPS_TRACK2/deploy_review_app.sh
+PORT=8501 CONTAINER=ppe-pipeline-track2-test bash deploy.sh
 ```
 
-`INFRA_DIR` overrides where terraform is read from; it defaults to
-`jurong-port/terraform/infra`.
+`IMAGE_TAG=<existing tag>` redeploys an image already in ECR and skips the
+build -- what to use when only the instance-side step failed.
 
-## Configuration
+There is deliberately no GitHub Actions deploy.
 
-All environment variables, set by `deploy_review_app.sh` from terraform
-outputs — not read from a file on the host:
+Live at `http://<instance public IP>:8501/`. The password is read off the
+running container at deploy time, so a deploy never silently changes how
+people log in, and the secret never leaves the instance.
 
-`REVIEW_QUEUE_TABLE`, `PIPELINE_BUCKET`, `AWS_REGION`, `RETRAIN_RULE_NAME`,
-`TRAINING_PIPELINE_NAME`, `MODEL_PACKAGE_GROUPS_JSON`,
-`MULTI_SIZE_ENDPOINT_NAME`, `MULTI_SIZE_VARIANT_NAME`,
-`SAGEMAKER_EXECUTION_ROLE_ARN`, `SERVING_IMAGE_URI`,
-`RUN_PIPELINE_CODEBUILD_PROJECT`.
+## The two training pipelines
 
-It authenticates as the instance's own IAM role (`track2-yolo-review-host`);
-there are no credentials in the image.
+| | production replay | custom |
+|---|---|---|
+| Pipeline | `track2-yolo-training-pipeline` | `track2-yolo-custom-training-pipeline` |
+| Registry group | `track2-ppe-fullframe-replay` | `track2-yolo-custom-detector` |
+| Classes | fixed: `person`, `helmet` | whatever the dataset's `data.yaml` declares |
+| Dataset | pinned pull snapshot, six classes remapped to two | a folder you pick |
+| Started by | CodeBuild -> the replay coordinator Lambda | the app, directly |
 
-## Shared state, and why that matters
+They are separate on purpose. The production path **discards** every box
+outside person/helmet, its evaluator refuses any checkpoint whose class
+names differ, and its registry group's consumers read index 0 as `person`.
+A model with a different taxonomy in that chain would be mislabelled at
+every step without failing anywhere. See
+`model_training/custom_training/README.md`.
 
-This app and JP_UI read and write the **same** DynamoDB tables, S3 bucket,
-SageMaker endpoint and Model Registry. A deploy from one is visible to the
-other, and either can start training jobs or change what is served.
+Epochs, image size, batch and seed are tunable on both. Every pipeline
+parameter defaults to the value that used to be hardcoded, so a run that
+specifies none of them behaves exactly as it always did -- which is what
+keeps the weekly schedule unaffected.
 
-Most relevant: JP_UI now creates the inference endpoint on demand and
-deletes it once its queue drains. If this app assumes a standing endpoint,
-it will find one missing that used to always be there.
+## What is NOT in this folder
+
+The shared platform still lives in the JP_UI repo under
+`jurong-port/terraform/infra`: the EC2 instance this app runs on, the
+`track2-yolo-review-host` IAM role, the S3 bucket, the retraining
+coordinator Lambda and its schedule, the SNS topics.
+
+This app's stack reads those through data sources rather than owning them,
+so `terraform apply` here can never disturb them. Moving that stack as
+well is a separate operation: it manages resources well beyond this app,
+and its state would have to move with it.
+
+Two things there still need an apply from that repo when changed -- the
+retraining coordinator (mirrored at `model_training/replay_lambda/`) and
+the training pipeline's CodeBuild source zip.
+
+## Conventions worth knowing
+
+- **Line endings are LF**, enforced by `.gitattributes`. A CRLF checkout
+  breaks `deploy.sh` under bash and makes Terraform report a permanent
+  phantom diff on the CodeBuild buildspec.
+- **Terraform state is local** (`terraform/terraform.tfstate`) and not in
+  git. It is currently the only copy; an S3 backend is the right fix and
+  has not been done.
+- The app runs **single-worker with in-memory queues**. Anything that must
+  survive a restart is in DynamoDB, and jobs left mid-flight are recovered
+  at startup -- see `recover_interrupted_jobs`. Skipping that is what once
+  left an endpoint billing for a day.
