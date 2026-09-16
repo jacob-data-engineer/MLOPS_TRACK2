@@ -188,7 +188,13 @@ function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted:
               <Field label="mAP50-95" value={formatMetric(audit.metrics["mAP50-95"])} />
               <Field label="Precision" value={formatMetric(audit.metrics["precision"])} />
               <Field label="Recall" value={formatMetric(audit.metrics["recall"])} />
-              <Field label="Accuracy" value={formatMetric(audit.metrics["accuracy"])} />
+              {/* The full-frame evaluator reports f1, the older one
+                  accuracy -- show whichever this run actually produced. */}
+              {audit.metrics["f1"] !== null && audit.metrics["f1"] !== undefined ? (
+                <Field label="F1" value={formatMetric(audit.metrics["f1"])} />
+              ) : (
+                <Field label="Accuracy" value={formatMetric(audit.metrics["accuracy"])} />
+              )}
             </div>
           ) : (
             <p className="text-xs text-ink-muted">

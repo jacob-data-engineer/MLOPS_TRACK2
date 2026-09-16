@@ -337,6 +337,28 @@ def latest_approved_lookup(registries: dict) -> dict:
     return result
 
 
+def _read_evaluation_metrics(data: dict) -> dict:
+    """The detection numbers out of an evaluation.json, whichever shape it
+    is in.
+
+    The legacy evaluator wrote them flat at the top level. The full-frame
+    evaluator that actually runs now nests them under "metrics" and reports
+    f1 where the old one reported accuracy -- read flat-only, every
+    full-frame run looked like it had no metrics at all. Missing keys stay
+    None rather than 0: "not measured" and "measured as zero" are not the
+    same thing on a model card.
+    """
+    source = data.get("metrics") if isinstance(data.get("metrics"), dict) else data
+    return {
+        "mAP50": source.get("mAP50"),
+        "mAP50-95": source.get("mAP50-95"),
+        "precision": source.get("precision"),
+        "recall": source.get("recall"),
+        "f1": source.get("f1"),
+        "accuracy": source.get("accuracy"),
+    }
+
+
 def fetch_metrics_and_lineage(model_package_arn: str) -> tuple[dict | None, str, dict | None]:
     """One describe_model_package call -> (metrics-or-None, description,
     lineage-or-None). Metrics: the 5 flat numbers (mAP50, mAP50-95,
@@ -365,14 +387,7 @@ def fetch_metrics_and_lineage(model_package_arn: str) -> tuple[dict | None, str,
             # aren't URL-normalized, so the double slash 404s verbatim.
             key = re.sub(r"/+", "/", key)
             body = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-            data = json.loads(body)
-            metrics = {
-                "mAP50": data.get("mAP50"),
-                "mAP50-95": data.get("mAP50-95"),
-                "precision": data.get("precision"),
-                "recall": data.get("recall"),
-                "accuracy": data.get("accuracy"),
-            }
+            metrics = _read_evaluation_metrics(json.loads(body))
         except Exception as exc:
             print(f"Could not fetch evaluation metrics for {model_package_arn}: {exc}")
 
@@ -2224,8 +2239,9 @@ def _registered_model_for_execution(steps: list) -> dict | None:
             break
     if not arn:
         return None
-    # ".../model-package/<group>/<version>"
-    tail = arn.rsplit("/model-package/", 1)[-1]
+    # "arn:aws:sagemaker:<region>:<account>:model-package/<group>/<version>"
+    # -- the separator before "model-package" is a COLON, not a slash.
+    tail = arn.rsplit(":model-package/", 1)[-1]
     group, _, version = tail.partition("/")
     approval_status = ""
     try:
@@ -2260,9 +2276,14 @@ def reconcile_training_audits() -> None:
         # every row whose model lookup had failed even once -- the failure
         # became indistinguishable from "this run registered nothing".
         if audit.get("status") in TERMINAL_EXECUTION_STATUSES and audit.get("actual"):
-            if audit.get("model") and audit.get("metrics") is not None:
+            has_model = bool(audit.get("model"))
+            if has_model and audit.get("metrics") is not None:
                 continue
-            if audit.get("model_lookup_done"):
+            # Only give up on a run that finished without registering
+            # anything. A row that has a model but no metrics is still
+            # incomplete, and stopping here is what left the first run
+            # showing a model with nothing measured against it.
+            if not has_model and audit.get("model_lookup_done"):
                 continue
         try:
             _reconcile_one_audit(audit)
@@ -2297,15 +2318,18 @@ def _reconcile_one_audit(audit: dict) -> None:
         if end_time and not audit.get("ended_at"):
             updates["ended_at"] = end_time.isoformat()
 
-    # One listing, used by both lookups below.
-    steps = _execution_steps(execution_arn) if (audit.get("model") is None or not audit.get("actual")) else []
+    # Re-looked-up whenever the metrics are still missing, not only when
+    # the model is: that also repairs a row recorded by an earlier, buggier
+    # version of this code without anyone having to delete it.
+    needs_model = audit.get("model") is None or audit.get("metrics") is None
+    steps = _execution_steps(execution_arn) if (needs_model or not audit.get("actual")) else []
 
     if not audit.get("actual"):
         actual = _actual_run_parameters(steps)
         if actual:
             updates["actual"] = actual
 
-    if audit.get("model") is None:
+    if needs_model:
         model = _registered_model_for_execution(steps)
         if model:
             updates["model"] = model
