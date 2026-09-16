@@ -200,3 +200,37 @@ resource "aws_codebuild_project" "app" {
     privileged_mode             = true # required for docker build/push inside the build
   }
 }
+
+# --- letting the instance pull what was built ----------------------------
+
+# The review host's role is granted ECR pull by the stack that owns the
+# instance, scoped to the repos that existed when that was written -- so
+# pulling this one came back 403 Forbidden even though `docker login`
+# succeeded. The grant is attached here, to the repository this stack
+# owns, rather than by widening the other stack's IAM: the fix then lives
+# with the thing being accessed, and applying it cannot disturb the stack
+# that owns the instance.
+#
+# Same account, so a repository policy alone authorizes the pull. The one
+# account-level action (ecr:GetAuthorizationToken) is already in the
+# instance role -- the login in the deploy log proves it.
+data "aws_iam_role" "review_host" {
+  name = var.review_host_role_name
+}
+
+resource "aws_ecr_repository_policy" "app_pull" {
+  repository = aws_ecr_repository.app.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowReviewHostPull"
+      Effect    = "Allow"
+      Principal = { AWS = data.aws_iam_role.review_host.arn }
+      Action = [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer",
+      ]
+    }]
+  })
+}

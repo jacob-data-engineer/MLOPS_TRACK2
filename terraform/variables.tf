@@ -33,3 +33,9 @@ variable "github_token_parameter" {
   type        = string
   default     = "/track2-yolo/github-token"
 }
+
+variable "review_host_role_name" {
+  description = "IAM role the review host runs as. Granted pull access to this stack's ECR repo, since the stack that owns the role only grants it the repos that existed when it was written."
+  type        = string
+  default     = "track2-yolo-review-host"
+}
