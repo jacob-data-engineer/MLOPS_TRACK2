@@ -1,0 +1,10 @@
+#!/bin/bash
+# Entry point SageMaker invokes via `docker run <image> serve`.
+# Each model's Dockerfile installs this to /usr/local/bin/serve.
+set -euo pipefail
+
+exec uvicorn common.server:app \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --workers "${SAGEMAKER_UVICORN_WORKERS:-1}" \
+  --log-level "${RESTORE_LOG_LEVEL:-info}"

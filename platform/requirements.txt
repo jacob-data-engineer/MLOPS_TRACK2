@@ -1,0 +1,22 @@
+# --- Web framework / server (SageMaker BYOC: FastAPI + Uvicorn on :8080) ---
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+pydantic==2.7.4
+
+# --- PyTorch / CUDA ---
+# Installed from the PyTorch CUDA 12.1 wheel index in both Dockerfiles:
+#   pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cu121
+# Pinned here for local (non-Docker) environment reproducibility; each
+# Dockerfile is the source of truth for which CUDA build gets installed.
+torch==2.3.1
+torchvision==0.18.1
+
+# --- Image I/O / processing ---
+Pillow==10.4.0
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+
+# --- AWS / SageMaker tooling (model artifact fetch, local verification scripts) ---
+boto3==1.34.144
+sagemaker==2.224.1

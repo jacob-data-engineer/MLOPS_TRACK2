@@ -22,7 +22,10 @@ PORT="${PORT:-8090}"
 CONTAINER="${CONTAINER:-track2-app}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # This folder's own stack -- nothing here reads the jurong-port state.
-INFRA_DIR="${INFRA_DIR:-$SCRIPT_DIR/terraform}"
+# terraform/app is this app's own stack (ECR, CodeBuild, the audit table).
+# terraform/platform beside it owns the shared estate -- the instance, the
+# roles, the bucket -- and is never what this script reads.
+INFRA_DIR="${INFRA_DIR:-$SCRIPT_DIR/terraform/app}"
 
 if [ ! -d "$INFRA_DIR" ]; then
   echo "No terraform at $INFRA_DIR." >&2

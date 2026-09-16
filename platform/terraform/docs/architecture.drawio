@@ -1,0 +1,126 @@
+<mxfile host="app.diagrams.net" modified="2026-09-02T00:00:00.000Z" agent="Claude" version="24.0.0">
+  <diagram name="track2-yolo architecture" id="track2-yolo-arch">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="1275" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===================== DATA SOURCE ===================== -->
+        <mxCell id="src1" value="safety-model-dataset-dev&#10;(external source bucket)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="src2" value="External escalation-dataset&#10;pull pipeline (outside this repo)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="150" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="src3" value="track2_pull/latest.json&#10;(S3, points at newest pull)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="260" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== INGESTION ===================== -->
+        <mxCell id="ing1" value="S3 ObjectCreated event&#10;(prefix=track2_pull/, suffix=latest.json)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="320" y="260" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ing2" value="Lambda: track2-sagemaker-pull-training&#10;(pull_training_data.py) — automatic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="320" y="360" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ing3" value="sagemaker_training/escalation_dataset/&#10;(training-ready data, refreshed each pull)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="320" y="460" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== TRIGGERS ===================== -->
+        <mxCell id="trig1" value="CodeBuild:&#10;track2-yolo-run-pipeline (CLI/manual)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="40" y="460" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="trig2" value="Lambda: track2-yolo-weekly-retrain&#10;(EventBridge, Sun 23:00 SGT)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="40" y="530" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="trig3" value="SageMaker Studio console&#10;'Start an execution' (manual)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="40" y="600" width="200" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== PIPELINE ===================== -->
+        <mxCell id="pipegroup" value="track2-yolo-training-pipeline" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#333333;verticalAlign=top;fontStyle=1;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="620" y="360" width="600" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="p1" value="TrainYolo&#10;(ml.g4dn.xlarge)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="640" y="400" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" value="EvaluateYolo&#10;(ml.m5.xlarge)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="840" y="400" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" value="RegisterYoloModel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="400" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== MODEL REGISTRY ===================== -->
+        <mxCell id="reg1" value="track2-yolo11&#10;Model Package Group (v1-v9)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="400" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="reg2" value="Human approval&#10;(approve_model.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="500" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== POST-APPROVAL ===================== -->
+        <mxCell id="post1" value="Lambda: dump_approved_weights&#10;(EventBridge on ModelApprovalStatus=Approved)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="600" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="post2" value="track2-s3:&#10;latest_approved_model_weights/model.pt (+archive)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="700" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== DEPLOYMENT (MISSING) ===================== -->
+        <mxCell id="dep1" value="deploy_endpoint.py&#10;(manual script)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="600" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="dep2" value="track2-yolo-endpoint&#10;[ NOT DEPLOYED — currently deleted ]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="680" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== NOTIFICATIONS ===================== -->
+        <mxCell id="not1" value="Lambda: track2-yolo-training-completed-notify&#10;(EventBridge on pipeline execution status change)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="620" y="820" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="not2" value="Lambdas: confidence_monitor&#10;+ trigger_review (drift monitoring)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="620" y="920" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="not3" value="SNS: track2-yolo-reviewer-notifications" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="960" y="870" width="220" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="not4" value="SNS: track2-yolo-monitor-drift" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="960" y="940" width="220" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="not5" value="Email&#10;(confirmed subscriber)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="895" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EDGES ===================== -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="src1" target="src2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="src2" target="src3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="write/overwrite" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="src3" target="ing1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="invokes" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="ing1" target="ing2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="copies pull" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="ing2" target="ing3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="ing3" target="p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="trig1" target="p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="trig2" target="p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="trig3" target="p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="p1" target="p2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="p2" target="p3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="p3" target="reg1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="reg1" target="reg2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" value="on Approved" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="reg2" target="post1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="post1" target="post2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" value="manual, not yet run" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="reg2" target="dep1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="dep1" target="dep2"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e18" value="Executing / Succeeded / Failed" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pipegroup" target="not1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="not1" target="not3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e20" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="not2" target="not4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e21" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="not4" target="not3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e22" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="not3" target="not5"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
