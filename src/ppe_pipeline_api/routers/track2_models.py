@@ -140,6 +140,7 @@ def add_to_queue(payload: TrainingParams, session=Depends(require_session)) -> d
     try:
         epochs, img_size, batch, seed = t2.validate_training_params(
             payload.epochs, payload.dataset_folder, payload.img_size, payload.batch, payload.seed,
+            payload.eval_dataset_folder,
         )
         entry = {
             "id": uuid.uuid4().hex[:12],

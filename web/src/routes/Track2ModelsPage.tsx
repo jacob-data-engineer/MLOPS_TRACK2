@@ -212,6 +212,16 @@ function TrainingForm({
               ? "Metrics will be measured on this folder."
               : "None selected -- the run will be evaluated on its own training images."}
           </p>
+          {/* The evaluation step reads dataset-card.json, which only the
+              prepared datasets carry. Said here because the folder looks
+              fine otherwise -- training succeeds and evaluation then dies
+              on the missing file, losing the whole run. */}
+          <p className="mt-1 text-xs text-ink-muted">
+            Whichever folder is evaluated needs a <span className="tabular">dataset-card.json</span>{" "}
+            beside its <span className="tabular">data.yaml</span>. Prepared datasets under{" "}
+            <span className="tabular">replay/fullframe/datasets/</span> have one; this is checked before
+            the run starts.
+          </p>
         </div>
 
         <div className="min-w-0">

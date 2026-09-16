@@ -1846,12 +1846,52 @@ def training_already_running_reason(progress: dict | None) -> str | None:
     return None
 
 
-def validate_training_params(epochs, dataset_folder, img_size=640, batch=16, seed=42) -> tuple[int, int, int, int]:
+def _s3_object_exists(key: str) -> bool:
+    try:
+        s3.head_object(Bucket=BUCKET, Key=key)
+        return True
+    except botocore.exceptions.ClientError:
+        return False
+
+
+def validate_dataset_folder(folder: str, *, used_for_evaluation: bool) -> None:
+    """Checks a chosen folder carries what the pipeline will look for.
+
+    Training and evaluation want different things, and the difference is
+    not obvious from the folder: train.py reads data.yaml and the
+    images/labels beside it, while evaluate.py additionally reads
+    dataset-card.json, which only the replay-derived datasets carry.
+
+    Checked here because the alternative is finding out ~15 minutes in,
+    after a GPU training job has already succeeded, when the evaluation
+    step dies on a missing file and takes the whole run's model with it.
+    """
+    prefix = folder.strip("/")
+    if not _s3_object_exists(f"{prefix}/data.yaml"):
+        raise ValueError(
+            f"'{folder}' has no data.yaml, so it is not a YOLO dataset folder. "
+            "Pick the folder that contains data.yaml, images/ and labels/."
+        )
+    if used_for_evaluation and not _s3_object_exists(f"{prefix}/dataset-card.json"):
+        raise ValueError(
+            f"'{folder}' has no dataset-card.json, which the evaluation step reads. "
+            "Training would succeed and evaluation would then fail, losing the run. "
+            "Choose a prepared dataset (the replay datasets under "
+            "replay/fullframe/datasets/ carry one) as the evaluation folder."
+        )
+
+
+def validate_training_params(epochs, dataset_folder, img_size=640, batch=16, seed=42, eval_dataset_folder="") -> tuple[int, int, int, int]:
     """Shared by the immediate Start Training path and Add to Queue -- both
     need the exact same checks so a bad entry doesn't sit in the queue for
     potentially hours before failing when it's finally its turn to run."""
     if not dataset_folder:
         raise ValueError("No dataset folder selected -- use the browser to pick one first.")
+    # Whichever folder evaluation will read is the one that needs the card:
+    # with no separate evaluation folder chosen, that is the training one.
+    validate_dataset_folder(dataset_folder, used_for_evaluation=not eval_dataset_folder)
+    if eval_dataset_folder:
+        validate_dataset_folder(eval_dataset_folder, used_for_evaluation=True)
     epochs_int = int(epochs)
     if not (1 <= epochs_int <= 1000):
         raise ValueError(f"Epochs must be between 1 and 1000, got {epochs_int}.")
@@ -1873,7 +1913,7 @@ def start_training_run(generation, size, epochs, dataset_folder, base_model_fold
     validation failure or a CodeBuild error; returns the new build's id on
     success. Caller is responsible for the already-running (1 GPU slot)
     guard -- see training_already_running_reason."""
-    epochs_int, img_size_int, batch_int, seed_int = validate_training_params(epochs, dataset_folder, img_size, batch, seed)
+    epochs_int, img_size_int, batch_int, seed_int = validate_training_params(epochs, dataset_folder, img_size, batch, seed, eval_dataset_folder)
     env_overrides = [
         {"name": "TRAIN_GENERATION", "value": generation, "type": "PLAINTEXT"},
         {"name": "TRAIN_SIZE", "value": size, "type": "PLAINTEXT"},
