@@ -3401,6 +3401,15 @@ export function getTrack2TrainingAudit(limit = 50): Promise<{ audits: Track2Trai
   return apiGet(`/track2/models/audit?limit=${limit}`);
 }
 
+/** Removes the run from the history and deletes the model version it
+ * produced -- `deleted_model` names what went, or is null if the run never
+ * registered one. */
+export function deleteTrack2TrainingAudit(
+  auditId: string,
+): Promise<{ deleted: boolean; deleted_model: string | null }> {
+  return apiPost(`/track2/models/audit/${encodeURIComponent(auditId)}/delete`);
+}
+
 // `undefined` means "not specified, use the server's nice landing default";
 // "" (explicitly passed) means "the bucket root" -- these are NOT the same
 // thing, and conflating them (e.g. `if (browsePrefix) q.set(...)`, which
@@ -3639,11 +3648,40 @@ export function getTrack2Cost(days?: number, refresh = false): Promise<Track2Cos
   return apiGet(`/track2/cost?${q}`);
 }
 
-/** Sums the endpoint-hosting lines of a cost day. Hosting usage types read
- * "APS1-Host:ml.m5.2xlarge" -- the ":Host:" segment separates the standing
- * cost of the endpoint from training, processing and Studio. */
+/** Cost Explorer usage types read "<region>-<category>:<detail>", e.g.
+ * "APS1-Host:ml.m5.2xlarge", "APS1-Train:ml.g4dn.xlarge",
+ * "APS1-Processing:ml.m5.xlarge". The separator before the category is a
+ * HYPHEN -- an earlier filter here looked for ":Host:", which never occurs
+ * in any usage type, so every hosting figure in the UI summed to exactly
+ * zero. Parse the category out rather than substring-matching it. */
+function usageCategory(usageType: string): string {
+  const prefix = usageType.split(":")[0];
+  const dash = prefix.lastIndexOf("-");
+  return (dash >= 0 ? prefix.slice(dash + 1) : prefix).toLowerCase();
+}
+
+// "Hst" is how Cost Explorer labels endpoint data transfer
+// ("APS1-Hst:Data-Bytes-Out") -- same endpoint, same bill.
+const HOSTING_CATEGORIES = new Set(["host", "hst"]);
+// A training run is the GPU training job plus the Processing job that
+// evaluates it; both are the cost of running the pipeline once.
+const TRAINING_CATEGORIES = new Set(["train", "processing"]);
+
+function sumByCategory(items: Track2CostItem[], categories: Set<string>): number {
+  return items
+    .filter((i) => categories.has(usageCategory(i.usage_type)))
+    .reduce((sum, i) => sum + i.amount, 0);
+}
+
+/** The standing cost of the inference endpoint for a cost day. */
 export function track2HostingTotal(items: Track2CostItem[]): number {
-  return items.filter((i) => i.usage_type.includes(":Host:")).reduce((sum, i) => sum + i.amount, 0);
+  return sumByCategory(items, HOSTING_CATEGORIES);
+}
+
+/** What training cost for a cost day -- GPU training jobs plus the
+ * evaluation Processing jobs that run with them. */
+export function track2TrainingTotal(items: Track2CostItem[]): number {
+  return sumByCategory(items, TRAINING_CATEGORIES);
 }
 
 export interface Track2RunLineage {

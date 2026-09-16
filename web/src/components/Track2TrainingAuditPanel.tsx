@@ -1,71 +1,58 @@
-import { ChevronDown, ChevronRight, Loader2, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge, type BadgeTone } from "./Badge";
-import { Card } from "./Card";
-import { getTrack2TrainingAudit, type Track2TrainingAudit, type Track2TrainingAuditDataset } from "../lib/api";
+import {
+  deleteTrack2TrainingAudit,
+  getTrack2TrainingAudit,
+  type Track2TrainingAudit,
+  type Track2TrainingAuditDataset,
+} from "../lib/api";
 
-/** Full record of what each training run actually used: both image
- * folders and the file names in them, every hyperparameter, the notes,
- * which model version came out of it, and when it ran.
+/** Finished runs, under the queue that produced them -- the same shape as
+ * Deploy & Inference: what is queued above, what has already run below.
  *
- * Rows are written at submit time and completed by the server once the
- * run ends, so a row in flight legitimately has no end time, model or
- * metrics yet -- shown as "--" rather than hidden, since "not yet" and
- * "never recorded" have to stay distinguishable in an audit.
+ * Each row is the full record of what that run used: both image folders
+ * and the file names in them, every hyperparameter, the notes, which
+ * model version came out of it, and when it ran. Rows are written at
+ * submit time and completed by the server when the run ends, so a row
+ * still in flight legitimately has no end time, model or metrics -- shown
+ * as "--" rather than hidden, since "not yet" and "never recorded" have
+ * to stay distinguishable in a record like this.
  */
-export function Track2TrainingAuditPanel() {
+export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number }) {
   const [audits, setAudits] = useState<Track2TrainingAudit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
-  async function load() {
-    setBusy(true);
+  const load = useCallback(async () => {
     try {
       const res = await getTrack2TrainingAudit(50);
       setAudits(res.audits);
       setError(null);
     } catch {
-      setError("Could not load the training audit.");
-    } finally {
-      setBusy(false);
+      setError("Could not load the training history.");
     }
-  }
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load, reloadKey]);
+
+  if (audits !== null && audits.length === 0 && !error) return null;
 
   return (
-    <Card
-      title="Training audit"
-      caption="One record per submitted run -- inputs, parameters, outputs and timings"
-      action={
-        <button
-          type="button"
-          onClick={load}
-          disabled={busy}
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-black/15 px-3 py-2 text-xs font-medium text-ink-secondary disabled:opacity-40"
-        >
-          {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-          Refresh
-        </button>
-      }
-    >
+    <div className="mt-4">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">History</p>
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
       {audits === null ? (
         <p className="text-sm text-ink-muted">Loading...</p>
-      ) : audits.length === 0 ? (
-        <p className="text-sm text-ink-muted">
-          No runs recorded yet. Every run started from here is recorded from now on.
-        </p>
       ) : (
         <div className="flex flex-col gap-2">
           {audits.map((audit) => (
-            <AuditRow key={audit.id} audit={audit} />
+            <AuditRow key={audit.id} audit={audit} onDeleted={load} />
           ))}
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -99,28 +86,60 @@ function formatMetric(value: number | null | undefined): string {
   return typeof value === "number" ? value.toFixed(4) : String(value);
 }
 
-function AuditRow({ audit }: { audit: Track2TrainingAudit }) {
+function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted: () => void }) {
   const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    // Deleting the run deletes the registered model with it, which is not
+    // recoverable -- worth one confirmation naming exactly what goes.
+    const target = audit.model ? `${audit.model.group} v${audit.model.version}` : null;
+    const warning = target
+      ? `Delete this run AND its registered model ${target}? This cannot be undone.`
+      : "Delete this run from the history? It never registered a model.";
+    if (!window.confirm(warning)) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteTrack2TrainingAudit(audit.id);
+      onDeleted();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Delete failed.");
+      setDeleting(false);
+    }
+  }
 
   return (
     <div className="rounded-sm border border-hairline bg-page">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-black/[0.04]"
-      >
-        {open ? <ChevronDown size={14} className="shrink-0 text-ink-muted" /> : <ChevronRight size={14} className="shrink-0 text-ink-muted" />}
-        <span className="tabular text-sm text-ink">
-          YOLO{audit.generation}-{audit.size.toUpperCase()}
-        </span>
-        <span className="tabular truncate text-xs text-ink-muted">{formatTime(audit.submitted_at)}</span>
-        {audit.model && (
-          <span className="tabular shrink-0 text-xs text-ink-secondary">v{audit.model.version}</span>
-        )}
-        <span className="ml-auto shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          {open ? <ChevronDown size={14} className="shrink-0 text-ink-muted" /> : <ChevronRight size={14} className="shrink-0 text-ink-muted" />}
           <Badge tone={statusTone(audit.status)} label={audit.status} />
-        </span>
-      </button>
+          <span className="tabular shrink-0 text-sm text-ink">
+            YOLO{audit.generation}-{audit.size.toUpperCase()}
+          </span>
+          {audit.model && (
+            <span className="tabular shrink-0 text-xs text-ink-secondary">v{audit.model.version}</span>
+          )}
+          <span className="tabular truncate text-xs text-ink-muted">{formatTime(audit.submitted_at)}</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={deleting}
+          title={audit.model ? "Delete this run and the model version it registered" : "Delete this run"}
+          className="flex shrink-0 items-center gap-1.5 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04] disabled:opacity-40"
+        >
+          {deleting && <Loader2 size={12} className="animate-spin" />}
+          Delete
+        </button>
+      </div>
+      {deleteError && <p className="px-3 pb-2 text-xs text-critical">{deleteError}</p>}
 
       {open && (
         <div className="border-t border-hairline px-3 py-3">

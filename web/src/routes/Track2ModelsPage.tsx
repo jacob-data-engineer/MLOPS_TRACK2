@@ -5,7 +5,8 @@ import { Card } from "../components/Card";
 import { ProgressBar } from "../components/ProgressBar";
 import { StatTile } from "../components/StatTile";
 import { Track2S3FolderBrowser } from "../components/Track2S3FolderBrowser";
-import { Track2TrainingAuditPanel } from "../components/Track2TrainingAuditPanel";
+import { Track2TrainingHistory } from "../components/Track2TrainingAuditPanel";
+import { Track2TrainingCostToday } from "../components/Track2TrainingCostToday";
 import {
   addTrack2Queue,
   ApiError,
@@ -284,6 +285,9 @@ export function Track2ModelsPage() {
   const [data, setData] = useState<Track2ModelsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Bumped whenever a run is submitted, so the history below the queue
+  // picks up the new row without the operator having to reload the page.
+  const [historyKey, setHistoryKey] = useState(0);
   const [selection, setSelectionState] = useState<TrainingSelection>({
     size: "s",
     epochs: 50,
@@ -348,6 +352,7 @@ export function Track2ModelsPage() {
 
   function handleSubmitted(msg: string) {
     setMessage(msg);
+    setHistoryKey((k) => k + 1);
     load();
   }
 
@@ -383,6 +388,7 @@ export function Track2ModelsPage() {
 
       {data && (
         <div className="flex flex-col gap-5">
+          <Track2TrainingCostToday />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Card title="SageMaker GPU resource">
               {data.gpu_jobs.length === 0 ? (
@@ -520,9 +526,8 @@ export function Track2ModelsPage() {
                 ))}
               </div>
             )}
+            <Track2TrainingHistory reloadKey={historyKey} />
           </Card>
-
-          <Track2TrainingAuditPanel />
 
         </div>
       )}

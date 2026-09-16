@@ -45,3 +45,9 @@ variable "training_audit_table" {
   type        = string
   default     = "track2-yolo-training-audit"
 }
+
+variable "training_pipeline_name" {
+  description = "SageMaker pipeline the Training page starts and stops runs on."
+  type        = string
+  default     = "track2-yolo-training-pipeline"
+}

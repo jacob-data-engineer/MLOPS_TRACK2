@@ -2073,6 +2073,42 @@ def scan_training_audits(limit: int = 100) -> list:
     return items[:limit]
 
 
+def delete_training_audit(audit_id: str) -> dict:
+    """Removes one run from the history, and with it the model version that
+    run produced.
+
+    Deleting the record but leaving the model would make the history lie:
+    the registry would still hold a version with nothing saying where it
+    came from. The model package is deleted first -- if that fails the row
+    stays, so the pair never drifts apart silently.
+    """
+    try:
+        audit = training_audit_table().get_item(Key={"id": audit_id}).get("Item")
+    except Exception as exc:
+        raise ValueError(f"Could not read run {audit_id}: {exc}")
+    if not audit:
+        raise KeyError(audit_id)
+
+    model = audit.get("model") or {}
+    model_package_arn = model.get("model_package_arn")
+    deleted_model = None
+    if model_package_arn:
+        try:
+            sm.delete_model_package(ModelPackageName=model_package_arn)
+            deleted_model = f"{model.get('group')} v{model.get('version')}"
+        except sm.exceptions.ResourceNotFound:
+            # Already gone -- deleting the row is still the right outcome.
+            deleted_model = None
+        except Exception as exc:
+            raise ValueError(
+                f"Could not delete model package {model_package_arn}: {exc}. "
+                "The run was kept, so the history still matches the registry."
+            )
+
+    training_audit_table().delete_item(Key={"id": audit_id})
+    return {"deleted": True, "deleted_model": deleted_model}
+
+
 def _decimalize(value):
     """DynamoDB rejects float. Metrics arrive as floats from evaluation.json,
     so they are stored as Decimal via str() -- Decimal(float) would preserve

@@ -31,6 +31,7 @@ data "aws_iam_policy_document" "training_audit" {
       "dynamodb:UpdateItem",
       "dynamodb:Scan",
       "dynamodb:Query",
+      "dynamodb:DeleteItem",
     ]
     resources = [aws_dynamodb_table.training_audit.arn]
   }
@@ -44,4 +45,51 @@ resource "aws_iam_policy" "training_audit" {
 resource "aws_iam_role_policy_attachment" "training_audit" {
   role       = data.aws_iam_role.review_host.name
   policy_arn = aws_iam_policy.training_audit.arn
+}
+
+# Two grants the host role never had, both found by the UI failing:
+#
+#   Stop Training returned AccessDenied on StopPipelineExecution -- the
+#   button existed and called the API, but nothing allowed the action, so
+#   a run could be started from here and not stopped from here.
+#
+#   Deleting a run from the training history deletes the model package it
+#   produced, which is the point of the delete -- a history entry whose
+#   model outlived it would be a record of something that no longer
+#   matches what is in the registry.
+data "aws_iam_policy_document" "training_control" {
+  statement {
+    sid    = "StopOwnPipelineExecution"
+    effect = "Allow"
+    actions = [
+      "sagemaker:StopPipelineExecution",
+      "sagemaker:DescribePipelineExecution",
+    ]
+    resources = [
+      "arn:aws:sagemaker:${var.region}:${local.account_id}:pipeline/${var.training_pipeline_name}",
+      "arn:aws:sagemaker:${var.region}:${local.account_id}:pipeline/${var.training_pipeline_name}/execution/*",
+    ]
+  }
+  statement {
+    sid    = "DeleteRegisteredModelPackage"
+    effect = "Allow"
+    actions = [
+      "sagemaker:DeleteModelPackage",
+      "sagemaker:DescribeModelPackage",
+    ]
+    # Scoped to this project's own YOLO detector groups -- a wildcard over
+    # every model package in the account is far more than a delete button
+    # on this page should be able to reach.
+    resources = ["arn:aws:sagemaker:${var.region}:${local.account_id}:model-package/yolo*-detector/*"]
+  }
+}
+
+resource "aws_iam_policy" "training_control" {
+  name   = "${var.app_name}-training-control"
+  policy = data.aws_iam_policy_document.training_control.json
+}
+
+resource "aws_iam_role_policy_attachment" "training_control" {
+  role       = data.aws_iam_role.review_host.name
+  policy_arn = aws_iam_policy.training_control.arn
 }

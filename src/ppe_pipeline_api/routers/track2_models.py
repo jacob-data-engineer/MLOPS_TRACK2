@@ -77,6 +77,18 @@ def training_audit(limit: int = 50, session=Depends(require_session)) -> dict:
     return {"audits": t2.scan_training_audits(limit=min(max(limit, 1), 200))}
 
 
+@router.post("/audit/{audit_id}/delete")
+def delete_training_audit(audit_id: str, session=Depends(require_session)) -> dict:
+    """Removes a run from the history AND deletes the model version it
+    produced -- the two are one record, so they go together."""
+    try:
+        return t2.delete_training_audit(audit_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found (already deleted?).")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 class TrainingParams(BaseModel):
     generation: str
     size: str
