@@ -132,23 +132,6 @@ fi
 echo "Build succeeded."
 
 # --- 3. run it on the instance -----------------------------------------
-# Reuse whatever password the running container already has, so a deploy
-# doesn't silently change how people log in.
-APP_PASSWORD="${PPE_APP_PASSWORD:-}"
-if [ -z "$APP_PASSWORD" ]; then
-  CMD=$(aws ssm send-command --region "$REGION" --instance-ids "$INSTANCE_ID" \
-    --document-name AWS-RunShellScript \
-    --parameters 'commands=["for c in track2-app ppe-pipeline-track2-test; do docker inspect -f \"{{range .Config.Env}}{{println .}}{{end}}\" $c 2>/dev/null | grep ^PPE_APP_PASSWORD= | cut -d= -f2- && break; done"]' \
-    --query "Command.CommandId" --output text)
-  while [ "$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$INSTANCE_ID" --region "$REGION" --query Status --output text 2>/dev/null)" = "InProgress" ]; do sleep 3; done
-  APP_PASSWORD=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$INSTANCE_ID" \
-    --region "$REGION" --query StandardOutputContent --output text | tr -d '\r\n ')
-fi
-if [ -z "$APP_PASSWORD" ]; then
-  echo "Could not determine PPE_APP_PASSWORD -- export it and re-run." >&2
-  exit 1
-fi
-
 RUN_SCRIPT="$(mktemp)"
 trap 'rm -f "$RUN_SCRIPT"' EXIT
 cat > "$RUN_SCRIPT" <<EOF
@@ -160,9 +143,33 @@ set -euo pipefail
 docker image prune -a -f
 aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $REGISTRY
 docker pull $IMAGE
+
+# Reuse the password the container already running here has, so a deploy
+# doesn't silently change how people log in. Read on the instance, not by
+# the deploy script: the secret then never passes through the operator's
+# terminal, the SSM payload, or this script's copy in S3. Runs before the
+# rm below, while the old container is still there to read it from.
+APP_PASSWORD="${PPE_APP_PASSWORD:-}"
+if [ -z "\$APP_PASSWORD" ]; then
+  # Both "|| true"s matter under set -euo pipefail: a container in the
+  # list that doesn't exist makes docker inspect fail, and pipefail would
+  # otherwise abort the whole deploy on the first name that misses rather
+  # than moving on to the next.
+  for c in $CONTAINER track2-app ppe-pipeline-track2-test; do
+    APP_PASSWORD=\$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "\$c" 2>/dev/null \\
+      | sed -n 's/^PPE_APP_PASSWORD=//p' | head -1 || true)
+    if [ -n "\$APP_PASSWORD" ]; then break; fi
+  done
+fi
+if [ -z "\$APP_PASSWORD" ]; then
+  echo "No container on this host carries PPE_APP_PASSWORD and none was" >&2
+  echo "exported -- refusing to start the app with no password." >&2
+  exit 1
+fi
+
 docker rm -f $CONTAINER 2>/dev/null || true
 docker run -d --name $CONTAINER --restart unless-stopped -p $PORT:8501 \\
-  -e PPE_APP_PASSWORD='$APP_PASSWORD' \\
+  -e PPE_APP_PASSWORD="\$APP_PASSWORD" \\
   -e AWS_REGION='$REGION' \\
   -e REVIEW_QUEUE_TABLE='track2-yolo-review-queue' \\
   -e PIPELINE_BUCKET='$BUCKET' \\
