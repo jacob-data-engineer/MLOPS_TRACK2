@@ -4,7 +4,7 @@ model registry, training runs, scheduling, deploy, inference, lineage,
 notifications) that used to live in the standalone stdlib app at
 `terraform/review-app/review_app.py`. That app had no authentication and
 ran on its own public EC2 instance; this migration ports its business
-logic into JP_UI's FastAPI app (gated by the existing session auth) and
+logic into this FastAPI app (gated by the existing session auth) and
 its React shell (matching the rest of the UI's look), dropping only the
 old app's hand-rolled HTML rendering and manual query-string routing.
 

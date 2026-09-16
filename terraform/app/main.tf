@@ -1,6 +1,6 @@
 # Build infrastructure for the Track2 app. Self-contained: its own state,
 # its own IAM role, its own ECR repo. Nothing here is defined by, or
-# depends on the state of, the jurong-port stack.
+# depends on the state of, the platform stack.
 #
 # What it does NOT own is the things that already exist and are shared --
 # the pipeline S3 bucket and the review host. Those are read through data

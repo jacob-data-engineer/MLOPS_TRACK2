@@ -11,7 +11,7 @@ variable "app_name" {
 }
 
 variable "pipeline_bucket" {
-  description = "Existing S3 bucket used to hand build source to CodeBuild. Owned by the jurong-port stack; read-only here."
+  description = "Existing S3 bucket used to hand build source to CodeBuild. Owned by the platform stack; read-only here."
   type        = string
   default     = "track2-s3"
 }
