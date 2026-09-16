@@ -70,13 +70,40 @@ fi
 
 # --- 1. ship the source to S3 ------------------------------------------
 # Excludes are not just size: .venv and node_modules are host-specific
-# build output that would shadow what the image builds for itself, and
-# .git would put the whole history in a build context for no reason.
+# build output that would shadow what the image builds for itself, .git
+# would put the whole history in a build context for no reason, and
+# terraform/.terraform is a ~700MB provider cache with nothing to do with
+# the image -- it alone is a hundred times the size of the real source.
 ZIP="$(mktemp -d)/track2-app.zip"
 echo "Packaging source ..."
-( cd "$SCRIPT_DIR" && zip -q -r "$ZIP" . \
-    -x '*.venv/*' 'node_modules/*' 'web/node_modules/*' 'web/dist/*' \
-       '*__pycache__/*' '*.pytest_cache/*' 'legacy-review-app/*' '*.pyc' )
+if command -v zip >/dev/null 2>&1; then
+  ( cd "$SCRIPT_DIR" && zip -q -r "$ZIP" . \
+      -x '*.venv/*' 'node_modules/*' 'web/node_modules/*' 'web/dist/*' \
+         '*__pycache__/*' '*.pytest_cache/*' 'legacy-review-app/*' '*.pyc' \
+         '.git/*' 'terraform/.terraform/*' 'terraform/*.tfstate*' )
+else
+  # Git Bash on Windows ships no `zip`, so this would otherwise only run
+  # from WSL/mac. The system bsdtar writes real zip archives. It is a
+  # Windows binary, so the archive path has to be Windows-shaped.
+  #
+  # The members are globbed (with dotglob, so .dockerignore is not missed)
+  # rather than given as ".": CodeBuild looks for the Dockerfile at the
+  # archive root, and this build of bsdtar has no -s to strip the "./"
+  # that archiving "." would prefix every entry with.
+  BSDTAR="${BSDTAR:-/c/Windows/System32/tar.exe}"
+  if [ ! -x "$BSDTAR" ]; then
+    echo "Need either 'zip' or bsdtar (tar.exe) to package the source." >&2
+    exit 1
+  fi
+  ( cd "$SCRIPT_DIR" && shopt -s dotglob && "$BSDTAR" -c -a -f "$(cygpath -w "$ZIP")" \
+      --exclude '*/.venv/*' --exclude '*/node_modules/*' \
+      --exclude 'web/dist/*' --exclude '*/__pycache__/*' \
+      --exclude '*/.pytest_cache/*' --exclude 'legacy-review-app/*' \
+      --exclude '*.pyc' --exclude '.git/*' \
+      --exclude '*/.terraform/*' --exclude '*.tfstate' \
+      --exclude '*.tfstate.backup' \
+      -- * )
+fi
 echo "  $(du -h "$ZIP" | cut -f1)"
 aws s3 cp "$ZIP" "s3://$BUCKET/$SOURCE_PREFIX/app.zip" --region "$REGION"
 rm -rf "$(dirname "$ZIP")"
