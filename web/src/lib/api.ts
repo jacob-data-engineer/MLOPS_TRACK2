@@ -3460,6 +3460,16 @@ export function startTrack2Training(params: Track2TrainingParams): Promise<{ mes
   return apiPost("/track2/models/train/dataset", params);
 }
 
+/** Trains on the dataset's own classes, through a separate pipeline and
+ * registry group -- a model whose classes are not the production
+ * person/helmet pair must not reach the production lineage. Requires
+ * `base_model_folder`: the trainer fine-tunes from a checkpoint. */
+export function startTrack2CustomTraining(
+  params: Track2TrainingParams,
+): Promise<{ message: string; run_id: string; execution_arn: string; audit_id: string }> {
+  return apiPost("/track2/models/train/custom", params);
+}
+
 export function stopTrack2Training(): Promise<{ message: string }> {
   return apiPost("/track2/models/train/stop");
 }

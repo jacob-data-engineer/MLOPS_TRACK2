@@ -51,3 +51,9 @@ variable "training_pipeline_name" {
   type        = string
   default     = "track2-yolo-training-pipeline"
 }
+
+variable "custom_pipeline_name" {
+  description = "Separate pipeline for models trained on a dataset's own classes. Kept apart from the production one so a model whose classes are not person/helmet cannot enter the replay lineage."
+  type        = string
+  default     = "track2-yolo-custom-training-pipeline"
+}

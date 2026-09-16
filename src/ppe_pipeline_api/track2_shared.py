@@ -1956,6 +1956,77 @@ def start_training_run(generation, size, epochs, dataset_folder, base_model_fold
     return build_id
 
 
+CUSTOM_PIPELINE_NAME = os.environ.get("CUSTOM_TRAINING_PIPELINE_NAME", "track2-yolo-custom-training-pipeline")
+CUSTOM_REGISTRY_GROUP = "track2-yolo-custom-detector"
+
+
+def start_custom_training_run(
+    *, dataset_folder, eval_dataset_folder, base_model_uri, epochs, img_size, batch, seed, notes,
+) -> dict:
+    """Trains on a dataset's own classes, via the separate custom pipeline.
+
+    Started directly rather than through CodeBuild and the replay
+    coordinator: none of that path applies here. There is no snapshot to
+    pin, no six-to-two class remap to perform, and no production baseline
+    to supersede -- the dataset is simply the one that was chosen. A
+    useful side effect is that the execution ARN is known at submit time,
+    so the audit row links to it exactly instead of matching on time.
+
+    Deliberately a different pipeline and registry group from production:
+    a model whose classes are not person/helmet must not be able to reach
+    the replay lineage, whose consumers read index 0 as person.
+    """
+    epochs_int, img_size_int, batch_int, seed_int = validate_training_params(
+        epochs, dataset_folder, img_size, batch, seed, eval_dataset_folder,
+    )
+    if not base_model_uri:
+        raise ValueError(
+            "A base model is required -- the trainer fine-tunes from a checkpoint rather than "
+            "training from scratch."
+        )
+    run_id = "custom-" + uuid.uuid4().hex[:24]
+    run_root = f"s3://{BUCKET}/custom/runs/{run_id}"
+    train_uri = f"s3://{BUCKET}/{dataset_folder.strip('/')}/"
+    eval_uri = f"s3://{BUCKET}/{eval_dataset_folder.strip('/')}/" if eval_dataset_folder else train_uri
+    parameters = {
+        "TrainingDatasetUri": train_uri,
+        "EvaluationDatasetUri": eval_uri,
+        "EvaluationOutputUri": f"{run_root}/evaluation",
+        "RunMetadataUri": f"{run_root}/request.json",
+        "RunId": run_id,
+        "DatasetVersion": run_id,
+        "BaseModelUri": base_model_uri,
+        "Epochs": str(epochs_int),
+        "ImgSize": str(img_size_int),
+        "Batch": str(batch_int),
+        "Seed": str(seed_int),
+    }
+    response = sm.start_pipeline_execution(
+        PipelineName=CUSTOM_PIPELINE_NAME,
+        ClientRequestToken=run_id,
+        PipelineExecutionDisplayName=run_id,
+        PipelineParameters=[{"Name": k, "Value": v} for k, v in parameters.items()],
+    )
+    execution_arn = response["PipelineExecutionArn"]
+    audit = write_training_audit(
+        build_id="", generation="custom", size="any", epochs=epochs_int,
+        img_size=img_size_int, batch=batch_int, seed=seed_int,
+        dataset_folder=dataset_folder, eval_dataset_folder=eval_dataset_folder,
+        base_model_folder="", notes=notes, source="custom",
+    )
+    # Linked immediately, which the replay path cannot do.
+    try:
+        training_audit_table().update_item(
+            Key={"id": audit["id"]},
+            UpdateExpression="SET #execution_arn = :arn, #status = :status",
+            ExpressionAttributeNames={"#execution_arn": "execution_arn", "#status": "status"},
+            ExpressionAttributeValues={":arn": execution_arn, ":status": "Executing"},
+        )
+    except Exception as exc:
+        print(f"Could not attach execution {execution_arn} to audit {audit['id']}: {exc}")
+    return {"run_id": run_id, "execution_arn": execution_arn, "audit_id": audit["id"]}
+
+
 def _get_build_status(build_id: str) -> str | None:
     try:
         builds = codebuild.batch_get_builds(ids=[build_id])["builds"]

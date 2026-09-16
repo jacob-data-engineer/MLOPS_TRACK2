@@ -13,6 +13,7 @@ import {
   getTrack2Models,
   removeTrack2Queue,
   startTrack2Queue,
+  startTrack2CustomTraining,
   startTrack2Training,
   stopTrack2Queue,
   stopTrack2Training,
@@ -37,6 +38,9 @@ interface TrainingSelection {
   evalFolder: string;
   baseModelFolder: string;
   noBaseModel: boolean;
+  /** Train on the dataset's own classes through the separate custom
+   * pipeline, instead of the production person/helmet one. */
+  customClasses: boolean;
   notes: string;
 }
 
@@ -52,7 +56,7 @@ function TrainingForm({
   onSubmitted: (message: string) => void;
 }) {
   const sizes = data.generation_sizes[GENERATION] ?? [];
-  const { size, epochs, imgSize, batch, seed, datasetFolder, evalFolder, baseModelFolder, noBaseModel, notes } = selection;
+  const { size, epochs, imgSize, batch, seed, datasetFolder, evalFolder, baseModelFolder, noBaseModel, customClasses, notes } = selection;
   const [datasetPrefix, setDatasetPrefix] = useState(data.dataset_browser.prefix);
   const [weightsPrefix, setWeightsPrefix] = useState("");
   const [evalPrefix, setEvalPrefix] = useState(data.eval_browser.prefix);
@@ -105,7 +109,9 @@ function TrainingForm({
     setBusy(true);
     setError(null);
     try {
-      const res = await startTrack2Training(params());
+      const res = customClasses
+        ? await startTrack2CustomTraining(params())
+        : await startTrack2Training(params());
       onSubmitted(res.message);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Training trigger failed.");
@@ -258,6 +264,25 @@ function TrainingForm({
         </div>
       </div>
 
+      {/* The taxonomy decides which pipeline runs, so it belongs next to
+          the buttons rather than buried among the hyperparameters. */}
+      <label className="mt-4 flex items-start gap-2 text-xs text-ink-secondary">
+        <input
+          type="checkbox"
+          className="mt-0.5 shrink-0"
+          checked={customClasses}
+          onChange={(e) => setSelection({ customClasses: e.target.checked })}
+        />
+        <span>
+          <span className="font-medium text-ink">Train on this dataset's own classes</span>
+          <span className="mt-0.5 block">
+            {customClasses
+              ? "Uses the separate custom pipeline: classes come from the dataset's data.yaml, and the model registers to track2-yolo-custom-detector. Needs a base model .pt selected above. Not deployable through the inference tab, which expects the production labels."
+              : "Off: the production pipeline, which trains person/helmet only and discards every other class in the data."}
+          </span>
+        </span>
+      </label>
+
       <label className="mt-4 block">
         <span className="mb-1 block text-xs text-ink-muted">Notes <span className="text-ink-muted/70">(optional -- notes about this run)</span></span>
         <textarea
@@ -308,6 +333,7 @@ export function Track2ModelsPage() {
     evalFolder: "",
     baseModelFolder: "",
     noBaseModel: true,
+    customClasses: false,
     notes: "",
   });
 

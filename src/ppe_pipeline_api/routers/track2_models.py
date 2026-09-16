@@ -120,6 +120,42 @@ def start_training(payload: TrainingParams, session=Depends(require_session)) ->
     return {"message": f"Training started (YOLO{payload.generation}-{payload.size}, {payload.epochs} epochs, {payload.dataset_folder}): {build_id}", "build_id": build_id}
 
 
+@router.post("/train/custom")
+def start_custom_training(payload: TrainingParams, session=Depends(require_session)) -> dict:
+    """Trains on the chosen dataset's own classes, through the separate
+    custom pipeline and registry group -- see
+    model_training/custom_training/README.md for why it is separate rather
+    than a mode of the production one."""
+    if not payload.base_model_folder:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Pick a base model .pt for a custom-class run. The trainer fine-tunes from a "
+                "checkpoint, and the registry's latest Approved package belongs to the "
+                "person/helmet taxonomy, so it is not assumed here."
+            ),
+        )
+    try:
+        base_model_uri = t2.resolve_base_model_s3_uri(payload.base_model_folder)
+        result = t2.start_custom_training_run(
+            dataset_folder=payload.dataset_folder,
+            eval_dataset_folder=payload.eval_dataset_folder,
+            base_model_uri=base_model_uri,
+            epochs=payload.epochs, img_size=payload.img_size,
+            batch=payload.batch, seed=payload.seed,
+            notes=payload.notes[:2048],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Custom training failed to start: {exc}")
+    return {
+        "message": (
+            f"Custom training started ({result['run_id']}) -- classes come from the dataset, "
+            f"and the model registers to {t2.CUSTOM_REGISTRY_GROUP}."
+        ),
+        **result,
+    }
+
+
 @router.post("/train/stop")
 def stop_training(session=Depends(require_session)) -> dict:
     """Stops the currently Executing pipeline execution, if any. A stopped

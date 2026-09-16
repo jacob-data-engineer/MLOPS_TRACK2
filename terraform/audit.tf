@@ -59,15 +59,22 @@ resource "aws_iam_role_policy_attachment" "training_audit" {
 #   matches what is in the registry.
 data "aws_iam_policy_document" "training_control" {
   statement {
-    sid    = "StopOwnPipelineExecution"
+    sid    = "ControlOwnPipelineExecutions"
     effect = "Allow"
     actions = [
       "sagemaker:StopPipelineExecution",
       "sagemaker:DescribePipelineExecution",
+      "sagemaker:ListPipelineExecutionSteps",
+      # Only the custom pipeline is started from the app. Production runs
+      # go through the replay coordinator, which owns the snapshot
+      # bookkeeping -- starting that one from here would bypass it.
+      "sagemaker:StartPipelineExecution",
     ]
     resources = [
       "arn:aws:sagemaker:${var.region}:${local.account_id}:pipeline/${var.training_pipeline_name}",
       "arn:aws:sagemaker:${var.region}:${local.account_id}:pipeline/${var.training_pipeline_name}/execution/*",
+      "arn:aws:sagemaker:${var.region}:${local.account_id}:pipeline/${var.custom_pipeline_name}",
+      "arn:aws:sagemaker:${var.region}:${local.account_id}:pipeline/${var.custom_pipeline_name}/execution/*",
     ]
   }
   statement {
@@ -80,7 +87,10 @@ data "aws_iam_policy_document" "training_control" {
     # Scoped to this project's own YOLO detector groups -- a wildcard over
     # every model package in the account is far more than a delete button
     # on this page should be able to reach.
-    resources = ["arn:aws:sagemaker:${var.region}:${local.account_id}:model-package/yolo*-detector/*"]
+    resources = [
+      "arn:aws:sagemaker:${var.region}:${local.account_id}:model-package/yolo*-detector/*",
+      "arn:aws:sagemaker:${var.region}:${local.account_id}:model-package/track2-yolo-custom-detector/*",
+    ]
   }
 }
 
