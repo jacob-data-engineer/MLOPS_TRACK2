@@ -9,11 +9,22 @@ folder. It used to sit inside the JP_UI repo and no longer refers to it.
 ```
 src/ppe_pipeline_api/   FastAPI app -- routers/ per page, track2_shared.py for the logic
 web/                    React + Vite SPA, built into web/dist and served by the same process
-terraform/              this app's own stack: ECR repo, CodeBuild project, audit table, IAM
+terraform/app/          this app's stack: ECR repo, CodeBuild project, audit table, IAM
+terraform/platform/     the shared estate: EC2, roles, bucket, lambdas, schedules, SNS
 model_training/         the SageMaker training pipelines, evaluators and dataset preparers
+platform/               the estate's own scripts, docs and architecture diagrams
 deploy.sh               laptop -> S3 -> CodeBuild -> ECR -> SSM -> EC2
 tests/                  pytest
 ```
+
+**Two Terraform stacks, separate on purpose.** `terraform/app` owns what
+belongs to this app and reads the rest through data sources, so applying
+it can never disturb the instance or the roles. `terraform/platform` owns
+those. `deploy.sh` reads `terraform/app` and must never read the other.
+
+`terraform/platform` refers to its build sources as
+`${path.module}/../../model_training/...`, which resolves to this repo's
+own `model_training/`. That is why the stack sits two levels down.
 
 ## Deploying
 
@@ -56,21 +67,23 @@ parameter defaults to the value that used to be hardcoded, so a run that
 specifies none of them behaves exactly as it always did -- which is what
 keeps the weekly schedule unaffected.
 
-## What is NOT in this folder
+## Applying the platform stack
 
-The shared platform still lives in the JP_UI repo under
-`jurong-port/terraform/infra`: the EC2 instance this app runs on, the
-`track2-yolo-review-host` IAM role, the S3 bucket, the retraining
-coordinator Lambda and its schedule, the SNS topics.
+`terraform/platform` carries pre-existing drift: a plan there reports
+around 15 in-place changes that nobody made today. Most are Lambda code
+being re-uploaded from local zips, because that state was rebuilt by
+import and never recorded a source hash.
 
-This app's stack reads those through data sources rather than owning them,
-so `terraform apply` here can never disturb them. Moving that stack as
-well is a separate operation: it manages resources well beyond this app,
-and its state would have to move with it.
+**Prefer a targeted apply there.** A blanket one pushes every local zip
+over whatever is deployed:
 
-Two things there still need an apply from that repo when changed -- the
-retraining coordinator (mirrored at `model_training/replay_lambda/`) and
-the training pipeline's CodeBuild source zip.
+```powershell
+terraform apply -target=aws_lambda_function.weekly_retrain
+```
+
+The one case where that is exactly what you want is after editing
+`model_training/replay_lambda/` -- its `archive_file` packages that
+directory, and applying is how the coordinator gets deployed.
 
 ## Conventions worth knowing
 
