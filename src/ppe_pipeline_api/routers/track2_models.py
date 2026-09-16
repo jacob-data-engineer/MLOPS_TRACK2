@@ -33,9 +33,14 @@ def get_models(
     # which of the two cases it actually was.
     browse_prefix: str | None = None,
     weights_browse_prefix: str = "",
+    # Same None-vs-"" distinction as browse_prefix above: None means "give
+    # me the landing default", "" means the operator navigated to the
+    # bucket root and must stay there.
+    eval_browse_prefix: str | None = None,
     session=Depends(require_session),
 ) -> dict:
     dataset_prefix = t2.DATASETS_S3_PREFIX if browse_prefix is None else browse_prefix
+    eval_prefix = t2.DATASETS_S3_PREFIX if eval_browse_prefix is None else eval_browse_prefix
     registries = t2.all_model_registries()
     training_progress = t2.get_training_progress()
     pending_message = t2.pending_submission_overlay(training_progress)
@@ -59,7 +64,19 @@ def get_models(
             "prefix": weights_browse_prefix,
             "folders": t2.list_s3_folders(weights_browse_prefix),
         },
+        "eval_browser": {
+            "prefix": eval_prefix,
+            "folders": t2.list_s3_folders(eval_prefix),
+        },
     }
+
+
+@router.get("/audit")
+def training_audit(limit: int = 50, session=Depends(require_session)) -> dict:
+    """Full record of every submitted run: the exact folders and file names
+    on both sides, every parameter, the notes, which model version came out
+    of it, and when it started and ended."""
+    return {"audits": t2.scan_training_audits(limit=min(max(limit, 1), 200))}
 
 
 class TrainingParams(BaseModel):
@@ -70,6 +87,9 @@ class TrainingParams(BaseModel):
     batch: int = 16
     seed: int = 42
     dataset_folder: str
+    # Optional: unset, the pipeline evaluates on the training dataset, which
+    # is what it has always done.
+    eval_dataset_folder: str = ""
     base_model_folder: str = ""
     notes: str = ""
 
@@ -83,6 +103,7 @@ def start_training(payload: TrainingParams, session=Depends(require_session)) ->
         build_id = t2.start_training_run(
             payload.generation, payload.size, payload.epochs, payload.dataset_folder,
             payload.base_model_folder, payload.notes[:2048], payload.img_size, payload.batch, payload.seed,
+            payload.eval_dataset_folder, source="manual",
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Training trigger failed: {exc}")
@@ -119,6 +140,7 @@ def add_to_queue(payload: TrainingParams, session=Depends(require_session)) -> d
             "batch": batch,
             "seed": seed,
             "dataset_folder": payload.dataset_folder,
+            "eval_dataset_folder": payload.eval_dataset_folder,
             "base_model_folder": payload.base_model_folder,
             "notes": payload.notes[:2048],
             "added_at": datetime.now(timezone.utc).isoformat(),

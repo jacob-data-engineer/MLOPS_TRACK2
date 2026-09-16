@@ -3329,6 +3329,7 @@ export interface Track2QueueEntry {
   batch: number;
   seed: number;
   dataset_folder: string;
+  eval_dataset_folder?: string;
   base_model_folder: string;
   notes: string;
   added_at: string;
@@ -3381,6 +3382,46 @@ export interface Track2ModelsResponse {
   automated_queues: Track2AutomatedQueue[];
   dataset_browser: { prefix: string; folders: string[] };
   weights_browser: { prefix: string; folders: string[] };
+  eval_browser: { prefix: string; folders: string[] };
+}
+
+/** One audit row per submitted run. Written at submit time with what the
+ * operator chose, then completed by the server once the run finishes --
+ * so `ended_at`, `model` and `metrics` are null until then. */
+export interface Track2TrainingAuditDataset {
+  folder: string;
+  s3_uri: string;
+  file_count: number;
+  file_names: string[];
+  /** file_names is a capped sample, not the whole set -- show file_count. */
+  truncated: boolean;
+}
+
+export interface Track2TrainingAudit {
+  id: string;
+  build_id: string;
+  source: string;
+  status: string;
+  submitted_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  generation: string;
+  size: string;
+  parameters: { epochs: number; img_size: number; batch: number; seed: number };
+  notes: string;
+  train_dataset: Track2TrainingAuditDataset;
+  eval_dataset: Track2TrainingAuditDataset;
+  /** True when no separate evaluation set was chosen, so the run was
+   * evaluated on its own training data. */
+  eval_is_train_dataset: boolean;
+  base_model: { folder: string; source: string };
+  model: { group: string; version: string; model_package_arn: string; approval_status: string } | null;
+  metrics: Record<string, number | null> | null;
+  execution_arn: string;
+}
+
+export function getTrack2TrainingAudit(limit = 50): Promise<{ audits: Track2TrainingAudit[] }> {
+  return apiGet(`/track2/models/audit?limit=${limit}`);
 }
 
 // `undefined` means "not specified, use the server's nice landing default";
@@ -3388,10 +3429,15 @@ export interface Track2ModelsResponse {
 // thing, and conflating them (e.g. `if (browsePrefix) q.set(...)`, which
 // treats an empty string as absent) is exactly what made navigating to the
 // bucket root silently snap back to the default subfolder instead.
-export function getTrack2Models(browsePrefix?: string, weightsBrowsePrefix?: string): Promise<Track2ModelsResponse> {
+export function getTrack2Models(
+  browsePrefix?: string,
+  weightsBrowsePrefix?: string,
+  evalBrowsePrefix?: string,
+): Promise<Track2ModelsResponse> {
   const q = new URLSearchParams();
   if (browsePrefix !== undefined) q.set("browse_prefix", browsePrefix);
   if (weightsBrowsePrefix !== undefined) q.set("weights_browse_prefix", weightsBrowsePrefix);
+  if (evalBrowsePrefix !== undefined) q.set("eval_browse_prefix", evalBrowsePrefix);
   return apiGet<Track2ModelsResponse>(`/track2/models?${q}`);
 }
 
@@ -3403,6 +3449,8 @@ export interface Track2TrainingParams {
   batch?: number;
   seed?: number;
   dataset_folder: string;
+  /** Omitted or "", the run is evaluated on its training dataset. */
+  eval_dataset_folder?: string;
   base_model_folder?: string;
   notes?: string;
 }

@@ -1740,7 +1740,7 @@ def validate_training_params(epochs, dataset_folder, img_size=640, batch=16, see
     return epochs_int, img_size_int, batch_int, seed_int
 
 
-def start_training_run(generation, size, epochs, dataset_folder, base_model_folder, notes, img_size=640, batch=16, seed=42) -> str:
+def start_training_run(generation, size, epochs, dataset_folder, base_model_folder, notes, img_size=640, batch=16, seed=42, eval_dataset_folder="", source="manual") -> str:
     """Validates and submits one training run via CodeBuild -- the single
     place that builds environmentVariablesOverride and calls
     codebuild.start_build, so the immediate "Start Training" action and
@@ -1758,6 +1758,14 @@ def start_training_run(generation, size, epochs, dataset_folder, base_model_fold
         {"name": "TRAIN_SEED", "value": str(seed_int), "type": "PLAINTEXT"},
         {"name": "TRAIN_DATA_S3_URI", "value": f"s3://{BUCKET}/{dataset_folder}/", "type": "PLAINTEXT"},
     ]
+    # Only sent when a separate evaluation set was chosen. Unset, the
+    # pipeline evaluates on the training data, which is its existing
+    # behaviour -- sending the training URI here would look like a
+    # deliberate choice in the build's environment when it isn't one.
+    if eval_dataset_folder:
+        env_overrides.append(
+            {"name": "EVAL_DATA_S3_URI", "value": f"s3://{BUCKET}/{eval_dataset_folder}/", "type": "PLAINTEXT"}
+        )
     if base_model_folder:
         base_model_s3_uri = resolve_base_model_s3_uri(base_model_folder)
         env_overrides.append({"name": "BASE_MODEL_S3_URI", "value": base_model_s3_uri, "type": "PLAINTEXT"})
@@ -1771,6 +1779,15 @@ def start_training_run(generation, size, epochs, dataset_folder, base_model_fold
     global _pending_submission
     with _pending_submission_lock:
         _pending_submission = {"build_id": build_id, "triggered_at": datetime.now(timezone.utc)}
+    # After the build is actually submitted, so a run that never started
+    # leaves no audit row claiming it did. Listing the dataset can take a
+    # moment on a large folder; the build is already on its way by then.
+    write_training_audit(
+        build_id=build_id, generation=generation, size=size, epochs=epochs_int,
+        img_size=img_size_int, batch=batch_int, seed=seed_int,
+        dataset_folder=dataset_folder, eval_dataset_folder=eval_dataset_folder,
+        base_model_folder=base_model_folder, notes=notes, source=source,
+    )
     return build_id
 
 
@@ -1884,6 +1901,7 @@ def try_advance_queue() -> None:
                 entry["generation"], entry["size"], entry["epochs"],
                 entry["dataset_folder"], entry["base_model_folder"], entry["notes"],
                 entry["img_size"], entry["batch"], entry["seed"],
+                entry.get("eval_dataset_folder", ""), source="queue",
             )
             entry["build_id"] = build_id
             entry["started_at"] = datetime.now(timezone.utc).isoformat()
@@ -1907,6 +1925,302 @@ async def queue_poll_loop() -> None:
             try_advance_queue()
         except Exception as exc:
             print(f"Queue poll failed: {exc}")
+        # Same tick rather than its own loop: both want to know when a run
+        # changed state, and one poll is one set of SageMaker calls.
+        try:
+            reconcile_training_audits()
+        except Exception as exc:
+            print(f"Training audit reconcile failed: {exc}")
+
+
+# --- training audit ------------------------------------------------------
+#
+# The pipeline already writes a lineage row of its own (LINEAGE_TABLE_NAME,
+# record_type "training_run"), but it is written from inside the pipeline
+# and only carries what the pipeline itself knows: dataset URI, epochs,
+# img_size, base model. It has no evaluation dataset, no file names, no
+# batch/seed, no end time, and no metrics -- the metrics live on the
+# registered model package, reachable only backwards via its lineage_id.
+#
+# This table is the app's own record, written at submit time (when the
+# operator's exact choices are still known) and completed afterwards by
+# reconcile_training_audits when the run finishes. Separate table rather
+# than extra fields on the pipeline's row: that row is owned and shaped by
+# a different deploy unit, and writing into it from here would race with
+# it and blur who owns what.
+
+TRAINING_AUDIT_TABLE_NAME = os.environ.get("TRAINING_AUDIT_TABLE", "track2-yolo-training-audit")
+
+# A YOLO dataset folder can hold tens of thousands of images and a single
+# DynamoDB item is capped at 400KB, so the audit keeps a bounded sample of
+# names plus the true total. Recording "1,000 of 24,317" is honest; a
+# silently truncated list that looks complete is not, so `truncated` is
+# stored alongside and the UI says so.
+AUDIT_MAX_FILE_NAMES = 1000
+# Bounds the submit-time listing itself. 1000 keys per page, so this is up
+# to 200k objects -- past that the count is reported as a floor.
+AUDIT_MAX_LIST_PAGES = 200
+
+
+def training_audit_table():
+    return _dynamodb().Table(TRAINING_AUDIT_TABLE_NAME)
+
+
+def list_dataset_image_names(folder: str) -> tuple[list, int, bool]:
+    """(sample of image names, total found, whether either bound was hit).
+
+    Recursive, unlike list_s3_images: a YOLO dataset is images/train/... and
+    images/val/..., so a Delimiter-scoped listing of the dataset root finds
+    no images at all. Names are returned relative to `folder` so the split
+    each file came from stays visible.
+    """
+    if not folder:
+        return [], 0, False
+    prefix = folder.rstrip("/") + "/"
+    names: list = []
+    total = 0
+    truncated = False
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=BUCKET, Prefix=prefix)
+        for page_number, page in enumerate(pages, start=1):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith("/") or not key.lower().endswith(IMAGE_EXTENSIONS):
+                    continue
+                total += 1
+                if len(names) < AUDIT_MAX_FILE_NAMES:
+                    names.append(key[len(prefix):])
+            if page_number >= AUDIT_MAX_LIST_PAGES:
+                truncated = True
+                break
+    except Exception as exc:
+        print(f"Could not list images under {folder}: {exc}")
+        return names, total, True
+    if total > len(names):
+        truncated = True
+    return names, total, truncated
+
+
+def _dataset_audit_block(folder: str) -> dict:
+    names, total, truncated = list_dataset_image_names(folder)
+    return {
+        "folder": folder,
+        "s3_uri": f"s3://{BUCKET}/{folder}/" if folder else "",
+        "file_count": total,
+        "file_names": names,
+        "truncated": truncated,
+    }
+
+
+def write_training_audit(
+    *, build_id, generation, size, epochs, img_size, batch, seed,
+    dataset_folder, eval_dataset_folder, base_model_folder, notes, source="manual",
+) -> dict:
+    """One row per submitted run, written before the run is under way so
+    the operator's exact inputs are captured even if the run later fails.
+    Never raises: an audit write failing must not take down the training
+    submission it is describing."""
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "id": uuid.uuid4().hex[:16],
+        "record_type": "training_audit",
+        "build_id": build_id or "",
+        "source": source,
+        "status": "Submitted",
+        "submitted_at": now,
+        "started_at": None,
+        "ended_at": None,
+        "generation": str(generation),
+        "size": str(size),
+        "parameters": {
+            "epochs": int(epochs),
+            "img_size": int(img_size),
+            "batch": int(batch),
+            "seed": int(seed),
+        },
+        "notes": notes or "",
+        "train_dataset": _dataset_audit_block(dataset_folder),
+        # Falls back to the training dataset, which is what the pipeline
+        # evaluates on when no separate evaluation set is chosen -- worth
+        # recording explicitly, since "evaluated on its own training data"
+        # is exactly the thing an audit should make visible rather than
+        # leave as a blank to be misread as "unknown".
+        "eval_dataset": _dataset_audit_block(eval_dataset_folder or dataset_folder),
+        "eval_is_train_dataset": not eval_dataset_folder,
+        "base_model": {
+            "folder": base_model_folder or "",
+            "source": "folder" if base_model_folder else "registry-latest-approved",
+        },
+        "model": None,
+        "metrics": None,
+        "execution_arn": "",
+    }
+    try:
+        training_audit_table().put_item(Item=record)
+    except Exception as exc:
+        print(f"Could not write training audit for build {build_id}: {exc}")
+    return record
+
+
+def scan_training_audits(limit: int = 100) -> list:
+    """Every audit row, newest first by submitted_at."""
+    items: list = []
+    kwargs: dict = {}
+    try:
+        while True:
+            response = training_audit_table().scan(**kwargs)
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
+    except Exception as exc:
+        print(f"Could not scan training audits: {exc}")
+        return []
+    items.sort(key=lambda item: str(item.get("submitted_at") or ""), reverse=True)
+    return items[:limit]
+
+
+def _decimalize(value):
+    """DynamoDB rejects float. Metrics arrive as floats from evaluation.json,
+    so they are stored as Decimal via str() -- Decimal(float) would preserve
+    the binary representation error (0.1 -> 0.1000000000000000055...)."""
+    from decimal import Decimal
+
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _decimalize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_decimalize(v) for v in value]
+    return value
+
+
+def _execution_for_audit(submitted_at: str) -> dict | None:
+    """The pipeline execution a submitted audit turned into.
+
+    There is no id shared between the CodeBuild build that submits a run
+    and the pipeline execution it creates -- run_pipeline.py starts the
+    execution from inside the build -- so they are matched on time: the
+    OLDEST execution that started at or after this audit was written. Two
+    runs cannot overlap (the account has one GPU slot, enforced by
+    training_already_running_reason), so this is unambiguous.
+    """
+    try:
+        summaries = sm.list_pipeline_executions(
+            PipelineName=PIPELINE_NAME, SortBy="CreationTime", SortOrder="Descending", MaxResults=20,
+        )["PipelineExecutionSummaries"]
+    except Exception as exc:
+        print(f"Could not list pipeline executions for audit: {exc}")
+        return None
+    candidates = [
+        s for s in summaries
+        if s.get("StartTime") and s["StartTime"].isoformat() >= submitted_at
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda s: s["StartTime"])
+
+
+def _registered_model_for_execution(generation: str, size: str, started_after: str) -> dict | None:
+    """The model package this execution registered: the oldest package in
+    the run's own group created at or after it started. Returns None until
+    RegisterYoloModel has actually run."""
+    group_name = f"yolo{generation}{size}-detector"
+    try:
+        packages = sm.list_model_packages(
+            ModelPackageGroupName=group_name, SortBy="CreationTime", SortOrder="Descending", MaxResults=20,
+        )["ModelPackageSummaryList"]
+    except Exception as exc:
+        if "does not exist" not in str(exc):
+            print(f"Could not list model packages for {group_name}: {exc}")
+        return None
+    candidates = [
+        p for p in packages
+        if p.get("CreationTime") and p["CreationTime"].isoformat() >= started_after
+    ]
+    if not candidates:
+        return None
+    package = min(candidates, key=lambda p: p["CreationTime"])
+    return {
+        "group": group_name,
+        "version": package["ModelPackageArn"].rsplit("/", 1)[-1],
+        "model_package_arn": package["ModelPackageArn"],
+        "approval_status": package.get("ModelApprovalStatus", ""),
+    }
+
+
+TERMINAL_EXECUTION_STATUSES = ("Succeeded", "Failed", "Stopped")
+
+
+def reconcile_training_audits() -> None:
+    """Fills in what is only knowable after submission -- start and end
+    time, final status, the registered model version, and its metrics.
+    Called from the queue poll loop; never raises."""
+    try:
+        audits = scan_training_audits(limit=200)
+    except Exception as exc:
+        print(f"Could not read training audits to reconcile: {exc}")
+        return
+    for audit in audits:
+        if audit.get("status") in TERMINAL_EXECUTION_STATUSES and audit.get("metrics") is not None:
+            continue
+        if audit.get("status") in TERMINAL_EXECUTION_STATUSES and audit.get("model") is None:
+            # Finished without ever registering a model (a failed or
+            # stopped run) -- nothing further will ever arrive for it.
+            continue
+        try:
+            _reconcile_one_audit(audit)
+        except Exception as exc:
+            print(f"Could not reconcile training audit {audit.get('id')}: {exc}")
+
+
+def _reconcile_one_audit(audit: dict) -> None:
+    updates: dict = {}
+    execution_arn = audit.get("execution_arn") or ""
+    if not execution_arn:
+        summary = _execution_for_audit(str(audit.get("submitted_at") or ""))
+        if not summary:
+            return
+        execution_arn = summary["PipelineExecutionArn"]
+        updates["execution_arn"] = execution_arn
+        updates["started_at"] = summary["StartTime"].isoformat()
+
+    try:
+        description = sm.describe_pipeline_execution(PipelineExecutionArn=execution_arn)
+    except Exception as exc:
+        print(f"Could not describe execution {execution_arn}: {exc}")
+        return
+    status = description.get("PipelineExecutionStatus", "")
+    if status and status != audit.get("status"):
+        updates["status"] = status
+    start_time = description.get("CreationTime")
+    if start_time and not audit.get("started_at"):
+        updates["started_at"] = start_time.isoformat()
+    if status in TERMINAL_EXECUTION_STATUSES:
+        end_time = description.get("LastModifiedTime")
+        if end_time and not audit.get("ended_at"):
+            updates["ended_at"] = end_time.isoformat()
+
+    started_at = str(updates.get("started_at") or audit.get("started_at") or "")
+    if audit.get("model") is None and started_at:
+        model = _registered_model_for_execution(str(audit.get("generation")), str(audit.get("size")), started_at)
+        if model:
+            updates["model"] = model
+            metrics, _description, _lineage = fetch_metrics_and_lineage(model["model_package_arn"])
+            if metrics:
+                updates["metrics"] = _decimalize(metrics)
+
+    if not updates:
+        return
+    expression = ", ".join(f"#{k} = :{k}" for k in updates)
+    training_audit_table().update_item(
+        Key={"id": audit["id"]},
+        UpdateExpression=f"SET {expression}",
+        ExpressionAttributeNames={f"#{k}": k for k in updates},
+        ExpressionAttributeValues={f":{k}": v for k, v in updates.items()},
+    )
 
 
 # --- automated (persistent, DynamoDB-backed) training queues ------------------

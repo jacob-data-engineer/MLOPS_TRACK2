@@ -6,6 +6,7 @@ import { ProgressBar } from "../components/ProgressBar";
 import { StatTile } from "../components/StatTile";
 import { Track2AutomatedQueuesPanel } from "../components/Track2AutomatedQueuesPanel";
 import { Track2S3FolderBrowser } from "../components/Track2S3FolderBrowser";
+import { Track2TrainingAuditPanel } from "../components/Track2TrainingAuditPanel";
 import {
   addTrack2AutomatedQueue,
   addTrack2Queue,
@@ -37,6 +38,9 @@ interface TrainingSelection {
   batch: number;
   seed: number;
   datasetFolder: string;
+  /** Empty means "evaluate on the training dataset", which is what the
+   * pipeline does when no separate set is given. */
+  evalFolder: string;
   baseModelFolder: string;
   noBaseModel: boolean;
   notes: string;
@@ -54,11 +58,13 @@ function TrainingForm({
   onSubmitted: (message: string) => void;
 }) {
   const sizes = data.generation_sizes[GENERATION] ?? [];
-  const { size, epochs, imgSize, batch, seed, datasetFolder, baseModelFolder, noBaseModel, notes } = selection;
+  const { size, epochs, imgSize, batch, seed, datasetFolder, evalFolder, baseModelFolder, noBaseModel, notes } = selection;
   const [datasetPrefix, setDatasetPrefix] = useState(data.dataset_browser.prefix);
   const [weightsPrefix, setWeightsPrefix] = useState("");
+  const [evalPrefix, setEvalPrefix] = useState(data.eval_browser.prefix);
   const [datasetFolders, setDatasetFolders] = useState(data.dataset_browser.folders);
   const [weightsFolders, setWeightsFolders] = useState(data.weights_browser.folders);
+  const [evalFolders, setEvalFolders] = useState(data.eval_browser.folders);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,11 +76,12 @@ function TrainingForm({
   // prefixes are actually being browsed right now instead.
   useEffect(() => {
     let cancelled = false;
-    getTrack2Models(datasetPrefix, weightsPrefix)
+    getTrack2Models(datasetPrefix, weightsPrefix, evalPrefix)
       .then((res) => {
         if (cancelled) return;
         setDatasetFolders(res.dataset_browser.folders);
         setWeightsFolders(res.weights_browser.folders);
+        setEvalFolders(res.eval_browser.folders);
       })
       .catch(() => {
         // A browse-only refresh failing isn't worth surfacing as a page
@@ -83,7 +90,7 @@ function TrainingForm({
     return () => {
       cancelled = true;
     };
-  }, [datasetPrefix, weightsPrefix]);
+  }, [datasetPrefix, weightsPrefix, evalPrefix]);
 
   const latestApproved = data.latest_approved[GENERATION]?.[size] ?? null;
 
@@ -95,6 +102,7 @@ function TrainingForm({
     batch,
     seed,
     dataset_folder: datasetFolder,
+    eval_dataset_folder: evalFolder,
     base_model_folder: noBaseModel ? "" : baseModelFolder,
     notes,
   });
@@ -175,13 +183,13 @@ function TrainingForm({
         </label>
       </div>
 
-      {/* Both pickers sit side by side across the full card, the same shape
+      {/* The pickers sit side by side across the full card, the same shape
           as Deploy & Inference. Each column is min-w-0 so a long S3 path
           truncates inside its own pane instead of widening the grid track
-          and squeezing the other browser. */}
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          and squeezing the others. */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="min-w-0">
-          <span className="mb-1 block text-xs text-ink-muted">Dataset folder</span>
+          <span className="mb-1 block text-xs text-ink-muted">Training images folder</span>
           <Track2S3FolderBrowser
             prefix={datasetPrefix}
             folders={datasetFolders}
@@ -190,6 +198,26 @@ function TrainingForm({
             selected={datasetFolder}
             allowCreate
           />
+        </div>
+
+        <div className="min-w-0">
+          <span className="mb-1 block text-xs text-ink-muted">Evaluation images folder</span>
+          <Track2S3FolderBrowser
+            prefix={evalPrefix}
+            folders={evalFolders}
+            onNavigate={setEvalPrefix}
+            onSelect={(folder) => setSelection({ evalFolder: folder })}
+            selected={evalFolder}
+            allowCreate
+          />
+          {/* Says what actually happens rather than leaving it blank: with
+              nothing chosen the pipeline evaluates on the training data, so
+              the reported metrics are not held-out ones. */}
+          <p className={`mt-1.5 text-xs ${evalFolder ? "text-ink-muted" : "text-critical"}`}>
+            {evalFolder
+              ? "Metrics will be measured on this folder."
+              : "None selected -- the run will be evaluated on its own training images."}
+          </p>
         </div>
 
         <div className="min-w-0">
@@ -355,6 +383,7 @@ export function Track2ModelsPage() {
     batch: 16,
     seed: 42,
     datasetFolder: "",
+    evalFolder: "",
     baseModelFolder: "",
     noBaseModel: true,
     notes: "",
@@ -557,7 +586,13 @@ export function Track2ModelsPage() {
                       <span>Batch: {e.batch}</span>
                       <span>Seed: {e.seed}</span>
                       <span className="col-span-2 truncate sm:col-span-3" title={e.dataset_folder}>
-                        Dataset: {e.dataset_folder}
+                        Training images: {e.dataset_folder}
+                      </span>
+                      <span
+                        className="col-span-2 truncate sm:col-span-3"
+                        title={e.eval_dataset_folder || e.dataset_folder}
+                      >
+                        Evaluation images: {e.eval_dataset_folder || `${e.dataset_folder} (same as training)`}
                       </span>
                       {e.base_model_folder && (
                         <span className="col-span-2 truncate sm:col-span-3" title={e.base_model_folder}>
@@ -582,6 +617,8 @@ export function Track2ModelsPage() {
               </div>
             )}
           </Card>
+
+          <Track2TrainingAuditPanel />
 
           <AutomatedQueueForm selection={selection} onAdded={handleSubmitted} />
           <Track2AutomatedQueuesPanel queues={data.automated_queues} onDelete={handleDeleteAutomatedQueue} />

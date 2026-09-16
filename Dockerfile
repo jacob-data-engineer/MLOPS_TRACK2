@@ -61,6 +61,14 @@ RUN --mount=type=secret,id=track_repos_token \
 
 COPY --from=frontend-builder /app/web/dist ./web/dist
 
+# Import the app once at build time. Without this, a syntax or import
+# error only surfaces when the container starts -- which the deploy does
+# AFTER removing the old container, so a typo takes the site down instead
+# of failing the build while the running one is untouched. Imports only
+# (boto3 clients are constructed lazily against no credentials here), so
+# it talks to nothing.
+RUN uv run python -c "import sys; sys.path.insert(0, 'src'); import ppe_pipeline_api.main"
+
 EXPOSE 8501
 
 # AWS_BEARER_TOKEN_BEDROCK / PPE_APP_PASSWORD / PPE_STORAGE_BACKEND etc.

@@ -39,3 +39,9 @@ variable "review_host_role_name" {
   type        = string
   default     = "track2-yolo-review-host"
 }
+
+variable "training_audit_table" {
+  description = "DynamoDB table holding one row per submitted training run: both dataset folders and their file names, every parameter, the notes, the registered model version, and start/end times."
+  type        = string
+  default     = "track2-yolo-training-audit"
+}
