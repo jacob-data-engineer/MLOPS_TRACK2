@@ -11,3 +11,4 @@ eval_runs/
 *.log
 reports/
 model_training/
+platform/

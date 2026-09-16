@@ -102,7 +102,7 @@ if command -v zip >/dev/null 2>&1; then
   ( cd "$SCRIPT_DIR" && zip -q -r "$ZIP" . \
       -x '*.venv/*' 'node_modules/*' 'web/node_modules/*' 'web/dist/*' \
          '*__pycache__/*' '*.pytest_cache/*' 'legacy-review-app/*' '*.pyc' \
-         '.git/*' 'terraform/.terraform/*' 'terraform/*.tfstate*' 'model_training/*' )
+         '.git/*' 'terraform/.terraform/*' 'terraform/*.tfstate*' 'model_training/*' 'platform/*' )
 else
   # Git Bash on Windows ships no `zip`, so this would otherwise only run
   # from WSL/mac. The system bsdtar writes real zip archives. It is a
@@ -124,6 +124,7 @@ else
       --exclude '*.pyc' --exclude '.git/*' \
       --exclude '*/.terraform/*' --exclude '*.tfstate' \
       --exclude '*.tfstate.backup' --exclude 'model_training/*' \
+      --exclude 'platform/*' \
       -- * )
 fi
 echo "  $(du -h "$ZIP" | cut -f1)"
