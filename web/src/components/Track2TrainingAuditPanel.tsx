@@ -154,6 +154,11 @@ function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted:
             <Field label="Seed" value={String(audit.parameters.seed)} />
           </div>
 
+          {/* The pipeline does not always run what was asked for, and an
+              audit that only showed the request would describe a run that
+              never happened. Only rendered when they actually differ. */}
+          {audit.actual && <ActualRunNotice audit={audit} />}
+
           <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
             <DatasetBlock title="Training images" dataset={audit.train_dataset} />
             <DatasetBlock
@@ -200,6 +205,50 @@ function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted:
             </>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Shown only when the job that ran differs from what was submitted --
+ * different hyperparameters, or a different dataset entirely. Silent when
+ * they agree, so it reads as a warning rather than noise. */
+function ActualRunNotice({ audit }: { audit: Track2TrainingAudit }) {
+  const actual = audit.actual;
+  if (!actual) return null;
+
+  const requestedUri = audit.train_dataset.s3_uri.replace(/\/+$/, "");
+  const actualUri = (actual.train_data_s3_uri || "").replace(/\/+$/, "");
+  const differences: string[] = [];
+  if (actual.epochs !== null && actual.epochs !== audit.parameters.epochs) {
+    differences.push(`epochs ${audit.parameters.epochs} -> ${actual.epochs}`);
+  }
+  if (actual.batch !== null && actual.batch !== audit.parameters.batch) {
+    differences.push(`batch ${audit.parameters.batch} -> ${actual.batch}`);
+  }
+  if (actual.img_size !== null && actual.img_size !== audit.parameters.img_size) {
+    differences.push(`image size ${audit.parameters.img_size} -> ${actual.img_size}`);
+  }
+  if (actual.seed !== null && actual.seed !== audit.parameters.seed) {
+    differences.push(`seed ${audit.parameters.seed} -> ${actual.seed}`);
+  }
+  const datasetDiffers = Boolean(actualUri) && Boolean(requestedUri) && actualUri !== requestedUri;
+  if (!differences.length && !datasetDiffers) return null;
+
+  return (
+    <div className="mt-3 rounded-sm border border-critical/30 bg-critical-subtle p-2.5 text-xs text-critical">
+      <p className="font-semibold">The pipeline did not run what was submitted.</p>
+      {differences.length > 0 && <p className="tabular mt-1">Changed: {differences.join(" · ")}</p>}
+      {datasetDiffers && (
+        <p className="tabular mt-1 break-all">
+          Trained on {actualUri} instead of the folder chosen above.
+        </p>
+      )}
+      {actual.training_job_name && (
+        <p className="tabular mt-1 break-all text-ink-secondary">
+          Training job: {actual.training_job_name}
+          {actual.instance_type && ` on ${actual.instance_type}`}
+        </p>
       )}
     </div>
   );

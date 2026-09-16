@@ -2150,31 +2150,93 @@ def _execution_for_audit(submitted_at: str) -> dict | None:
     return min(candidates, key=lambda s: s["StartTime"])
 
 
-def _registered_model_for_execution(generation: str, size: str, started_after: str) -> dict | None:
-    """The model package this execution registered: the oldest package in
-    the run's own group created at or after it started. Returns None until
-    RegisterYoloModel has actually run."""
-    group_name = f"yolo{generation}{size}-detector"
+def _execution_steps(execution_arn: str) -> list:
     try:
-        packages = sm.list_model_packages(
-            ModelPackageGroupName=group_name, SortBy="CreationTime", SortOrder="Descending", MaxResults=20,
-        )["ModelPackageSummaryList"]
+        return sm.list_pipeline_execution_steps(PipelineExecutionArn=execution_arn)["PipelineExecutionSteps"]
     except Exception as exc:
-        if "does not exist" not in str(exc):
-            print(f"Could not list model packages for {group_name}: {exc}")
+        print(f"Could not list steps for {execution_arn}: {exc}")
+        return []
+
+
+def _actual_run_parameters(steps: list) -> dict | None:
+    """What the training job was ACTUALLY given, read off the job itself.
+
+    Not the same thing as what this app submitted. The deployed
+    run_pipeline.py substitutes its own dataset, base model and
+    hyperparameters for the ones sent in the build's environment, so an
+    audit that only recorded the request would describe a run that never
+    happened. Both are kept, and the UI shows the difference.
+    """
+    job_name = None
+    for step in steps:
+        arn = (step.get("Metadata") or {}).get("TrainingJob", {}).get("Arn")
+        if arn:
+            job_name = arn.rsplit("/", 1)[-1]
+            break
+    if not job_name:
         return None
-    candidates = [
-        p for p in packages
-        if p.get("CreationTime") and p["CreationTime"].isoformat() >= started_after
-    ]
-    if not candidates:
+    try:
+        job = sm.describe_training_job(TrainingJobName=job_name)
+    except Exception as exc:
+        print(f"Could not describe training job {job_name}: {exc}")
         return None
-    package = min(candidates, key=lambda p: p["CreationTime"])
+    hyper = job.get("HyperParameters", {}) or {}
+
+    def _int(key):
+        try:
+            return int(hyper[key])
+        except (KeyError, TypeError, ValueError):
+            return None
+
     return {
-        "group": group_name,
-        "version": package["ModelPackageArn"].rsplit("/", 1)[-1],
-        "model_package_arn": package["ModelPackageArn"],
-        "approval_status": package.get("ModelApprovalStatus", ""),
+        "training_job_name": job_name,
+        "instance_type": job.get("ResourceConfig", {}).get("InstanceType", ""),
+        "epochs": _int("epochs"),
+        "img_size": _int("img-size"),
+        "batch": _int("batch"),
+        "seed": _int("seed"),
+        "train_data_s3_uri": hyper.get("train-data-s3-uri", ""),
+        "base_model_s3_uri": hyper.get("base-model-s3-uri", ""),
+        "run_id": hyper.get("run-id", ""),
+    }
+
+
+def _registered_model_for_execution(steps: list) -> dict | None:
+    """The model package this execution registered, read from the
+    execution's own RegisterModel step. Returns None until that step has
+    run (or if the run never registers anything).
+
+    Asked of the execution rather than searched for by group and time. An
+    earlier version guessed the group from the UI's generation and size --
+    "yolo11s-detector" for a YOLO11-S run -- and searched it for a package
+    created after the run started. That found nothing whenever the pipeline
+    registered somewhere else, which is exactly what the deployed
+    run_pipeline.py does: it ignores the submitted size and registers into
+    track2-ppe-fullframe-replay. The step metadata carries the real ARN, so
+    there is nothing left to infer.
+    """
+    arn = None
+    for step in steps:
+        metadata = step.get("Metadata") or {}
+        register = metadata.get("RegisterModel") or {}
+        if register.get("Arn"):
+            arn = register["Arn"]
+            break
+    if not arn:
+        return None
+    # ".../model-package/<group>/<version>"
+    tail = arn.rsplit("/model-package/", 1)[-1]
+    group, _, version = tail.partition("/")
+    approval_status = ""
+    try:
+        approval_status = sm.describe_model_package(ModelPackageName=arn).get("ModelApprovalStatus", "")
+    except Exception as exc:
+        print(f"Could not describe {arn}: {exc}")
+    return {
+        "group": group,
+        "version": version,
+        "model_package_arn": arn,
+        "approval_status": approval_status,
     }
 
 
@@ -2191,12 +2253,17 @@ def reconcile_training_audits() -> None:
         print(f"Could not read training audits to reconcile: {exc}")
         return
     for audit in audits:
-        if audit.get("status") in TERMINAL_EXECUTION_STATUSES and audit.get("metrics") is not None:
-            continue
-        if audit.get("status") in TERMINAL_EXECUTION_STATUSES and audit.get("model") is None:
-            # Finished without ever registering a model (a failed or
-            # stopped run) -- nothing further will ever arrive for it.
-            continue
+        # Done means: it finished, we know which model it registered (or
+        # established it registered none), and we have that model's metrics.
+        # An earlier version stopped retrying as soon as a run reached a
+        # terminal status without a model attached, which permanently froze
+        # every row whose model lookup had failed even once -- the failure
+        # became indistinguishable from "this run registered nothing".
+        if audit.get("status") in TERMINAL_EXECUTION_STATUSES and audit.get("actual"):
+            if audit.get("model") and audit.get("metrics") is not None:
+                continue
+            if audit.get("model_lookup_done"):
+                continue
         try:
             _reconcile_one_audit(audit)
         except Exception as exc:
@@ -2230,14 +2297,28 @@ def _reconcile_one_audit(audit: dict) -> None:
         if end_time and not audit.get("ended_at"):
             updates["ended_at"] = end_time.isoformat()
 
-    started_at = str(updates.get("started_at") or audit.get("started_at") or "")
-    if audit.get("model") is None and started_at:
-        model = _registered_model_for_execution(str(audit.get("generation")), str(audit.get("size")), started_at)
+    # One listing, used by both lookups below.
+    steps = _execution_steps(execution_arn) if (audit.get("model") is None or not audit.get("actual")) else []
+
+    if not audit.get("actual"):
+        actual = _actual_run_parameters(steps)
+        if actual:
+            updates["actual"] = actual
+
+    if audit.get("model") is None:
+        model = _registered_model_for_execution(steps)
         if model:
             updates["model"] = model
+            updates["model_lookup_done"] = True
             metrics, _description, _lineage = fetch_metrics_and_lineage(model["model_package_arn"])
             if metrics:
                 updates["metrics"] = _decimalize(metrics)
+        elif status in TERMINAL_EXECUTION_STATUSES:
+            # The run is over and its steps carry no RegisterModel ARN, so
+            # there is genuinely no model to find. Recorded so the next
+            # pass stops looking, without that being confused with a
+            # lookup that merely failed.
+            updates["model_lookup_done"] = True
 
     if not updates:
         return

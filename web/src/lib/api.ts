@@ -3392,6 +3392,21 @@ export interface Track2TrainingAudit {
    * evaluated on its own training data. */
   eval_is_train_dataset: boolean;
   base_model: { folder: string; source: string };
+  /** What the training job was actually given, read off the job itself --
+   * which is not always what was submitted, because the deployed
+   * run_pipeline.py substitutes its own dataset and hyperparameters. Null
+   * until the job exists. */
+  actual: {
+    training_job_name: string;
+    instance_type: string;
+    epochs: number | null;
+    img_size: number | null;
+    batch: number | null;
+    seed: number | null;
+    train_data_s3_uri: string;
+    base_model_s3_uri: string;
+    run_id: string;
+  } | null;
   model: { group: string; version: string; model_package_arn: string; approval_status: string } | null;
   metrics: Record<string, number | null> | null;
   execution_arn: string;
