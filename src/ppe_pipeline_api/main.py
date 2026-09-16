@@ -39,6 +39,15 @@ from .routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Any inference/eval job still marked in-flight belongs to a process
+    # that no longer exists -- this one just started, and its workers are
+    # created below. Left alone, such a row reads as unfinished work
+    # forever, which blocks the endpoint teardown and bills until someone
+    # notices. Runs before the workers so it can never race one.
+    try:
+        track2_shared.recover_interrupted_jobs()
+    except Exception as exc:  # never block startup on this
+        print(f"Could not recover interrupted jobs: {exc}")
     # Advances the ad-hoc Track2 training queue in the background -- see
     # track2_shared.py's module docstring on why this state is in-memory,
     # single-process only, same as session_store.py.

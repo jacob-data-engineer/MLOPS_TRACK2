@@ -835,8 +835,13 @@ def endpoint_status() -> dict | None:
         raise
     variant = (desc.get("ProductionVariants") or [{}])[0]
     created = desc.get("CreationTime")
+    # Used by the idle sweep as the floor for "how long has this been sitting
+    # here": an endpoint that was just created or just changed has not been
+    # idle, whatever the queues say.
+    last_modified = desc.get("LastModifiedTime") or created
     return {
         "status": desc.get("EndpointStatus"),
+        "last_modified_at": last_modified.isoformat() if last_modified else None,
         # describe_endpoint doesn't echo the instance type back on the
         # variant (only counts), and fetching the config just for it would
         # be a second call on a hot path -- this is what we create with.
@@ -1039,6 +1044,120 @@ def sagemaker_cost_breakdown(days: int = COST_DEFAULT_DAYS, *, refresh: bool = F
     with _cost_cache_lock:
         _cost_cache[days] = (time.time(), result)
     return result
+
+
+# Statuses that mean "a worker thread in this process owns this job right
+# now". They are only ever true while the process that set them is alive,
+# which is what makes them recoverable on startup.
+IN_FLIGHT_STATUSES = ("deploying", "running")
+
+
+def recover_interrupted_jobs() -> list:
+    """Fails any job left mid-flight by a process that is no longer here.
+
+    Called once at startup. The workers driving these jobs are daemon
+    threads holding their state in memory, so a container restart -- a
+    deploy, a crash, an EC2 stop -- leaves the row saying "deploying"
+    forever with nothing on its way to finishing it. That is not only a
+    wrong history entry: endpoint_teardown_blocker treats such a row as
+    unfinished work, so the endpoint can never be torn down again and
+    bills indefinitely. One such row kept the endpoint up for over a day.
+
+    Safe to run at startup specifically because nothing else can own these
+    rows yet: the worker threads are started by this same process, after
+    this runs.
+    """
+    recovered = []
+    now = datetime.now(timezone.utc).isoformat()
+    message = "Interrupted -- the app restarted while this job was in progress."
+    for item in list_inference_queue():
+        if item.get("status") not in IN_FLIGHT_STATUSES:
+            continue
+        try:
+            _update_inference_queue_item(
+                item["id"], status="failed", completed_at=now, error=message,
+            )
+            recovered.append(f"inference:{item['id']}")
+        except Exception as exc:
+            print(f"Could not recover interrupted inference job {item.get('id')}: {exc}")
+    for run in list_eval_runs():
+        if run.get("status") not in IN_FLIGHT_STATUSES:
+            continue
+        try:
+            eval_runs_table().update_item(
+                Key={"id": run["id"]},
+                UpdateExpression="SET #status = :status, #completed_at = :completed_at, #error = :error",
+                ExpressionAttributeNames={"#status": "status", "#completed_at": "completed_at", "#error": "error"},
+                ExpressionAttributeValues={":status": "failed", ":completed_at": now, ":error": message},
+            )
+            recovered.append(f"eval:{run['id']}")
+        except Exception as exc:
+            print(f"Could not recover interrupted eval run {run.get('id')}: {exc}")
+    if recovered:
+        print(f"Recovered {len(recovered)} interrupted job(s): {', '.join(recovered)}")
+    return recovered
+
+
+# How long the endpoint may sit with nothing needing it before the idle
+# sweep removes it. Long enough that someone who spun it up deliberately
+# and is about to queue work does not lose it under them; short enough
+# that a missed teardown costs cents rather than a day's hosting.
+ENDPOINT_IDLE_TEARDOWN_SECONDS = 1800
+
+
+def _endpoint_idle_seconds(status: dict) -> float | None:
+    """Seconds since anything last needed the endpoint, or None if that
+    cannot be established (in which case the sweep leaves it alone).
+
+    Measured from the most recent of: the endpoint's own last change, and
+    the completion of the last job on either queue. Read from DynamoDB and
+    SageMaker rather than process memory, so a restart does not reset the
+    clock and hide an endpoint that has been idle for hours.
+    """
+    latest = status.get("last_modified_at") or status.get("created_at")
+    if not latest:
+        return None
+    marks = [str(latest)]
+    for item in list_inference_queue():
+        if item.get("completed_at"):
+            marks.append(str(item["completed_at"]))
+    for run in list_eval_runs():
+        if run.get("completed_at"):
+            marks.append(str(run["completed_at"]))
+    try:
+        newest = max(datetime.fromisoformat(str(m).replace("Z", "+00:00")) for m in marks)
+    except ValueError as exc:
+        print(f"Could not read an idle timestamp: {exc}")
+        return None
+    if newest.tzinfo is None:
+        newest = newest.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - newest).total_seconds()
+
+
+def sweep_idle_endpoint() -> str | None:
+    """Removes the endpoint when nothing has needed it for a while.
+
+    The teardown at the end of each queue drain is the normal path; this
+    is the safety net for when that never runs -- the process died between
+    the last job and the teardown, or the job that raised the endpoint was
+    itself interrupted. Without it, a single missed teardown bills until
+    someone notices.
+
+    Returns a short description if it deleted the endpoint, else None.
+    """
+    status = endpoint_status()
+    if not status or status.get("status") != "InService":
+        return None
+    blocker = endpoint_teardown_blocker()
+    if blocker:
+        return None
+    idle = _endpoint_idle_seconds(status)
+    if idle is None or idle < ENDPOINT_IDLE_TEARDOWN_SECONDS:
+        return None
+    delete_endpoint()
+    minutes = int(idle // 60)
+    print(f"Idle sweep: deleted the endpoint after {minutes} minutes with nothing needing it.")
+    return f"deleted after {minutes} minutes idle"
 
 
 def endpoint_teardown_blocker() -> str | None:
@@ -1937,6 +2056,18 @@ async def queue_poll_loop() -> None:
             reconcile_training_audits()
         except Exception as exc:
             print(f"Training audit reconcile failed: {exc}")
+        # The safety net for a teardown that never ran because the process
+        # died between the last job and it. Cheap when there is no endpoint:
+        # one describe_endpoint that returns not-found.
+        #
+        # Off the event loop: when it does delete, it waits for the
+        # inference component to go first, which took 150s in practice --
+        # running that inline would stall every request in this
+        # single-worker process for the duration.
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, sweep_idle_endpoint)
+        except Exception as exc:
+            print(f"Idle endpoint sweep failed: {exc}")
 
 
 # --- training audit ------------------------------------------------------
