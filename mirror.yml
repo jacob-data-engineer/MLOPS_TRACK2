@@ -1,0 +1,18 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $BASE_REPO
+  build:
+    commands:
+      # Pulled once, here, so that every app build afterwards fetches them
+      # from ECR in-region instead of from Docker Hub or GitHub.
+      - docker pull public.ecr.aws/docker/library/node:20-slim
+      - docker tag public.ecr.aws/docker/library/node:20-slim $BASE_REPO:node-20-slim
+      - docker push $BASE_REPO:node-20-slim
+      - docker pull ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+      - docker tag ghcr.io/astral-sh/uv:python3.12-bookworm-slim $BASE_REPO:uv-python3.12-bookworm-slim
+      - docker push $BASE_REPO:uv-python3.12-bookworm-slim
+  post_build:
+    commands:
+      - echo "mirrored both base images into $BASE_REPO"

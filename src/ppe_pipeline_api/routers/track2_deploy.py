@@ -42,7 +42,14 @@ def get_run_lineage(output_folder: str, run_id: str | None = None, session=Depen
     files read, the model size/version behind them, and when inference
     ran. Recorded in DynamoDB keyed by run id, with the output folder's
     own lineage.json as the fallback for runs that predate the table."""
-    lineage = t2.read_run_lineage(run_id, output_folder)
+    try:
+        lineage = t2.read_run_lineage(run_id, output_folder)
+    except ValueError as exc:
+        # The folder is not a folder. Nothing here raises a global
+        # ValueError handler, so without this the 400 it should be
+        # becomes a 500 with a traceback -- which reads as the service
+        # being broken rather than the argument being wrong.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if lineage is None:
         raise HTTPException(
             status_code=404,

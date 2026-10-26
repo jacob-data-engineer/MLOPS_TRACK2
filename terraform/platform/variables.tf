@@ -29,9 +29,16 @@ variable "training_instance_type" {
 }
 
 variable "review_app_port" {
+  # 8501, not 8090. The review app has only ever been served on 8501 --
+  # `deploy.sh` is invoked with PORT=8501 CONTAINER=ppe-pipeline-track2-test,
+  # and that is the one container on the host. 8090 was the script's own
+  # default, so it ended up here as "the" port while nothing listened on
+  # it: the start-up email advertised a dead link, the security group
+  # held it open to 0.0.0.0/0 with nothing behind it, and the uptime
+  # monitor watched the wrong address.
   description = "Port the review-app container listens on"
   type        = number
-  default     = 8090
+  default     = 8501
 }
 
 variable "operator_ips" {

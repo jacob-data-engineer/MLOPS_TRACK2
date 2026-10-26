@@ -64,6 +64,39 @@ export function formatTimestamp(value: string | Date): string {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second} SGT`;
 }
 
+/** "16 Oct 15:34 SGT" -- a wall-clock instant, short enough to sit inside a
+ * line of running text.
+ *
+ * Same zone and the same reasoning as `formatTimestamp`: storage is UTC, the
+ * zone is applied at the last possible moment, and it is pinned to
+ * `Asia/Singapore` rather than the viewer's browser.
+ *
+ * THE ZONE IS NAMED, always. Two of these were rendered with the browser's
+ * own clock and then labelled "SGT" by hand, which is right only on a machine
+ * already set to Singapore and silently wrong everywhere else. A reading that
+ * carries its own zone cannot be mislabelled by the line it sits in.
+ *
+ * Seconds are dropped: a schedule is set to the minute and a snapshot is
+ * named for the day it was taken, so the third figure is noise in both. */
+const SGT_SHORT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Singapore",
+  day: "2-digit",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+export function formatDayTime(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return typeof value === "string" ? value : "unrecorded";
+  }
+  const p: Record<string, string> = {};
+  for (const part of SGT_SHORT.formatToParts(date)) p[part.type] = part.value;
+  return `${p.day} ${p.month} ${p.hour}:${p.minute} SGT`;
+}
+
 /** How long ago `from` was: `8s`, `2m 14s`, `1h 6m`.
  *
  * NOT `formatTimestamp`'s job, and not a competitor to it. That renders a

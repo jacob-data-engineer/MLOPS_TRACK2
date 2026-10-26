@@ -36,7 +36,10 @@ def _serialize_package(pkg: dict) -> dict:
 @router.get("")
 def get_review(session=Depends(require_session)) -> dict:
     counts = t2.review_queue_counts()
-    registries = t2.all_model_registries()
+    # Production groups and open-taxonomy groups in one listing, so a
+    # custom-trained model is visible where models are reviewed. They stay
+    # out of serialize_registries_brief, which the Deploy page reads.
+    registries = {**t2.all_model_registries(), **t2.open_model_registries()}
     return {
         "counts": counts,
         "registries": {
@@ -84,14 +87,32 @@ def reject_model(model_package_arn: str, session=Depends(require_session)) -> di
 
 
 def _decide_model(model_package_arn: str, status: str) -> dict:
-    t2.sm.update_model_package(ModelPackageArn=model_package_arn, ModelApprovalStatus=status)
+    try:
+        t2.sm.update_model_package(ModelPackageArn=model_package_arn,
+                                   ModelApprovalStatus=status)
+    except botocore.exceptions.ClientError as exc:
+        # `delete_model` below has always caught this; approve and reject
+        # did not, so any ClientError came straight out as a 500 with a
+        # traceback behind it. The UAT pass found it with an ARN outside
+        # the IAM grant -- AccessDeniedException, unhandled -- but a
+        # throttle or a version deleted in another tab would have done
+        # the same, and those are ordinary.
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not mark it {status}: {exc}",
+        ) from exc
+    # The listing this status came out of is cached. Without this the
+    # operator approves a version, the page reloads, and it still reads
+    # Pending -- which looks like the approval did not take.
+    t2.forget_registry_listing()
     return {"model_package_arn": model_package_arn, "approval_status": status}
 
 
 @router.post("/model/{model_package_arn:path}/delete")
 def delete_model(model_package_arn: str, session=Depends(require_session)) -> dict:
     try:
-        t2.sm.delete_model_package(ModelPackageName=model_package_arn)
+        # Also unlinks the run that produced it, so the history does not go
+        # on claiming a version that is gone.
+        return t2.delete_model_package_and_detach_audit(model_package_arn)
     except botocore.exceptions.ClientError as exc:
         raise HTTPException(status_code=400, detail=f"Delete failed: {exc}")
-    return {"model_package_arn": model_package_arn, "deleted": True}

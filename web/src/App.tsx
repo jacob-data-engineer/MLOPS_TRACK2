@@ -25,6 +25,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { RequireAuth } from "./components/RequireAuth";
+import { RouteBoundary } from "./components/RouteBoundary";
 import { LoginPage } from "./routes/LoginPage";
 import { Track2CostPage } from "./routes/Track2CostPage";
 import { Track2DeployPage } from "./routes/Track2DeployPage";
@@ -35,6 +36,7 @@ import { Track2LineagePage } from "./routes/Track2LineagePage";
 import { Track2MetricsPage } from "./routes/Track2MetricsPage";
 import { Track2ModelsPage } from "./routes/Track2ModelsPage";
 import { Track2NotificationsPage } from "./routes/Track2NotificationsPage";
+import { Track2ScheduledPage } from "./routes/Track2ScheduledPage";
 import { Track2SchedulePage } from "./routes/Track2SchedulePage";
 import { Track2SyntheticPage } from "./routes/Track2SyntheticPage";
 
@@ -42,6 +44,25 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+
+      {/* The Help walkthrough, popped out. OUTSIDE the Layout route on
+          purpose: a second window carrying the sidebar, the wordmark and
+          the build badge is a second copy of the app, not a reference you
+          can keep beside the page you are working in. Still behind
+          RequireAuth -- it describes this estate, and the session is the
+          same one. */}
+      <Route
+        path="/track2/help/popout"
+        element={
+          <RequireAuth>
+            <div className="min-h-svh bg-page p-4">
+              <RouteBoundary>
+                <Track2HelpPage popout />
+              </RouteBoundary>
+            </div>
+          </RequireAuth>
+        }
+      />
 
       <Route
         element={
@@ -56,13 +77,25 @@ export function App() {
             Their old paths redirect to the landing page rather than 404,
             via the catch-all below, so existing links and bookmarks still
             land somewhere real. */}
-        <Route path="/" element={<Navigate to="/track2/models" replace />} />
+        {/* The landing page has to be one the nav offers. `/track2/models`
+            is still routed -- bookmarks resolve -- but it is no longer in
+            the sidebar, so arriving there would show a page with nothing
+            highlighted and no way back to it. */}
+        <Route path="/" element={<Navigate to="/track2/multi-auto-training" replace />} />
 
         {/* Review folded into Metrics (approve/reject/delete now live next
             to the metrics table itself) -- an old link still lands
             somewhere real. */}
         <Route path="/track2/review" element={<Navigate to="/track2/metrics" replace />} />
         <Route path="/track2/models" element={<Track2ModelsPage />} />
+        {/* The SAME component, so the queue, the GPU status and the
+            history are shared rather than duplicated. */}
+        <Route
+          path="/track2/multi-auto-training"
+          element={<Track2ModelsPage variant="multi" />}
+        />
+        {/* A suggested read-only view of the same settings as one picture.
+            Nothing on it writes; every stage links back to its card. */}
         <Route path="/track2/schedule" element={<Track2SchedulePage />} />
         <Route path="/track2/lineage" element={<Track2LineagePage />} />
         <Route path="/track2/metrics" element={<Track2MetricsPage />} />
@@ -73,6 +106,7 @@ export function App() {
             somewhere real. */}
         <Route path="/track2/inference" element={<Navigate to="/track2/deploy" replace />} />
         <Route path="/track2/notifications" element={<Track2NotificationsPage />} />
+        <Route path="/track2/scheduled" element={<Track2ScheduledPage />} />
         <Route path="/track2/help" element={<Track2HelpPage />} />
         <Route path="/track2/synthetic" element={<Track2SyntheticPage />} />
         <Route path="/track2/export" element={<Track2ExportPage />} />

@@ -166,9 +166,17 @@ data "aws_iam_policy_document" "review_app_access" {
     # Read-only: GetCostAndUsage cannot change anything, and billing data
     # is account-wide by nature -- there is no SageMaker-only variant of
     # the permission, the service filter is applied in the query instead.
+    #
+    # pricing:GetProducts: the published on-demand rate, so today's spend
+    # can be MEASURED rather than waited for. Cost Explorer lags roughly
+    # a day, so on the afternoon of a day spent training it answers
+    # $0.00 -- which reads as "this is free" rather than "ask again
+    # tomorrow". Multiplying each job's BillableTimeInSeconds by the
+    # rate agrees with the bill and answers on the day. Read-only, free,
+    # and account-independent -- the price list is public.
     sid       = "ReadCostExplorer"
     effect    = "Allow"
-    actions   = ["ce:GetCostAndUsage"]
+    actions   = ["ce:GetCostAndUsage", "pricing:GetProducts"]
     resources = ["*"]
   }
   statement {
@@ -284,9 +292,17 @@ data "aws_iam_policy_document" "review_app_access" {
     # SAGEMAKER_RESOURCE_LIMIT even though _get_training_progress()
     # (which only looks at THIS pipeline's own executions) shows nothing
     # running. Confirmed live, see summary.md.
+    #
+    # ListProcessingJobs/DescribeProcessingJob: the CPU half of the same
+    # indicator. A run is not one machine -- TrainYolo holds the GPU,
+    # then EvaluateYolo runs for seven or eight minutes on an
+    # ml.m5.xlarge -- so without these the bar reported "GPU free" while
+    # a run was plainly still going, which was asked about three times in
+    # one morning before anyone looked at the logs and found the deny.
+    # Account-wide for the same List* reason as above.
     sid       = "TrainingProgressPanel"
     effect    = "Allow"
-    actions   = ["sagemaker:ListPipelineExecutions", "sagemaker:ListPipelineExecutionSteps", "sagemaker:DescribeTrainingJob", "sagemaker:ListTrainingJobs"]
+    actions   = ["sagemaker:ListPipelineExecutions", "sagemaker:ListPipelineExecutionSteps", "sagemaker:DescribeTrainingJob", "sagemaker:ListTrainingJobs", "sagemaker:ListProcessingJobs", "sagemaker:DescribeProcessingJob"]
     resources = ["*"]
   }
   statement {
@@ -364,7 +380,12 @@ data "aws_iam_policy_document" "review_app_access" {
     # not "*".
     sid     = "ManageReviewerNotificationSubscriptions"
     effect  = "Allow"
-    actions = ["sns:Subscribe", "sns:Unsubscribe", "sns:ListSubscriptionsByTopic"]
+    # Get/SetSubscriptionAttributes: each subscriber's choice of which
+    # kinds of email they get is their subscription's FilterPolicy.
+    # Publish: the app emails "Errors" subscribers when a retrain chain
+    # it ran stops short (src/ppe_pipeline_api/notify.py).
+    actions = ["sns:Subscribe", "sns:Unsubscribe", "sns:ListSubscriptionsByTopic",
+    "sns:GetSubscriptionAttributes", "sns:SetSubscriptionAttributes", "sns:Publish"]
     resources = [
       aws_sns_topic.reviewer_notifications.arn,
       "${aws_sns_topic.reviewer_notifications.arn}:*",

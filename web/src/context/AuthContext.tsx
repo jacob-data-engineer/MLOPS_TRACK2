@@ -30,9 +30,41 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+/** Storage can throw outright in a private window or with site data
+ * blocked, which would take the whole app down on first render. A
+ * missing token only means signing in again. */
+function readStoredToken(): string | null {
+  try {
+    // Migrates anyone still holding a token from when this was per-tab,
+    // so the change does not itself sign everyone out once.
+    const carriedOver = sessionStorage.getItem(STORAGE_KEY);
+    if (carriedOver && !localStorage.getItem(STORAGE_KEY)) {
+      localStorage.setItem(STORAGE_KEY, carriedOver);
+      sessionStorage.removeItem(STORAGE_KEY);
+    }
+    return localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredToken(value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, value);
+  } catch {
+    // Unavailable storage: the session still works for this page, it
+    // just will not survive a reload.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // localStorage, not sessionStorage: sessionStorage is per TAB, so
+  // opening the app in a second tab landed on the sign-in screen, and
+  // closing a tab threw the session away. The token is shared across the
+  // browser and survives a tab being reopened.
   const [token, setToken] = useState<string | null>(() => {
-    const stored = sessionStorage.getItem(STORAGE_KEY);
+    const stored = readStoredToken();
     if (stored) setAuthToken(stored);
     return stored;
   });
@@ -48,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { token: newToken } = await loginRequest(password);
       setExpired(false);
-      sessionStorage.setItem(STORAGE_KEY, newToken);
+      writeStoredToken(newToken);
       setAuthToken(newToken);
       setToken(newToken);
     } catch (err) {
@@ -70,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem(STORAGE_KEY);
+    writeStoredToken(null);
     setAuthToken(null);
     setToken(null);
   }, []);
@@ -86,6 +118,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => setUnauthorizedHandler(null);
   }, [logout]);
+
+  // Now that the token is shared across tabs, the other tabs have to
+  // follow it. Without this, signing out in one tab leaves the others
+  // holding a token that has been removed from storage -- working until
+  // their next reload, then silently signed out.
+  useEffect(() => {
+    function onStorage(event: StorageEvent) {
+      if (event.key !== STORAGE_KEY && event.key !== null) return;
+      const current = readStoredToken();
+      setAuthToken(current);
+      setToken(current);
+      if (current) setExpired(false);
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({

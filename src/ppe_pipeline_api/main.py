@@ -18,9 +18,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, Response
 
 from . import auth, track2_shared
 from .routers import (
@@ -32,6 +33,8 @@ from .routers import (
     track2_metrics,
     track2_models,
     track2_notifications,
+    track2_pull_control,
+    track2_retention,
     track2_review,
     track2_schedule,
 )
@@ -52,13 +55,33 @@ async def lifespan(app: FastAPI):
     # track2_shared.py's module docstring on why this state is in-memory,
     # single-process only, same as session_store.py.
     poll_task = asyncio.create_task(track2_shared.queue_poll_loop())
+    # Fill the registry cache before anybody asks for it.
+    #
+    # Review & Metrics lists every model package group and describes every
+    # version in them. Cached, that is instant -- but the FIRST load after
+    # a deploy pays the whole 9-12 seconds, and a deploy ends every
+    # session, so the first person back in always pays it. Doing it here
+    # means they do not.
+    #
+    # In a thread, not awaited: it is blocking boto3, and the point is
+    # that startup does not wait for it. Failure is ignored on purpose --
+    # this is a warm-up, and the routes all still work cold.
+    # Once now, then again just inside the cache's lifetime for as long as
+    # the app is up. The one-off warm-up alone was not enough: the entries
+    # aged out before anybody arrived and the first request paid the full
+    # price regardless -- 7.6 seconds, measured over HTTP against the
+    # warmed process.
+    warm_task = asyncio.create_task(asyncio.to_thread(track2_shared.warm_registry_cache))
+    refresh_task = asyncio.create_task(track2_shared.registry_warm_loop())
     try:
         yield
     finally:
         poll_task.cancel()
+        warm_task.cancel()
+        refresh_task.cancel()
 
 
-app = FastAPI(title="PPE Pipeline API", lifespan=lifespan)
+app = FastAPI(title="Track2 MLOps API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -73,6 +96,9 @@ app.add_middleware(
 )
 
 app.post("/auth/login", response_model=auth.LoginResponse, tags=["auth"])(auth.login)
+# Probed by the browser whenever any other call 401s, to tell a dead
+# session from a one-off failure before signing anyone out.
+app.get("/auth/session", tags=["auth"])(auth.check_session)
 
 # Track2 only. The original PPE judge routers (track1, metrics, eval,
 # fewshot, goldset, models, escalations, helmet-cv) were removed along with
@@ -89,11 +115,34 @@ app.include_router(track2_notifications.router, prefix="/track2/notifications", 
 app.include_router(track2_export.router, prefix="/track2/export", tags=["track2-export"])
 app.include_router(track2_cost.router, prefix="/track2/cost", tags=["track2-cost"])
 app.include_router(track2_eval.router, prefix="/track2/eval", tags=["track2-eval"])
+app.include_router(track2_pull_control.router, prefix="/track2/pull-control", tags=["track2-pull-control"])
+app.include_router(track2_retention.router, prefix="/track2/retention", tags=["track2-retention"])
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/build")
+def build() -> dict:
+    """Which image this container is running, and what it is for.
+
+    Unauthenticated on purpose: it carries no data, and the one moment
+    you most need to know which build you are looking at is before you
+    have logged into it.
+
+    Two containers may run side by side -- a stable one and a development
+    one, on different ports, against the same tables. That is only safe
+    while the difference is visible, which is what this is for.
+    """
+    import os as _os
+
+    return {
+        "tag": _os.environ.get("APP_BUILD_TAG", ""),
+        "role": _os.environ.get("APP_ROLE", ""),
+        "port": _os.environ.get("APP_PORT", ""),
+    }
 
 
 # Serve the built React SPA (Dockerfile's frontend-builder stage) --
@@ -106,6 +155,38 @@ def health() -> dict:
 _WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
 if _WEB_DIST.is_dir():
+
+    @app.exception_handler(HTTPException)
+    async def _page_request_gets_the_app(request: Request, exc: HTTPException) -> Response:
+        """A browser asking for a PAGE gets the app, not an API error.
+
+        Ten of the SPA's routes are spelled exactly like the API routers
+        that back them -- `/track2/models` is both the page and the data
+        behind it. The routers are registered first and FastAPI takes the
+        first match, so the catch-all below never runs for those paths:
+        typing the URL, reloading, or opening a bookmark returned
+        `{"detail": "Missing or malformed Authorization header."}` where
+        the page should have been. Clicking through the nav always worked,
+        because React Router never asks the server -- which is why this
+        survived so long.
+
+        Discriminated on Accept. A top-level browser navigation sends
+        `text/html`; `fetch` with no Accept set -- which is every call the
+        SPA makes -- sends `*/*`. So the app's own requests still get
+        their JSON 401 and its session-recovery still runs, and only a
+        human pointing a browser at a page gets the page.
+
+        Registered inside this block on purpose: with no built frontend
+        there is nothing to serve, and an API-only deployment should keep
+        answering 401 in JSON.
+        """
+        if exc.status_code in (401, 403) and "text/html" in (
+            request.headers.get("accept") or ""
+        ):
+            return FileResponse(
+                _WEB_DIST / "index.html", headers={"Cache-Control": "no-cache"}
+            )
+        return await http_exception_handler(request, exc)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str) -> FileResponse:

@@ -58,6 +58,19 @@ def login(payload: LoginRequest, request: Request) -> LoginResponse:
     return LoginResponse(token=token)
 
 
+def check_session(authorization: str | None = Header(default=None)) -> dict:
+    """Is this token still good? 200 if so, 401 if not.
+
+    Exists so the browser can tell a dead session from a one-off 401 on
+    some unrelated call. Previously ANY 401 from ANY endpoint dropped
+    straight to the sign-in screen, so a single failing background poll
+    signed the operator out mid-task. Deliberately does no work beyond
+    the validation itself -- it runs on every 401, so it must be cheap.
+    """
+    require_session(authorization)
+    return {"ok": True}
+
+
 def require_session(authorization: str | None = Header(default=None)) -> tuple[str, dict]:
     """Dependency for every non-auth route: validates the bearer token and
     returns `(token, session_dict)` so a route can both key its own state

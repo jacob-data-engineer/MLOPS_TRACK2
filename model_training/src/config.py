@@ -1,6 +1,6 @@
 """Bucket/region/role/instance-type tunables — mirrors Track2's own
 config.py/config.toml pattern. Values here match the Terraform outputs
-from ../../terraform/infra; re-run `terraform output` there if any of
+from ../../terraform/platform; re-run `terraform output` there if any of
 these drift.
 """
 
@@ -58,9 +58,10 @@ class Config:
 # Nano (see register_baseline_model.py's own REGISTERABLE_SIZES).
 SIZES = ("s", "m", "l", "x")
 
-# YOLO11 only, by explicit user decision -- YOLOv8/9/10/12 and YOLO26
-# are all deliberately excluded, not just "not yet added" (YOLO12 has no
-# registered baseline and is not wanted here regardless). Nano also
+# YOLO11 and YOLO26. YOLOv8/9/10/12 are deliberately excluded, not just
+# "not yet added" (YOLO12 has no registered baseline and is not wanted
+# here regardless). YOLO26 was excluded on the same footing until
+# 2026-09-30 and is now in. Nano also
 # dropped from every generation's size options -- by policy, not because
 # those combinations are invalid Ultralytics releases. Must match
 # terraform/review-app/review_app.py's GENERATION_SIZES exactly (that app
@@ -68,7 +69,11 @@ SIZES = ("s", "m", "l", "x")
 # file, see terraform/scripts/deploy_review_app.sh -- so the two copies
 # are kept in sync by convention).
 GENERATION_SIZES = {
+    # YOLO26 added 2026-09-30. Needs ultralytics >= 8.4 in the training
+    # image -- 8.3 has no yolo26 cfg at all, so a run would die at model
+    # construction. See training-container/Dockerfile.
     "11": ("s", "m", "l", "x"),
+    "26": ("s", "m", "l", "x"),
 }
 
 

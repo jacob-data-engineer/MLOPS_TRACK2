@@ -2,7 +2,17 @@
 # Builds the React SPA (web/) into static files the Python stage below
 # serves. This is the only UI -- the Streamlit `app.py` it replaced has
 # been removed from the repo.
-FROM node:20-slim AS frontend-builder
+# Both base images are mirrored into this account's own ECR by the
+# `track2-app-base` repo, so a build pulls them in-region rather than from
+# Docker Hub or GitHub. That is the whole difference between a four minute
+# deploy and an eighteen minute one:
+#
+#   17 Sep   12 builds   3.9 - 6.9 min   (layers happened to be on the host)
+#   24 Sep   same code   4.0 - 18.3 min  (bimodal: cached host vs cold pull)
+#
+# Refresh them with the mirror buildspec when a newer base is wanted --
+# terraform/app/base_images.tf explains why that is deliberate.
+FROM 125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-app-base:node-20-slim AS frontend-builder
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -14,9 +24,11 @@ ENV VITE_API_BASE_URL=""
 RUN npm run build
 
 # ---- Python app stage --------------------------------------------------
-# CPU-only image: the judge runs on Amazon Bedrock, so nothing here needs
-# a GPU or any local model weights.
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+# CPU-only image. torch and torchvision come from the CPU wheel index
+# (see [tool.uv.sources] in pyproject.toml); nothing here needs a GPU.
+# Training runs on SageMaker, in a different image entirely
+# (model_training/training-container).
+FROM 125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-app-base:uv-python3.12-bookworm-slim
 
 WORKDIR /app
 
@@ -24,40 +36,32 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PYTHONUNBUFFERED=1
 
-# aiops-pipeline (pyproject.toml) is pulled from the private SNAIC-JP/Track2
-# repo over git+https, so
-# `uv sync` needs git installed plus a credential. The token is passed as a
-# BuildKit secret (`docker build --secret id=track_repos_token,...`) and only
-# ever touches a credential.helper that's configured, used, and unset inside
-# a single RUN — never written to a config file that survives into a layer,
-# so it can't be recovered from `docker history`/pulled image layers.
-# git: uv installs aiops-pipeline from a git+https URL (see below).
-# libgl1 / libglib2.0-0: opencv, pulled in by ultralytics for the stage-2
-#   helmet detector, links against them. Without these `import ultralytics`
-#   raises ImportError: libxcb.so.1 in this slim base image, which
-#   helmet_detector.locate() catches -- so every helmet case silently fell
-#   back to the judge's looser inline box instead of the detector's.
-#   Verified against this exact image: these two are sufficient (libxcb
-#   arrives as a dependency of libgl1).
+# libgl1 / libglib2.0-0: opencv, pulled in by ultralytics, links against
+#   them. Without these `import ultralytics` raises ImportError on
+#   libxcb.so.1 in this slim base image. ultralytics is imported for real
+#   here -- registering a checkpoint slices its detection head down to the
+#   chosen classes -- so this is not optional. Verified against this exact
+#   image: these two are sufficient (libxcb arrives with libgl1).
+#
+# git is deliberately NOT installed any more. It was here solely because
+# `uv sync` resolved aiops-pipeline from a private git+https URL, which in
+# turn meant threading a GitHub token through the build as a BuildKit
+# secret and unsetting the credential helper inside each RUN so it could
+# not survive into a layer. That dependency went with the PPE judge, so
+# every package now comes from an index and the build needs no credential
+# at all. The buildspec still writes /tmp/token; it is simply unused, and
+# an unused BuildKit secret is not an error.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git libgl1 libglib2.0-0 \
+      libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies first, separately from the app source, so this layer
 # is cached across rebuilds that only change app code.
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=secret,id=track_repos_token \
-    git config --global credential.helper \
-      '!f() { echo "username=x-access-token"; echo "password=$(cat /run/secrets/track_repos_token)"; }; f' \
-    && uv sync --locked --no-install-project \
-    && git config --global --unset-all credential.helper
+RUN uv sync --locked --no-install-project
 
 COPY . .
-RUN --mount=type=secret,id=track_repos_token \
-    git config --global credential.helper \
-      '!f() { echo "username=x-access-token"; echo "password=$(cat /run/secrets/track_repos_token)"; }; f' \
-    && uv sync --locked \
-    && git config --global --unset-all credential.helper
+RUN uv sync --locked
 
 COPY --from=frontend-builder /app/web/dist ./web/dist
 
@@ -71,8 +75,7 @@ RUN uv run python -c "import sys; sys.path.insert(0, 'src'); import ppe_pipeline
 
 EXPOSE 8501
 
-# AWS_BEARER_TOKEN_BEDROCK / PPE_APP_PASSWORD / PPE_STORAGE_BACKEND etc.
-# are read from the runtime environment (see .env.example) — never baked
-# into the image. Runs the FastAPI + React stack: main.py serves both the
+# PPE_APP_PASSWORD and the table/bucket/pipeline names are read from the
+# runtime environment (see .env.example) — never baked into the image. Runs the FastAPI + React stack: main.py serves both the
 # API and the built SPA in web/dist on the same port.
 ENTRYPOINT ["uv", "run", "uvicorn", "ppe_pipeline_api.main:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "8501"]

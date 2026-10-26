@@ -34,10 +34,44 @@ Three separate locks, all deliberate:
 A model with a different taxonomy in that chain is mislabelled at every
 step without failing anywhere, which is far worse than not running.
 
+## Which pipeline actually runs
+
+`track2-yolo-custom-training-pipeline` (below) is **superseded and unused.**
+It runs the digest-pinned "recovery" training image, whose wrapper asserts
+`model.names == {0: "person", 1: "helmet"}` on the BASE checkpoint -- so it
+can only ever fine-tune from a production checkpoint, which defeats the
+point of an open-taxonomy pipeline.
+
+Custom-class runs go to **`track2-yolo-open-training-pipeline`**, defined by
+`pipeline_open.json`. It runs `track2-yolo-train` (this repo's own
+`train.py`, no class assertion) pinned by digest, sends no `run-id`, and has
+no `CheckpointConfig`.
+
+```powershell
+cd C:\Projects\MLOPS_TRACK2\model_training\custom_training
+aws sagemaker create-pipeline `
+  --pipeline-name track2-yolo-open-training-pipeline `
+  --pipeline-definition file://pipeline_open.json `
+  --role-arn arn:aws:iam::125192671932:role/track2-yolo-sagemaker-execution `
+  --region ap-southeast-1
+```
+
+Seeds for "train from scratch" must exist before that mode works, one per
+architecture. Build them **inside the training image** -- a `.pt` is a
+pickled live `nn.Module`, so the writer's library versions must match the
+reader's:
+
+```powershell
+aws s3 cp make_scratch_checkpoint.py s3://track2-s3/custom/code/make_scratch_checkpoint.py --region ap-southeast-1
+# then a SageMaker Processing job on track2-yolo-train running
+#   python3 /opt/ml/processing/input/code/make_scratch_checkpoint.py --arch yolo11s
+# -> s3://track2-s3/external_models/scratch/yolo11s/{model.pt,manifest.json}
+```
+
 ## One-time setup
 
 ```powershell
-cd C:\Projects\JP_UI\jurong-port\model_training\custom_training
+cd C:\Projects\MLOPS_TRACK2\model_training\custom_training
 
 # 1. the evaluator the pipeline runs
 aws s3 cp evaluate_any.py s3://track2-s3/custom/code/evaluate_any.py --region ap-southeast-1

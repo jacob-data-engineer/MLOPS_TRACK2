@@ -61,6 +61,21 @@
   --color-critical: #9c1c17;
   --color-critical-subtle: #f1ddd4;
 
+  /* INFORMATIONAL BLUE. For a notice that tells you where something
+     already is, rather than one that blocks you.
+
+     Deliberately added against the One Red Rule above, which said red is
+     the only saturated hue. The rule earns its keep where red means
+     "stop", and it was costing the opposite: a card saying "a Model Name
+     has already been picked" was printed in the same alarm ink as a
+     refusal, so a message whose whole job was to reassure read as a
+     failure. Blue is the answer to "where is it", red stays the answer
+     to "you cannot".
+
+     The same hue the escalate verdict already uses, so this adds a
+     meaning to the palette rather than a colour. */
+  --color-info: #1c4f9c;
+
   /* THE VERDICT INKS. CEO decision, 1 Sep: "Violation is in Red, No Violation
      is in green and Escalation is in Blue" -- which replaces the One Red Rule
      and the No Triad Rule for verdicts (see DESIGN.md).

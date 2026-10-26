@@ -12,6 +12,48 @@ import {
 
 const SIZES = ["s", "m", "l", "x"];
 
+/** `yolo26s-open-detector` -> {generation: "26", size: "s", rest: "-open"}.
+ *  Mirrors parse_group_name server-side. null for a name not in that
+ *  shape -- the legacy custom group -- which then shows as itself. */
+function parseGroup(group: string): { generation: string; size: string; rest: string } | null {
+  const m = /^yolo(\d+)([smlx])(-.*)?$/.exec(group.replace(/-detector$/, ""));
+  return m ? { generation: m[1], size: m[2], rest: m[3] ?? "" } : null;
+}
+
+/** Every group the server sent, in a stable, readable order.
+ *
+ * This page used to render four hardcoded `yolo11{size}-detector` keys.
+ * The route has always passed `include_open=True` -- with a comment
+ * saying why export, unlike deploy, is safe for open-taxonomy models --
+ * and the page then threw all of them away. Nothing said so: the groups
+ * were fetched, counted, and silently not drawn, so a custom or YOLO26
+ * model was simply absent with no empty state to explain it.
+ */
+function groupsToShow(registries: Track2ExportResponse["registries"]): string[] {
+  const sizeRank = (size: string) => (SIZES.indexOf(size) + 1 || 99);
+  return Object.keys(registries)
+    .filter((g) => (registries[g]?.packages.length ?? 0) > 0)
+    .sort((a, b) => {
+      const pa = parseGroup(a);
+      const pb = parseGroup(b);
+      // Unparseable names last rather than interleaved by accident.
+      if (!pa || !pb) return (pa ? 0 : 1) - (pb ? 0 : 1) || a.localeCompare(b);
+      // Production (no suffix) before open/named, then generation, then size.
+      return (pa.rest ? 1 : 0) - (pb.rest ? 1 : 0)
+        || pa.generation.localeCompare(pb.generation)
+        || sizeRank(pa.size) - sizeRank(pb.size)
+        || a.localeCompare(b);
+    });
+}
+
+/** "YOLO26 · Size S · open" -- what this block actually holds. */
+function groupHeading(group: string): string {
+  const parsed = parseGroup(group);
+  if (!parsed) return group;
+  const suffix = parsed.rest ? ` · ${parsed.rest.replace(/^-/, "")}` : "";
+  return `YOLO${parsed.generation} · Size ${parsed.size.toUpperCase()}${suffix}`;
+}
+
 function approvalTone(status: string): "confirmed" | "rejected" | "pending" {
   if (status === "Approved") return "confirmed";
   if (status === "Rejected") return "rejected";
@@ -56,7 +98,8 @@ export function Track2ExportPage() {
       </h1>
       <p className="mb-6 max-w-3xl text-sm text-ink-secondary">
         Pull an Approved registry package's <code className="tabular">model.pt</code> out to
-        any S3 folder, written as <code className="tabular">yolo11-&lt;size&gt;-v&lt;version&gt;-&lt;date&gt;.pt</code>{" "}
+        any S3 folder, written as{" "}
+        <code className="tabular">yolo&lt;generation&gt;-&lt;size&gt;-v&lt;version&gt;-&lt;date&gt;.pt</code>{" "}
         so a folder full of exports stays legible on its own. An existing file
         at that exact name is archived first, never silently overwritten.
       </p>
@@ -82,15 +125,19 @@ export function Track2ExportPage() {
 
       {data && (
         <div className="flex flex-col gap-5">
-          <Card title="Select a YOLO11 model version to export">
-            {SIZES.map((size) => {
-              const group = `yolo11${size}-detector`;
+          <Card title="Select a model version to export">
+            {groupsToShow(data.registries).length === 0 && (
+              <p className="text-sm text-ink-muted">
+                No registered versions yet.
+              </p>
+            )}
+            {groupsToShow(data.registries).map((group) => {
               const summary = data.registries[group];
               if (!summary || summary.packages.length === 0) return null;
               return (
                 <div key={group} className="mb-4 last:mb-0">
                   <p className="mb-1.5 bg-page px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-secondary">
-                    YOLO11 &middot; Size {size.toUpperCase()}
+                    {groupHeading(group)}
                   </p>
                   <div className="flex flex-col gap-1.5">
                     {summary.packages.map((p) => {

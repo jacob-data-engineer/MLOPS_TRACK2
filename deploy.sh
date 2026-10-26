@@ -20,6 +20,9 @@ set -euo pipefail
 REGION="ap-southeast-1"
 PORT="${PORT:-8090}"
 CONTAINER="${CONTAINER:-track2-app}"
+# Shown in the UI beside the build tag, so which container you are looking
+# at is never a guess. Two may now run side by side -- see the sweep below.
+APP_ROLE="${APP_ROLE:-stable}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # This folder's own stack -- nothing here reads the jurong-port state.
 # terraform/app is this app's own stack (ECR, CodeBuild, the audit table).
@@ -117,7 +120,15 @@ else
     echo "Need either 'zip' or bsdtar (tar.exe) to package the source." >&2
     exit 1
   fi
+  # Both spellings of every directory exclude: bsdtar matches these
+  # patterns against the whole member path, so '*/.venv/*' requires a
+  # leading directory and silently misses a top-level '.venv/...'. A venv
+  # at the repo root is the normal case (uv puts it there), and without
+  # the bare pattern it went into the build source -- 351MB instead of
+  # 824KB, on every deploy, for a directory the image never uses.
   ( cd "$SCRIPT_DIR" && shopt -s dotglob && "$BSDTAR" -c -a -f "$(cygpath -w "$ZIP")" \
+      --exclude '.venv/*' --exclude 'node_modules/*' \
+      --exclude '__pycache__/*' --exclude '.pytest_cache/*' \
       --exclude '*/.venv/*' --exclude '*/node_modules/*' \
       --exclude 'web/dist/*' --exclude '*/__pycache__/*' \
       --exclude '*/.pytest_cache/*' --exclude 'legacy-review-app/*' \
@@ -128,13 +139,24 @@ else
       -- * )
 fi
 echo "  $(du -h "$ZIP" | cut -f1)"
-aws s3 cp "$ZIP" "s3://$BUCKET/$SOURCE_PREFIX/app.zip" --region "$REGION"
+# Keyed by container, not a single app.zip. Two deploys running at once
+# -- development and production, now that both exist -- otherwise share
+# one source object: the second upload replaces the first, and whichever
+# build fetches later compiles the other one's code and ships it under
+# its own tag. Nothing about that looks wrong afterwards.
+SOURCE_KEY="$SOURCE_PREFIX/app-$CONTAINER.zip"
+aws s3 cp "$ZIP" "s3://$BUCKET/$SOURCE_KEY" --region "$REGION"
 rm -rf "$(dirname "$ZIP")"
 
 # --- 2. build it in AWS -------------------------------------------------
 echo "Starting CodeBuild ($BUILD_PROJECT) ..."
+# The project's own source is still .../app.zip; this points the build at
+# this deploy's copy instead, so the project does not have to be edited
+# and two builds cannot read the same object.
 BUILD_ID=$(aws codebuild start-build \
   --project-name "$BUILD_PROJECT" \
+  --source-type-override S3 \
+  --source-location-override "$BUCKET/$SOURCE_KEY" \
   --environment-variables-override "name=IMAGE_TAG,value=$TAG,type=PLAINTEXT" \
   --region "$REGION" --query "build.id" --output text)
 echo "  $BUILD_ID"
@@ -192,9 +214,40 @@ if [ -z "\$APP_PASSWORD" ]; then
   exit 1
 fi
 
+# REPLACE whatever occupies THIS PORT, and leave anything on another port
+# alone. Two containers may now run side by side -- a stable one and a
+# development one -- which is why this is no longer a sweep of every
+# container from this repo.
+#
+# The port is the right thing to key on. The failure that made this a
+# sweep in the first place was a deploy landing on a new container while
+# the old one kept serving the URL people actually had: a stale build
+# nobody could see was stale. Two containers cannot share a port, so
+# clearing this port guarantees the URL being deployed to is the build
+# just deployed, while a container on a different port is left running
+# on purpose.
+#
+# Scoped to this repo, so nothing else on the box is touched, and the
+# running image tag is now shown in the UI -- which is the part that
+# makes two containers safe rather than confusing.
+for cid in \$(docker ps -a --format '{{.ID}} {{.Image}} {{.Ports}} {{.Names}}' \
+              | grep -F '$APP_REPO' \
+              | grep -E ":$PORT->|[[:space:]]$CONTAINER\$" \
+              | awk '{print \$1}' | sort -u); do
+  echo "removing app container \$cid (holds port $PORT or the name $CONTAINER)"
+  docker rm -f "\$cid" >/dev/null 2>&1 || true
+done
 docker rm -f $CONTAINER 2>/dev/null || true
+# Settings live on the HOST, not in the container, so they survive a
+# deploy replacing it. Per container name, so development cannot overwrite
+# production's saved settings by saving under the same name.
+mkdir -p /opt/track2-app/settings/$CONTAINER
 docker run -d --name $CONTAINER --restart unless-stopped -p $PORT:8501 \\
+  -v /opt/track2-app/settings/$CONTAINER:/settings \\
   -e PPE_APP_PASSWORD="\$APP_PASSWORD" \\
+  -e APP_BUILD_TAG='$TAG' \\
+  -e APP_ROLE='$APP_ROLE' \\
+  -e APP_PORT='$PORT' \\
   -e AWS_REGION='$REGION' \\
   -e REVIEW_QUEUE_TABLE='track2-yolo-review-queue' \\
   -e PIPELINE_BUCKET='$BUCKET' \\
@@ -218,7 +271,14 @@ echo
 docker ps --filter name=$CONTAINER --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 EOF
 
-aws s3 cp "$RUN_SCRIPT" "s3://$BUCKET/$SOURCE_PREFIX/run_container.sh" --region "$REGION" >/dev/null
+# Also per container, and for a worse reason than the zip: this script
+# carries the container NAME, the PORT and the role. Overwritten by a
+# concurrent deploy between upload and fetch, a production deploy would
+# bring the container up on development's port under development's name.
+# It is uploaded on the promotion path too (IMAGE_TAG skips the build but
+# not this), so the production route is exactly the one at risk.
+RUN_KEY="$SOURCE_PREFIX/run_container-$CONTAINER.sh"
+aws s3 cp "$RUN_SCRIPT" "s3://$BUCKET/$RUN_KEY" --region "$REGION" >/dev/null
 
 echo "Deploying to the instance ..."
 COMMAND_ID=$(aws ssm send-command \
@@ -227,9 +287,9 @@ COMMAND_ID=$(aws ssm send-command \
   --comment "Deploy track2 app $TAG" \
   --parameters "{\"commands\":[\
 \"mkdir -p /opt/track2-app\",\
-\"aws s3 cp s3://$BUCKET/$SOURCE_PREFIX/run_container.sh /opt/track2-app/run_container.sh --region $REGION\",\
-\"chmod +x /opt/track2-app/run_container.sh\",\
-\"/opt/track2-app/run_container.sh\"\
+\"aws s3 cp s3://$BUCKET/$RUN_KEY /opt/track2-app/run_container-$CONTAINER.sh --region $REGION\",\
+\"chmod +x /opt/track2-app/run_container-$CONTAINER.sh\",\
+\"/opt/track2-app/run_container-$CONTAINER.sh\"\
 ]}" \
   --region "$REGION" --query "Command.CommandId" --output text)
 
@@ -249,6 +309,69 @@ if [ "$STATUS" != "Success" ]; then
   echo "Deploy FAILED on the instance (SSM status: $STATUS)." >&2
   echo "The image is in ECR; the running container was not replaced." >&2
   exit 1
+fi
+
+# --- 4. the Lambda runs the SAME source file -----------------------------
+#
+# terraform/app zips src/ppe_pipeline_api/pull_control.py straight into the
+# pull-control router, so the container and the Lambda share one file and
+# one routing rule. But a container deploy does not touch Lambda, and the
+# Lambda only changes on a targeted apply -- so they drift in silence.
+#
+# That happened: the router spent a day filing into the old flat layout
+# while the app had moved to images/train, and nothing reported a problem
+# because each half was self-consistent.
+#
+# `source_code_hash` makes this a no-op when the file has not changed, so
+# it costs nothing on a frontend-only deploy.
+#
+# NOTE: there is ONE router, shared by both containers. A development
+# deploy therefore updates the function that sweeps unattended against
+# real data -- the same trade already accepted for the shared tables.
+if [ "${SKIP_LAMBDA:-}" = "1" ]; then
+  echo "SKIP_LAMBDA=1 -- leaving the router on its current code."
+else
+  echo
+  # The queue runner's zip is assembled here, not by Terraform: an
+  # archive_file can take one source_dir, and this needs two -- the
+  # package, and PyYAML, which the advance needs because validating a
+  # dataset reads its data.yaml.
+  #
+  # Only the `yaml/` package is copied, never the `_yaml` C extension
+  # beside it: that is built for THIS machine, and PyYAML falls back to
+  # its pure-Python parser when the extension will not import. Copying a
+  # Windows .pyd into a Linux Lambda is how that fallback stops being
+  # theoretical.
+  QR_BUILD="$INFRA_DIR/.build/queue_runner"
+  rm -rf "$QR_BUILD"
+  mkdir -p "$QR_BUILD"
+  cp -r "$SCRIPT_DIR/src/ppe_pipeline_api" "$QR_BUILD/ppe_pipeline_api"
+  find "$QR_BUILD" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+  if [ -d "$SCRIPT_DIR/.venv/Lib/site-packages/yaml" ]; then
+    cp -r "$SCRIPT_DIR/.venv/Lib/site-packages/yaml" "$QR_BUILD/yaml"
+  elif [ -d "$SCRIPT_DIR/.venv/lib/python3.12/site-packages/yaml" ]; then
+    cp -r "$SCRIPT_DIR/.venv/lib/python3.12/site-packages/yaml" "$QR_BUILD/yaml"
+  else
+    echo >&2 "WARNING: PyYAML not found in .venv -- the queue runner would fail"
+    echo >&2 "  at dataset validation. Install it and redeploy."
+  fi
+
+  echo "Updating the pull-control router (shares pull_control.py) ..."
+  if (cd "$INFRA_DIR" && terraform apply -auto-approve -input=false         -target=aws_lambda_function.pull_control_router         -target=aws_lambda_function.queue_runner >/dev/null 2>&1); then
+    LAMBDA_AT=$(aws lambda get-function-configuration       --function-name track2-app-pull-control-router       --region "$REGION" --query LastModified --output text 2>/dev/null || echo unknown)
+    echo "  router code as of $LAMBDA_AT"
+  else
+    # Loud, and after the container is already up, so the state is
+    # unambiguous rather than half-reported.
+    echo >&2
+    echo "WARNING: the container deployed but the router was NOT updated." >&2
+    echo "  Unattended sweeps are still running the previous code, which may" >&2
+    echo "  file into a different layout than this build expects." >&2
+    echo "  Most likely a Terraform state lock from a concurrent deploy." >&2
+    echo "  Re-run:  cd $INFRA_DIR && terraform apply \\" >&2
+    echo "             -target=aws_lambda_function.pull_control_router" >&2
+    exit 1
+  fi
 fi
 
 echo

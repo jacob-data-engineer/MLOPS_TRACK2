@@ -1,1 +1,437 @@
-{"Version": "2020-12-01", "Metadata": {}, "Parameters": [{"Name": "TrainingDatasetUri", "Type": "String"}, {"Name": "EvaluationOutputUri", "Type": "String"}, {"Name": "RunMetadataUri", "Type": "String"}, {"Name": "RunId", "Type": "String"}, {"Name": "DatasetVersion", "Type": "String"}, {"Name": "BaseModelUri", "Type": "String"}, {"Name": "EvaluationDatasetUri", "Type": "String"}, {"Name": "Epochs", "Type": "String", "DefaultValue": "50"}, {"Name": "ImgSize", "Type": "String", "DefaultValue": "640"}, {"Name": "Batch", "Type": "String", "DefaultValue": "16"}, {"Name": "Seed", "Type": "String", "DefaultValue": "42"}], "PipelineExperimentConfig": {"ExperimentName": "track2-yolo-custom-training", "TrialName": {"Get": "Execution.PipelineExecutionId"}}, "Steps": [{"Name": "TrainYolo", "Type": "Training", "Arguments": {"AlgorithmSpecification": {"TrainingInputMode": "File", "TrainingImage": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-fullframe-training-recovery@sha256:68db0d890859036177fa7fa38b2f25b7c96f2d067ee7f09efe5bd58bce329844", "MetricDefinitions": [{"Name": "train:epoch", "Regex": "(\\d+)/\\d+\\s+\\d+(?:\\.\\d+)?G"}, {"Name": "dataset:total_images", "Regex": "DATASET_TOTAL_IMAGES:\\s+(\\d+)"}, {"Name": "dataset:images_downloaded", "Regex": "DATASET_IMAGES:\\s+(\\d+)/\\d+"}]}, "OutputDataConfig": {"S3OutputPath": "s3://track2-s3/training-output/"}, "StoppingCondition": {"MaxRuntimeInSeconds": 86400}, "ResourceConfig": {"VolumeSizeInGB": 30, "InstanceCount": 1, "InstanceType": "ml.g4dn.xlarge"}, "RoleArn": "arn:aws:iam::125192671932:role/track2-yolo-sagemaker-execution", "HyperParameters": {"epochs": {"Get": "Parameters.Epochs"}, "img-size": {"Get": "Parameters.ImgSize"}, "batch": {"Get": "Parameters.Batch"}, "seed": {"Get": "Parameters.Seed"}, "train-data-s3-uri": {"Get": "Parameters.TrainingDatasetUri"}, "base-model-s3-uri": {"Get": "Parameters.BaseModelUri"}, "run-id": {"Get": "Parameters.RunId"}}, "DebugHookConfig": {"S3OutputPath": "s3://track2-s3/training-output/", "CollectionConfigurations": []}, "ProfilerConfig": {"S3OutputPath": "s3://track2-s3/training-output/", "DisableProfiler": false}, "CheckpointConfig": {"LocalPath": "/opt/ml/checkpoints", "S3Uri": {"Std:Join": {"On": "/", "Values": ["s3://track2-s3/custom/runs", {"Get": "Parameters.RunId"}, "checkpoints/"]}}}}, "RetryPolicies": [{"ExceptionType": ["Step.SERVICE_FAULT", "Step.THROTTLING", "SageMaker.JOB_INTERNAL_ERROR", "SageMaker.CAPACITY_ERROR"], "IntervalSeconds": 60, "BackoffRate": 2.0, "MaxAttempts": 1}]}, {"Name": "EvaluateYolo", "Type": "Processing", "Arguments": {"ProcessingResources": {"ClusterConfig": {"InstanceType": "ml.m5.xlarge", "InstanceCount": 1, "VolumeSizeInGB": 30}}, "AppSpecification": {"ImageUri": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train:train-latest", "ContainerEntrypoint": ["python3", "/opt/ml/processing/input/code/evaluate.py"]}, "RoleArn": "arn:aws:iam::125192671932:role/track2-yolo-sagemaker-execution", "ProcessingInputs": [{"InputName": "input-1", "AppManaged": false, "S3Input": {"S3Uri": {"Get": "Steps.TrainYolo.ModelArtifacts.S3ModelArtifacts"}, "LocalPath": "/opt/ml/processing/model", "S3DataType": "S3Prefix", "S3InputMode": "File", "S3DataDistributionType": "FullyReplicated", "S3CompressionType": "None"}}, {"InputName": "input-2", "AppManaged": false, "S3Input": {"S3Uri": {"Get": "Parameters.EvaluationDatasetUri"}, "LocalPath": "/opt/ml/processing/data", "S3DataType": "S3Prefix", "S3InputMode": "File", "S3DataDistributionType": "FullyReplicated", "S3CompressionType": "None"}}, {"InputName": "code", "AppManaged": false, "S3Input": {"S3Uri": "s3://track2-s3/custom/code/evaluate_any.py", "LocalPath": "/opt/ml/processing/input/code", "S3DataType": "S3Prefix", "S3InputMode": "File", "S3DataDistributionType": "FullyReplicated", "S3CompressionType": "None"}}], "ProcessingOutputConfig": {"Outputs": [{"OutputName": "evaluation", "AppManaged": false, "S3Output": {"S3Uri": {"Get": "Parameters.EvaluationOutputUri"}, "LocalPath": "/opt/ml/processing/output", "S3UploadMode": "EndOfJob"}}]}, "Environment": {"EXPERIMENT_NAME": "track2-yolo-training", "RUN_NAME": {"Get": "Execution.PipelineExecutionId"}, "BASE_MODEL_URI": {"Get": "Parameters.BaseModelUri"}}}, "RetryPolicies": [{"ExceptionType": ["Step.SERVICE_FAULT", "Step.THROTTLING", "SageMaker.JOB_INTERNAL_ERROR", "SageMaker.CAPACITY_ERROR"], "IntervalSeconds": 60, "BackoffRate": 2.0, "MaxAttempts": 1}]}, {"Name": "RegisterYoloModel-RegisterModel", "Type": "RegisterModel", "Arguments": {"ModelPackageGroupName": "track2-yolo-custom-detector", "ModelPackageDescription": "Custom-taxonomy detector trained on a chosen dataset; classes come from that dataset, not the production person/helmet pair.", "ModelMetrics": {"ModelQuality": {"Statistics": {"ContentType": "application/json", "S3Uri": {"Std:Join": {"On": "/", "Values": [{"Get": "Parameters.EvaluationOutputUri"}, "evaluation.json"]}}}}, "Bias": {}, "Explainability": {}}, "CustomerMetadataProperties": {"model_role": "fullframe-replay", "deployment_status": "candidate", "run_metadata_uri": {"Get": "Parameters.RunMetadataUri"}, "lineage_id": {"Get": "Parameters.RunId"}, "dataset_version": {"Get": "Parameters.DatasetVersion"}}, "InferenceSpecification": {"Containers": [{"Image": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train:serve-latest", "Environment": {}, "ModelDataUrl": {"Get": "Steps.TrainYolo.ModelArtifacts.S3ModelArtifacts"}}], "SupportedContentTypes": ["image/jpeg"], "SupportedResponseMIMETypes": ["application/json"], "SupportedRealtimeInferenceInstanceTypes": ["ml.g4dn.xlarge"], "SupportedTransformInstanceTypes": ["ml.g4dn.xlarge"]}, "ModelApprovalStatus": "PendingManualApproval", "SkipModelValidation": "None"}, "DependsOn": ["EvaluateYolo"], "RetryPolicies": [{"ExceptionType": ["Step.SERVICE_FAULT", "Step.THROTTLING"], "IntervalSeconds": 60, "BackoffRate": 2.0, "MaxAttempts": 1}]}]}
+{
+  "Version": "2020-12-01",
+  "Metadata": {},
+  "Parameters": [
+    {
+      "Name": "TrainingDatasetUri",
+      "Type": "String"
+    },
+    {
+      "Name": "EvaluationOutputUri",
+      "Type": "String"
+    },
+    {
+      "Name": "RunMetadataUri",
+      "Type": "String"
+    },
+    {
+      "Name": "RunId",
+      "Type": "String"
+    },
+    {
+      "Name": "DatasetVersion",
+      "Type": "String"
+    },
+    {
+      "Name": "BaseModelUri",
+      "Type": "String"
+    },
+    {
+      "Name": "EvaluationDatasetUri",
+      "Type": "String"
+    },
+    {
+      "Name": "Epochs",
+      "Type": "String",
+      "DefaultValue": "50"
+    },
+    {
+      "Name": "ImgSize",
+      "Type": "String",
+      "DefaultValue": "640"
+    },
+    {
+      "Name": "Batch",
+      "Type": "String",
+      "DefaultValue": "16"
+    },
+    {
+      "Name": "Seed",
+      "Type": "String",
+      "DefaultValue": "42"
+    },
+    {
+      "Name": "BaseModelPackageArn",
+      "Type": "String",
+      "DefaultValue": "none"
+    },
+    {
+      "Name": "Architecture",
+      "Type": "String",
+      "DefaultValue": "unspecified"
+    },
+    {
+      "Name": "RegistryGroup",
+      "Type": "String",
+      "DefaultValue": "yolo11s-open-detector"
+    },
+    {
+      "Name": "BaseModelSource",
+      "Type": "String",
+      "DefaultValue": "unspecified"
+    },
+    {
+      "Name": "Detector",
+      "Type": "String",
+      "DefaultValue": "open"
+    },
+    {
+      "Name": "Patience",
+      "Type": "String",
+      "DefaultValue": "0"
+    },
+    {
+      "Name": "Classes",
+      "Type": "String",
+      "DefaultValue": ""
+    },
+    {
+      "Name": "SingleCls",
+      "Type": "String",
+      "DefaultValue": "false"
+    },
+    {
+      "Name": "EvaluationDatasetIsSeparate",
+      "Type": "String",
+      "DefaultValue": "false"
+    },
+    {
+      "Name": "Hyperparams",
+      "Type": "String",
+      "DefaultValue": ""
+    },
+    {
+      "Name": "DataYamlUri",
+      "Type": "String",
+      "DefaultValue": ""
+    },
+    {
+      "Name": "DropUndeclaredClasses",
+      "Type": "String",
+      "DefaultValue": "false"
+    },
+    {
+      "Name": "EvalExtraUris",
+      "Type": "String",
+      "DefaultValue": ""
+    }
+  ],
+  "PipelineExperimentConfig": {
+    "ExperimentName": "track2-yolo-custom-training",
+    "TrialName": {
+      "Get": "Execution.PipelineExecutionId"
+    }
+  },
+  "Steps": [
+    {
+      "Name": "TrainYolo",
+      "Type": "Training",
+      "Arguments": {
+        "AlgorithmSpecification": {
+          "TrainingInputMode": "File",
+          "TrainingImage": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train@sha256:52e15a847bf6a0a853d6cb11dcbfe31f7638e7faafdb4054dedcf077bbebb64e",
+          "MetricDefinitions": [
+            {
+              "Name": "train:epoch",
+              "Regex": "(\\d+)/\\d+\\s+\\d+(?:\\.\\d+)?G"
+            },
+            {
+              "Name": "dataset:total_images",
+              "Regex": "DATASET_TOTAL_IMAGES:\\s+(\\d+)"
+            },
+            {
+              "Name": "dataset:images_downloaded",
+              "Regex": "DATASET_IMAGES:\\s+(\\d+)/\\d+"
+            }
+          ]
+        },
+        "OutputDataConfig": {
+          "S3OutputPath": "s3://track2-s3/training-output/"
+        },
+        "StoppingCondition": {
+          "MaxRuntimeInSeconds": 86400
+        },
+        "ResourceConfig": {
+          "VolumeSizeInGB": 30,
+          "InstanceCount": 1,
+          "InstanceType": "ml.g4dn.xlarge"
+        },
+        "RoleArn": "arn:aws:iam::125192671932:role/track2-yolo-sagemaker-execution",
+        "HyperParameters": {
+          "epochs": {
+            "Get": "Parameters.Epochs"
+          },
+          "img-size": {
+            "Get": "Parameters.ImgSize"
+          },
+          "batch": {
+            "Get": "Parameters.Batch"
+          },
+          "seed": {
+            "Get": "Parameters.Seed"
+          },
+          "patience": {
+            "Get": "Parameters.Patience"
+          },
+          "train-data-s3-uri": {
+            "Get": "Parameters.TrainingDatasetUri"
+          },
+          "base-model-s3-uri": {
+            "Get": "Parameters.BaseModelUri"
+          },
+          "classes": {
+            "Get": "Parameters.Classes"
+          },
+          "single-cls": {
+            "Get": "Parameters.SingleCls"
+          },
+          "hyperparams": {
+            "Get": "Parameters.Hyperparams"
+          },
+          "data-yaml-s3-uri": {
+            "Get": "Parameters.DataYamlUri"
+          },
+          "drop-undeclared-classes": {
+            "Get": "Parameters.DropUndeclaredClasses"
+          }
+        },
+        "DebugHookConfig": {
+          "S3OutputPath": "s3://track2-s3/training-output/",
+          "CollectionConfigurations": []
+        },
+        "ProfilerConfig": {
+          "S3OutputPath": "s3://track2-s3/training-output/",
+          "DisableProfiler": false
+        }
+      },
+      "RetryPolicies": [
+        {
+          "ExceptionType": [
+            "Step.SERVICE_FAULT",
+            "Step.THROTTLING",
+            "SageMaker.JOB_INTERNAL_ERROR",
+            "SageMaker.CAPACITY_ERROR"
+          ],
+          "IntervalSeconds": 60,
+          "BackoffRate": 2.0,
+          "MaxAttempts": 1
+        }
+      ]
+    },
+    {
+      "Name": "EvaluateYolo",
+      "Type": "Processing",
+      "Arguments": {
+        "ProcessingResources": {
+          "ClusterConfig": {
+            "InstanceType": "ml.m5.xlarge",
+            "InstanceCount": 1,
+            "VolumeSizeInGB": 30
+          }
+        },
+        "AppSpecification": {
+          "ImageUri": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train:train-latest",
+          "ContainerEntrypoint": [
+            "python3",
+            "/opt/ml/processing/input/code/evaluate_any.py"
+          ]
+        },
+        "RoleArn": "arn:aws:iam::125192671932:role/track2-yolo-sagemaker-execution",
+        "ProcessingInputs": [
+          {
+            "InputName": "input-1",
+            "AppManaged": false,
+            "S3Input": {
+              "S3Uri": {
+                "Get": "Steps.TrainYolo.ModelArtifacts.S3ModelArtifacts"
+              },
+              "LocalPath": "/opt/ml/processing/model",
+              "S3DataType": "S3Prefix",
+              "S3InputMode": "File",
+              "S3DataDistributionType": "FullyReplicated",
+              "S3CompressionType": "None"
+            }
+          },
+          {
+            "InputName": "input-2",
+            "AppManaged": false,
+            "S3Input": {
+              "S3Uri": {
+                "Get": "Parameters.EvaluationDatasetUri"
+              },
+              "LocalPath": "/opt/ml/processing/data",
+              "S3DataType": "S3Prefix",
+              "S3InputMode": "File",
+              "S3DataDistributionType": "FullyReplicated",
+              "S3CompressionType": "None"
+            }
+          },
+          {
+            "InputName": "code",
+            "AppManaged": false,
+            "S3Input": {
+              "S3Uri": "s3://track2-s3/custom/code/evaluate_any.py",
+              "LocalPath": "/opt/ml/processing/input/code",
+              "S3DataType": "S3Prefix",
+              "S3InputMode": "File",
+              "S3DataDistributionType": "FullyReplicated",
+              "S3CompressionType": "None"
+            }
+          }
+        ],
+        "ProcessingOutputConfig": {
+          "Outputs": [
+            {
+              "OutputName": "evaluation",
+              "AppManaged": false,
+              "S3Output": {
+                "S3Uri": {
+                  "Get": "Parameters.EvaluationOutputUri"
+                },
+                "LocalPath": "/opt/ml/processing/output",
+                "S3UploadMode": "EndOfJob"
+              }
+            }
+          ]
+        },
+        "Environment": {
+          "EXPERIMENT_NAME": "track2-yolo-training",
+          "RUN_NAME": {
+            "Get": "Execution.PipelineExecutionId"
+          },
+          "BASE_MODEL_URI": {
+            "Get": "Parameters.BaseModelUri"
+          },
+          "CLASSES": {
+            "Get": "Parameters.Classes"
+          },
+          "SINGLE_CLS": {
+            "Get": "Parameters.SingleCls"
+          },
+          "EVAL_IS_SEPARATE": {
+            "Get": "Parameters.EvaluationDatasetIsSeparate"
+          },
+          "DROP_UNDECLARED_CLASSES": {
+            "Get": "Parameters.DropUndeclaredClasses"
+          },
+          "EVAL_EXTRA_URIS": {
+            "Get": "Parameters.EvalExtraUris"
+          }
+        }
+      },
+      "RetryPolicies": [
+        {
+          "ExceptionType": [
+            "Step.SERVICE_FAULT",
+            "Step.THROTTLING",
+            "SageMaker.JOB_INTERNAL_ERROR",
+            "SageMaker.CAPACITY_ERROR"
+          ],
+          "IntervalSeconds": 60,
+          "BackoffRate": 2.0,
+          "MaxAttempts": 1
+        }
+      ]
+    },
+    {
+      "Name": "RegisterYoloModel-RegisterModel",
+      "Type": "RegisterModel",
+      "Arguments": {
+        "ModelPackageGroupName": {
+          "Get": "Parameters.RegistryGroup"
+        },
+        "ModelPackageDescription": "Open-taxonomy version: any classes, any base checkpoint. Not production replay.",
+        "ModelMetrics": {
+          "ModelQuality": {
+            "Statistics": {
+              "ContentType": "application/json",
+              "S3Uri": {
+                "Std:Join": {
+                  "On": "/",
+                  "Values": [
+                    {
+                      "Get": "Parameters.EvaluationOutputUri"
+                    },
+                    "evaluation.json"
+                  ]
+                }
+              }
+            }
+          },
+          "Bias": {},
+          "Explainability": {}
+        },
+        "CustomerMetadataProperties": {
+          "model_role": "open-detector",
+          "deployment_status": "candidate",
+          "run_metadata_uri": {
+            "Get": "Parameters.RunMetadataUri"
+          },
+          "lineage_id": {
+            "Get": "Parameters.RunId"
+          },
+          "dataset_version": {
+            "Get": "Parameters.DatasetVersion"
+          },
+          "architecture": {
+            "Get": "Parameters.Architecture"
+          },
+          "base_model_uri": {
+            "Get": "Parameters.BaseModelUri"
+          },
+          "base_model_package_arn": {
+            "Get": "Parameters.BaseModelPackageArn"
+          },
+          "base_model_source": {
+            "Get": "Parameters.BaseModelSource"
+          },
+          "detector": {
+            "Get": "Parameters.Detector"
+          },
+          "patience": {
+            "Get": "Parameters.Patience"
+          }
+        },
+        "InferenceSpecification": {
+          "Containers": [
+            {
+              "Image": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train:serve-latest",
+              "Environment": {},
+              "ModelDataUrl": {
+                "Get": "Steps.TrainYolo.ModelArtifacts.S3ModelArtifacts"
+              }
+            }
+          ],
+          "SupportedContentTypes": [
+            "image/jpeg"
+          ],
+          "SupportedResponseMIMETypes": [
+            "application/json"
+          ],
+          "SupportedRealtimeInferenceInstanceTypes": [
+            "ml.g4dn.xlarge"
+          ],
+          "SupportedTransformInstanceTypes": [
+            "ml.g4dn.xlarge"
+          ]
+        },
+        "ModelApprovalStatus": "Approved",
+        "SkipModelValidation": "None"
+      },
+      "DependsOn": [
+        "EvaluateYolo"
+      ],
+      "RetryPolicies": [
+        {
+          "ExceptionType": [
+            "Step.SERVICE_FAULT",
+            "Step.THROTTLING"
+          ],
+          "IntervalSeconds": 60,
+          "BackoffRate": 2.0,
+          "MaxAttempts": 1
+        }
+      ]
+    }
+  ]
+}

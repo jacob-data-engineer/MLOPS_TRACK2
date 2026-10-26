@@ -23,6 +23,13 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    # Zips the pull-control router at plan time, so the Lambda is built
+    # from the same file the API imports rather than a checked-in blob
+    # that has to be remembered separately.
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }
 
@@ -118,8 +125,10 @@ data "aws_iam_policy_document" "codebuild" {
     # Pulling a base image from a registry that isn't ours needs these
     # unrestricted: the resource being read is not addressable from this
     # side, so it cannot be scoped to an ARN.
-    sid       = "EcrPullAnyRegistry"
-    effect    = "Allow"
+    sid    = "EcrPullAnyRegistry"
+    effect = "Allow"
+    # BatchGetImage/GetDownloadUrlForLayer on the base repo too: the app
+    # build FROMs the mirrored images, so it has to pull them.
     actions   = ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"]
     resources = ["*"]
   }
@@ -127,7 +136,7 @@ data "aws_iam_policy_document" "codebuild" {
     sid       = "EcrPushAppRepo"
     effect    = "Allow"
     actions   = ["ecr:PutImage", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload"]
-    resources = [aws_ecr_repository.app.arn]
+    resources = [aws_ecr_repository.app.arn, aws_ecr_repository.base.arn]
   }
   statement {
     sid       = "ReadGithubToken"
@@ -156,6 +165,23 @@ resource "aws_codebuild_project" "app" {
   # A node stage plus a torch/ultralytics install on a cold cache runs well
   # past the 30 minutes that is enough for the smaller training images.
   build_timeout = 60
+
+  # Reuse Docker layers between builds. The Dockerfile is already ordered
+  # for it -- package.json and uv.lock are copied and installed BEFORE the
+  # source is -- so a change to a .tsx or a .py reuses both dependency
+  # layers and both base images instead of fetching and rebuilding them.
+  #
+  # Uncached, every deploy re-pulled two base images and re-ran `npm ci`
+  # and `uv sync` to ship a three-line edit; one such build spent twelve of
+  # its twenty minutes downloading a base image that had not changed.
+  #
+  # LOCAL is per build host and best-effort: a fresh host gives a cold
+  # build. That is why the base images are also pulled from inside AWS
+  # rather than Docker Hub -- the two fixes cover each other.
+  cache {
+    type  = "LOCAL"
+    modes = ["LOCAL_DOCKER_LAYER_CACHE", "LOCAL_CUSTOM_CACHE"]
+  }
 
   source {
     type      = "S3"

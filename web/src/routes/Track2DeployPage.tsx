@@ -63,6 +63,8 @@ const PHASE_LABEL: Record<EndpointPhase, string> = {
   not_deployed: "Not deployed",
 };
 
+const GROUP_GENERATION = /^yolo(\d+)[smlx]/;
+
 const PHASE_PILL_CLASS: Record<EndpointPhase, string> = {
   ready: "bg-emerald-600",
   inferencing: "bg-accent",
@@ -135,6 +137,26 @@ function PhasePill({ deployed }: { deployed: Track2DeployedComponent | null }) {
   );
 }
 
+/** "YOLO26-S", read from the model package rather than asserted.
+ *
+ * This said `YOLO11-${size}` for every model. The platform has been able
+ * to train generation 26 since 2026-09-30, so a YOLO26 checkpoint would
+ * be labelled YOLO11 on the one page that exists to say what is
+ * deployed -- and the size beside it would be right, which makes the
+ * whole label read as considered rather than hard-coded.
+ *
+ * The package ARN carries the group and the group carries the
+ * generation: ".../model-package/yolo26s-helmet-detector/3". With no
+ * package -- S3 weights -- the generation is genuinely unknown, and
+ * saying so beats guessing. */
+function lineageModelLabel(lineage: Track2RunLineage): string {
+  const size = (lineage.model.size ?? "?").toUpperCase();
+  const arn = lineage.model.model_package_arn ?? "";
+  const group = arn.split("/").slice(-2)[0] ?? "";
+  const match = GROUP_GENERATION.exec(group);
+  return match ? `YOLO${match[1]}-${size}` : `YOLO-${size}`;
+}
+
 /** What produced one run's results, read back from the lineage recorded
  * in DynamoDB (falling back to the output folder's own lineage.json).
  * Fetched on expand rather than with the queue: it is a lookup per run,
@@ -184,7 +206,7 @@ function RunLineage({ outputFolder, runId }: { outputFolder: string; runId: stri
           {lineage && (
             <div className="flex flex-col gap-1.5 text-xs">
               <LineageRow label="Model">
-                {`YOLO11-${(lineage.model.size ?? "?").toUpperCase()}`}
+                {lineageModelLabel(lineage)}
                 {lineage.model.version ? ` · registry v${lineage.model.version}` : ""}
                 {!lineage.model.version && lineage.model.weights_kind === "s3" ? " · S3 weights" : ""}
               </LineageRow>
@@ -450,11 +472,15 @@ function InferenceQueueSection({
       .catch((err) => setError(err instanceof ApiError ? err.detail : "Couldn't load registry versions."));
   }, []);
 
-  const rowsBySize: { size: string; rows: Track2MetricsRow[] }[] = [];
+  const rowsBySize: { size: string; registry: string; group_name: string; rows: Track2MetricsRow[] }[] = [];
   for (const row of rows ?? []) {
     const group = rowsBySize[rowsBySize.length - 1];
-    if (group && group.size === row.size) group.rows.push(row);
-    else rowsBySize.push({ size: row.size, rows: [row] });
+    // Split on the GROUP, not the size. yolo11s-detector and
+    // yolo11s-open-detector are both size "s", so grouping by size alone
+    // produced two identical "SIZE S" headers -- and one "SIZE" with no
+    // letter for the legacy group, which has no size at all.
+    if (group && group.group_name === row.group_name) group.rows.push(row);
+    else rowsBySize.push({ size: row.size, registry: row.registry, group_name: row.group_name, rows: [row] });
   }
 
   const selectedRow = rows?.find((r) => rowKey(r) === selectedKey);
@@ -567,11 +593,21 @@ function InferenceQueueSection({
                     <th className="tabular py-1.5 font-medium">mAP50</th>
                   </tr>
                 </thead>
-                {rowsBySize.map(({ size, rows: sizeRows }) => (
-                  <tbody key={size}>
+                {rowsBySize.map(({ size, registry, group_name, rows: sizeRows }) => (
+                  <tbody key={group_name}>
                     <tr>
                       <td colSpan={4} className="bg-page px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-secondary">
-                        YOLO11 &middot; Size {size}
+                        {/* The generation comes off the group name --
+                            `yolo26s-detector` is a production group too.
+                            Writing YOLO11 here labelled every production
+                            row as generation 11 whatever it was. */}
+                        {registry === "production"
+                          ? <>
+                              Production &middot;{" "}
+                              YOLO{GROUP_GENERATION.exec(group_name)?.[1] ?? "?"} &middot;{" "}
+                              Size {size}
+                            </>
+                          : <>Custom &middot; {group_name} <span className="font-normal normal-case tracking-normal text-ink-muted">(own classes -- detections come back as that model's class indices)</span></>}
                       </td>
                     </tr>
                     {sizeRows.map((row) => {
@@ -603,6 +639,10 @@ function InferenceQueueSection({
         ) : (
           <div className="flex flex-col gap-2">
             <label className="block">
+              {/* No generation in the label. These are loose weights in
+                  S3 -- nothing records which generation they are, and
+                  "YOLO11-S" on a yolo26 checkpoint is a worse answer
+                  than the size alone. */}
               <span className="mb-1 block text-xs text-ink-muted">Size</span>
               <select
                 className="w-full max-w-xs rounded-md border border-black/15 bg-page px-3 py-2 text-sm"
@@ -610,7 +650,7 @@ function InferenceQueueSection({
                 onChange={(e) => setS3Size(e.target.value)}
               >
                 {SIZES.map((s) => (
-                  <option key={s} value={s}>YOLO11-{s.toUpperCase()}</option>
+                  <option key={s} value={s}>{s.toUpperCase()}</option>
                 ))}
               </select>
             </label>

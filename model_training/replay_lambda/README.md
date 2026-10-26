@@ -2,7 +2,7 @@
 
 This is the **deployed** source of the `track2-yolo-weekly-retrain` Lambda,
 downloaded from AWS. It is here because it was not in version control at
-all: `terraform/infra/lambda_src/trigger_weekly_retrain.py` still holds a
+all: `terraform/platform/lambda_src/trigger_weekly_retrain.py` still holds a
 23-line stub that starts the pipeline with no parameters, while the
 function that actually runs is this three-module replay coordinator.
 
@@ -11,7 +11,7 @@ function that actually runs is this three-module replay coordinator.
 This directory **is** the deploy source. Terraform packages it:
 
 ```powershell
-cd jurong-port\terraform\infra
+cd C:\Projects\MLOPS_TRACK2\terraform\platform
 terraform apply -target=aws_lambda_function.weekly_retrain
 ```
 

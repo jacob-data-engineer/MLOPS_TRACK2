@@ -391,7 +391,13 @@ resource "aws_cloudwatch_event_rule" "training_pipeline_completed" {
     source      = ["aws.sagemaker"]
     detail-type = ["SageMaker Model Building Pipeline Execution Status Change"]
     detail = {
-      pipelineArn = [local.training_pipeline_arn]
+      # Both pipelines: the original, and the app's own open one that
+      # every Multi-Auto Training run uses. Only the first was listed, so
+      # those runs never sent a start or end email.
+      pipelineArn = [
+        local.training_pipeline_arn,
+        "arn:aws:sagemaker:${var.region}:${var.account_id}:pipeline/track2-yolo-open-training-pipeline",
+      ]
       # Executing: fires once, at the transition into this status -- i.e.
       # pipeline start, not every step transition (this is the execution-
       # level status-change event, not a step-level one).
@@ -487,12 +493,16 @@ resource "aws_lambda_permission" "allow_s3_latest_json" {
 # CAUTION: aws_s3_bucket_notification is a full-replace resource -- only
 # one may exist per bucket in Terraform, and applying it overwrites
 # whatever notification configuration currently exists on the live bucket.
-# Confirmed via `aws s3api get-bucket-notification-configuration` that
-# track2-s3 has none today, so this is safe now -- but if anything else
-# (this external pipeline included) ever configures its own bucket
-# notification directly on track2-s3 outside this Terraform, applying this
-# resource again would silently clobber it. Re-check before ever changing
-# this block.
+# So everything the bucket notifies has to be in THIS block; anything
+# configured directly on track2-s3 outside this Terraform is silently
+# clobbered the next time this applies. Re-check with
+# `aws s3api get-bucket-notification-configuration` before changing it.
+#
+# 2026-09-23: `eventbridge` added below to match a change made directly on
+# the bucket, because this stack has drift and cannot be applied to land
+# one setting. The live config was read first and the lambda_function
+# block below re-sent with it -- writing the flag alone would have
+# unhooked pull_training_data. This block and the live bucket agree today.
 resource "aws_s3_bucket_notification" "track2_aws_s3_bucket_notification_latest_json" {
   bucket = aws_s3_bucket.pipeline.id
 
@@ -502,6 +512,11 @@ resource "aws_s3_bucket_notification" "track2_aws_s3_bucket_notification_latest_
     filter_prefix       = "data/track2-datasets/track2_pull/"
     filter_suffix       = "latest.json"
   }
+
+  # Routes every object event to EventBridge, where the app's own rules
+  # filter them. Pull control's "when files arrive" trigger is the
+  # consumer; the rule lives in terraform/app, which owns that feature.
+  eventbridge = true
 
   depends_on = [aws_lambda_permission.allow_s3_latest_json]
 }

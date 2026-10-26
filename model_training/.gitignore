@@ -1,5 +1,5 @@
 # CodeBuild source zips — regenerated from the .py/Dockerfile sources,
-# which are what's actually committed. terraform/infra/{codebuild.tf,
+# which are what's actually committed. terraform/platform/{codebuild.tf,
 # codebuild_pipeline.tf} read these directly off disk from here.
 *.zip
 

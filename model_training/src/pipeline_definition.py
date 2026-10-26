@@ -49,6 +49,7 @@ evaluate.py's own docstring) — makes candidates comparable side-by-side
 in SageMaker Studio's Experiments view (Gap #5).
 """
 
+import base64
 import json
 import os
 from datetime import datetime, timezone
@@ -158,6 +159,21 @@ def _resolve_latest_approved_base_model(region: str, model_package_group_name: s
 DYNAMODB_LINEAGE_TABLE = "track2-dynamoDB"  # pre-existing, reused table (hash key "id") -- see summary.md's 2026-09-07 entry
 
 
+def _readable_hyperparams(blob: str) -> dict:
+    """The blob as a plain dict, for the run record. {} if it will not decode."""
+    if not blob:
+        return {}
+    for attempt in (lambda: json.loads(base64.b64decode(blob).decode("utf-8")),
+                    lambda: json.loads(blob)):
+        try:
+            got = attempt()
+            if isinstance(got, dict):
+                return got
+        except Exception:                                          # noqa: BLE001
+            continue
+    return {}
+
+
 def _write_run_metadata(
     *,
     region: str,
@@ -202,7 +218,13 @@ def _write_run_metadata(
             "model_package_arn": base_model_package_arn,
             "s3_uri": base_model_s3_uri,
         },
-        "hyperparameters": {"epochs": epochs, "img_size": img_size, "batch": batch, "seed": seed},
+        "hyperparameters": {
+            "epochs": epochs, "img_size": img_size, "batch": batch, "seed": seed,
+            # Readable here even though it travels encoded -- an audit row
+            # saying "hyperparams: eyJvcHRpbWl6ZXIi..." answers nothing
+            # anybody would ask it.
+            **_readable_hyperparams(os.environ.get("TRAIN_HYPERPARAMS", "").strip()),
+        },
         "notes": notes,
     }
     key = f"training-runs/{run_id}/run_metadata.json"
@@ -255,6 +277,11 @@ def build_pipeline(pipeline_session: PipelineSession) -> Pipeline:
     img_size = int(os.environ.get("TRAIN_IMG_SIZE", "640"))
     batch = int(os.environ.get("TRAIN_BATCH", "16"))
     seed = int(os.environ.get("TRAIN_SEED", "42"))
+    # Opaque on purpose: it travels as a SageMaker hyperparameter, which
+    # becomes a command-line argument, and a JSON object through that
+    # layer is a quoting problem that presents as the parameter being
+    # silently ignored. train.py decodes and validates it.
+    hyperparams_blob = os.environ.get("TRAIN_HYPERPARAMS", "").strip()
 
     # Which YOLO size this run trains/registers -- selects a Model
     # Package Group via generation+size (defaults to "11"/"s", the
@@ -331,6 +358,7 @@ def build_pipeline(pipeline_session: PipelineSession) -> Pipeline:
             "img-size": img_size,
             "batch": batch,
             "seed": seed,
+            **({"hyperparams": hyperparams_blob} if hyperparams_blob else {}),
             # No SageMaker input channel for the dataset (see TrainingStep
             # below) -- train.py downloads it itself via this hyperparameter,
             # specifically so it can print real byte-progress (see

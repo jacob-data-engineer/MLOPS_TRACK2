@@ -1,12 +1,20 @@
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { useCardOpen } from "../lib/cardState";
 import { useCallback, useEffect, useState } from "react";
 import { Badge, type BadgeTone } from "./Badge";
+import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
 import {
+  ApiError,
   deleteTrack2TrainingAudit,
+  exportTrack2TrainingAuditCsv,
+  exportTrack2Weights,
+  getTrack2Export,
   getTrack2TrainingAudit,
+  getTrack2TrainingAuditWeightsUrl,
   type Track2TrainingAudit,
   type Track2TrainingAuditDataset,
 } from "../lib/api";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 /** Finished runs, under the queue that produced them -- the same shape as
  * Deploy & Inference: what is queued above, what has already run below.
@@ -71,9 +79,26 @@ function formatTime(value: string | null): string {
   return date.toLocaleString();
 }
 
-function formatDuration(started: string | null, ended: string | null): string {
-  if (!started || !ended) return "--";
-  const ms = new Date(ended).getTime() - new Date(started).getTime();
+/** How long the run took, or has taken so far.
+ *
+ * This is the PIPELINE EXECUTION's wall time -- `started_at` and
+ * `ended_at` are written from `describe_pipeline_execution` -- so it
+ * covers waiting for GPU capacity, training, evaluation and
+ * registration. It is NOT the billable GPU time, and the gap is real:
+ * on 2026-10-15 an execution started at 18:41:07 and its training job
+ * did not get an instance until 18:44:04, three minutes it was not
+ * charged for.
+ *
+ * `running` makes an unfinished run count up instead of reading "--",
+ * which is what it did for the whole twenty minutes anybody actually
+ * wants to know.
+ */
+function formatDuration(started: string | null, ended: string | null,
+                        running = false): string {
+  if (!started) return "--";
+  const from = new Date(started).getTime();
+  const to = ended ? new Date(ended).getTime() : (running ? Date.now() : NaN);
+  const ms = to - from;
   if (!Number.isFinite(ms) || ms < 0) return "--";
   const minutes = Math.floor(ms / 60000);
   const seconds = Math.round((ms % 60000) / 1000);
@@ -81,28 +106,111 @@ function formatDuration(started: string | null, ended: string | null): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+/** Statuses where the run has not stopped, so the clock is still going. */
+const STILL_GOING = new Set(["Executing", "Stopping", "InProgress"]);
+
 function formatMetric(value: number | null | undefined): string {
   if (value === null || value === undefined) return "--";
   return typeof value === "number" ? value.toFixed(4) : String(value);
 }
 
-function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted: () => void }) {
-  const [open, setOpen] = useState(false);
+/** Exported so the registry tables can show the full run behind a version
+ * without rebuilding this card. The history panel and the per-model detail
+ * must not drift: they describe the same run, and two renderings of the
+ * same submitted-vs-actual comparison would be worse than one. */
+export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted: () => void }) {
+  const [open, setOpen] = useCardOpen("training_audit", false);
   const [deleting, setDeleting] = useState(false);
+  // Deleting a run deletes the registered model with it. The dialog
+  // names the version that goes, because the row it is on shows a date
+  // and a status, not what it produced.
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  // Copying the .pt into a bucket folder, as opposed to downloading it.
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportPrefix, setExportPrefix] = useState("");
+  const [exportFolders, setExportFolders] = useState<string[]>([]);
+  const [exportTarget, setExportTarget] = useState("");
+  const [exportMessage, setExportMessage] = useState("");
+  const [copying, setCopying] = useState(false);
+
+  // Only while the picker is open: listing the bucket for every collapsed
+  // run in the history would be dozens of calls for nothing.
+  useEffect(() => {
+    if (!exportOpen) return;
+    let cancelled = false;
+    getTrack2Export(exportPrefix)
+      .then((res) => !cancelled && setExportFolders(res.folders))
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [exportOpen, exportPrefix]);
+
+  async function handleCopyToFolder() {
+    if (!audit.model?.model_package_arn || !exportTarget) return;
+    setCopying(true);
+    setExportMessage("");
+    try {
+      const res = await exportTrack2Weights(audit.model.model_package_arn, exportTarget);
+      setExportMessage(res.message);
+    } catch (err) {
+      setExportMessage(err instanceof ApiError ? err.detail : "Export failed.");
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  /** Follows a presigned S3 link rather than proxying the file: a
+   * checkpoint is 19MB+ and the API container is on one small box. */
+  async function handleExportWeights() {
+    setDownloading(true);
+    setDeleteError(null);
+    try {
+      const { url } = await getTrack2TrainingAuditWeightsUrl(audit.id);
+      const link = document.createElement("a");
+      link.href = url;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      setDeleteError(
+        err instanceof ApiError ? err.detail
+          : err instanceof Error ? err.message : "Could not download the weights.",
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  /** Fetched rather than linked: the endpoint needs the bearer token, so
+   * a plain <a href> would get a 401 and download nothing. */
+  async function handleExport() {
+    setExporting(true);
+    setDeleteError(null);
+    try {
+      const blob = await exportTrack2TrainingAuditCsv(audit.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `training-run-${audit.submitted_at.slice(0, 10)}-${audit.id}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Export failed.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function handleDelete() {
-    // Deleting the run deletes the registered model with it, which is not
-    // recoverable -- worth one confirmation naming exactly what goes.
-    const target = audit.model ? `${audit.model.group} v${audit.model.version}` : null;
-    const warning = target
-      ? `Delete this run AND its registered model ${target}? This cannot be undone.`
-      : "Delete this run from the history? It never registered a model.";
-    if (!window.confirm(warning)) return;
     setDeleting(true);
     setDeleteError(null);
     try {
       await deleteTrack2TrainingAudit(audit.id);
+      setConfirmDelete(false);
       onDeleted();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Delete failed.");
@@ -120,17 +228,80 @@ function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted:
         >
           {open ? <ChevronDown size={14} className="shrink-0 text-ink-muted" /> : <ChevronRight size={14} className="shrink-0 text-ink-muted" />}
           <Badge tone={statusTone(audit.status)} label={audit.status} />
+          {/* The MODEL NAME, not the generation/size pair.
+              For a custom-class run `generation` is the literal string
+              "custom" and `size` holds the architecture, so the old
+              template rendered "YOLOcustom-YOLO11S" -- which names
+              neither the model nor anything a person chose. The Class
+              the run belongs to is what the history is scanned for, and
+              it was only in the expanded detail.
+
+              Production runs keep the old form: they have no detector,
+              and their generation/size really are 11 and s. */}
           <span className="tabular shrink-0 text-sm text-ink">
-            YOLO{audit.generation}-{audit.size.toUpperCase()}
+            {audit.detector_slug ? (
+              <>
+                {audit.detector_slug}
+                {audit.size && (
+                  <span className="text-ink-muted"> &middot; {audit.size}</span>
+                )}
+              </>
+            ) : (
+              `YOLO${audit.generation}-${audit.size.toUpperCase()}`
+            )}
           </span>
           {audit.model && (
             <span className="tabular shrink-0 text-xs text-ink-secondary">v{audit.model.version}</span>
           )}
           <span className="tabular truncate text-xs text-ink-muted">{formatTime(audit.submitted_at)}</span>
+          {/* On the ROW, not only inside the expanded detail. "How long
+              did it take" is the question this list is read to answer,
+              and it was one click away on every single row. */}
+          {audit.started_at && (
+            <span className="tabular shrink-0 text-xs text-ink-secondary">
+              {formatDuration(audit.started_at, audit.ended_at,
+                              STILL_GOING.has(audit.status))}
+            </span>
+          )}
         </button>
+        {/* Every field and EVERY file name, not the capped sample shown
+            below -- the export reads the S3 manifest. */}
         <button
           type="button"
-          onClick={handleDelete}
+          onClick={handleExport}
+          disabled={exporting}
+          title="Export this run's full details, including every file name, as CSV"
+          className="flex shrink-0 items-center gap-1.5 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04] disabled:opacity-40"
+        >
+          {exporting && <Loader2 size={12} className="animate-spin" />}
+          Export CSV
+        </button>
+        {/* Only where a model actually came out of the run. */}
+        {audit.model && (
+          <button
+            type="button"
+            onClick={handleExportWeights}
+            disabled={downloading}
+            title="Download the .pt this run produced"
+            className="flex shrink-0 items-center gap-1.5 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04] disabled:opacity-40"
+          >
+            {downloading && <Loader2 size={12} className="animate-spin" />}
+            Download .pt
+          </button>
+        )}
+        {audit.model && (
+          <button
+            type="button"
+            onClick={() => setExportOpen((open) => !open)}
+            title="Copy the .pt into a folder in the bucket"
+            className="shrink-0 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04]"
+          >
+            {exportOpen ? "Cancel export" : "Export to S3"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setConfirmDelete(true)}
           disabled={deleting}
           title={audit.model ? "Delete this run and the model version it registered" : "Delete this run"}
           className="flex shrink-0 items-center gap-1.5 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04] disabled:opacity-40"
@@ -141,12 +312,89 @@ function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted:
       </div>
       {deleteError && <p className="px-3 pb-2 text-xs text-critical">{deleteError}</p>}
 
+      <ConfirmDialog
+        open={confirmDelete}
+        title={audit.model ? "Delete this run and its model?" : "Delete this run?"}
+        destructive
+        busy={deleting}
+        confirmLabel={audit.model ? "Delete the run and the model" : "Delete the run"}
+        cancelLabel="Keep it"
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => void handleDelete()}
+        body={audit.model ? (
+          <>
+            <p>
+              Removes this run from the history <strong>and deletes the
+              registered version</strong>{" "}
+              <span className="tabular">
+                {audit.model.group} v{audit.model.version}
+              </span>{" "}
+              with it.
+            </p>
+            <p className="mt-2">
+              Anything already deployed from that version keeps running.
+              What goes is the record of how it was trained, so nothing can
+              be rolled back to it or continued from it.
+            </p>
+            <p className="mt-2">This cannot be undone.</p>
+          </>
+        ) : (
+          <p>
+            Removes this run from the history. It never registered a model,
+            so no weights and no registry version are affected.
+          </p>
+        )}
+      />
+
+      {exportOpen && audit.model && (
+        <div className="border-t border-hairline px-3 py-3">
+          <p className="mb-2 text-xs text-ink-secondary">
+            Copy{" "}
+            <span className="tabular">{audit.model.group} v{audit.model.version}</span> as{" "}
+            <span className="tabular">selected.pt</span> into a folder. Use "New folder
+            name" to create one that does not exist yet; any existing{" "}
+            <span className="tabular">selected.pt</span> there is archived rather than
+            overwritten.
+          </p>
+          <Track2S3FolderBrowser
+            prefix={exportPrefix}
+            folders={exportFolders}
+            onNavigate={setExportPrefix}
+            onSelect={setExportTarget}
+            selected={exportTarget}
+            allowCreate
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={copying || !exportTarget}
+              onClick={handleCopyToFolder}
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+            >
+              {copying ? "Exporting..." : "Export here"}
+            </button>
+            {exportTarget && (
+              <span className="tabular text-xs text-ink-muted">
+                -&gt; {exportTarget}/selected.pt
+              </span>
+            )}
+          </div>
+          {exportMessage && (
+            <p className="tabular mt-2 break-all text-xs text-ink-secondary">{exportMessage}</p>
+          )}
+        </div>
+      )}
+
       {open && (
         <div className="border-t border-hairline px-3 py-3">
           <div className="tabular grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink sm:grid-cols-4">
             <Field label="Started" value={formatTime(audit.started_at)} />
             <Field label="Ended" value={formatTime(audit.ended_at)} />
-            <Field label="Duration" value={formatDuration(audit.started_at, audit.ended_at)} />
+            <Field
+              label="Duration (whole run)"
+              value={formatDuration(audit.started_at, audit.ended_at,
+                                    STILL_GOING.has(audit.status))}
+            />
             <Field label="Submitted by" value={audit.source === "queue" ? "Training queue" : "Started manually"} />
             <Field label="Epochs" value={String(audit.parameters.epochs)} />
             <Field label="Image size" value={String(audit.parameters.img_size)} />
@@ -169,6 +417,11 @@ function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted:
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink sm:grid-cols-4">
+            {/* The Model Name, outright. The registry group implies it --
+                "yolo11s-helmet-detector v9" -- but only to somebody who
+                knows how those names are built, and a run that never
+                reached registration has no group to read it from. */}
+            <Field label="Model Name" value={audit.detector_slug || "--"} />
             <Field
               label="Model version"
               value={audit.model ? `${audit.model.group} v${audit.model.version}` : "--"}
@@ -180,6 +433,31 @@ function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted:
             />
             <Field label="Build" value={audit.build_id || "--"} />
           </div>
+
+          {/* The frozen dataset, when there was one. It used to reach the
+              history only inside the free-text notes, which made it a
+              habit rather than a record: nothing guaranteed it was
+              there, and nothing could be filtered on it. */}
+          {audit.snapshot?.snapshot_id && (
+            <div className="mt-3 rounded-sm border border-hairline bg-page px-2.5 py-2 text-xs">
+              <p className="text-ink-muted">Frozen snapshot</p>
+              <p className="tabular mt-0.5 text-ink">
+                <span className="font-medium">{audit.snapshot.snapshot_id}</span>
+                {audit.snapshot.created_at && (
+                  <> &middot; frozen {formatTime(audit.snapshot.created_at)}</>
+                )}
+                {audit.snapshot.files
+                  ? ` · ${audit.snapshot.files.toLocaleString()} images`
+                  : ""}
+                {audit.snapshot.pinned
+                  ? " pinned by name"
+                  : " (names week folders -- not repeatable)"}
+              </p>
+              {audit.snapshot.note && (
+                <p className="mt-0.5 text-ink-muted">{audit.snapshot.note}</p>
+              )}
+            </div>
+          )}
 
           <p className="mt-3 mb-1 text-xs text-ink-muted">Metrics</p>
           {audit.metrics ? (
@@ -282,8 +560,20 @@ function DatasetBlock({
   return (
     <div className="min-w-0 rounded-sm border border-hairline bg-surface p-2.5">
       <p className="mb-1 text-xs text-ink-muted">{title}</p>
-      <p className="tabular break-all text-xs text-ink" title={dataset.s3_uri}>
-        {dataset.folder || "--"}
+      {/* The folder someone actually picked, not the assembled copy of
+          it. `data/assembled/<date>` is a staging name nobody chose, it
+          is deleted once the run finishes, and showing it as the
+          dataset's identity buries the only path that means anything.
+          It stays in the tooltip for anyone who needs it, and is the
+          visible line only when there is no origin to show -- a folder
+          that was not assembled IS its own origin. */}
+      <p
+        className="tabular break-all text-xs text-ink"
+        title={dataset.folder ? `assembled at ${dataset.folder}` : dataset.s3_uri}
+      >
+        {dataset.source_folders && dataset.source_folders.length > 0
+          ? dataset.source_folders.join(", ")
+          : dataset.folder || "--"}
       </p>
       <p className="tabular mt-1 text-xs text-ink-secondary">
         {dataset.file_count} image{dataset.file_count === 1 ? "" : "s"}
@@ -300,9 +590,22 @@ function DatasetBlock({
             {showFiles ? "Hide file names" : "Show file names"}
           </button>
           {showFiles && (
-            <div className="tabular mt-1.5 max-h-48 overflow-y-auto rounded-sm border border-hairline bg-page p-2 text-xs text-ink">
+            <div className="tabular mt-1.5 max-h-48 space-y-2 overflow-y-auto rounded-sm border border-hairline bg-page p-2 text-xs text-ink">
+              {/* Runs audited since the paths were resolved store them
+                  whole, and resolved to the ORIGIN where one was recorded
+                  -- the folder someone actually picked, not the dated
+                  copy. Older rows stored a name relative to the folder,
+                  and those would otherwise render bare as
+                  "images/train/x.jpg", naming a file in no particular
+                  dataset. A leading images/ or labels/ is what a relative
+                  one always starts with; that is the whole test, and it
+                  is the same rule the CSV export applies. */}
               {dataset.file_names.map((name) => (
-                <p key={name} className="break-all">{name}</p>
+                <p key={name} className="break-all">
+                  {dataset.folder && /^(images|labels)\//.test(name)
+                    ? `${dataset.folder}/${name}`
+                    : name}
+                </p>
               ))}
             </div>
           )}

@@ -27,7 +27,7 @@ export function LoginPage() {
       <div className="w-full max-w-sm rounded-sm border border-hairline bg-surface p-8">
         <div className="mb-6 flex flex-col items-center gap-2">
           <Factory size={28} className="text-accent" strokeWidth={1.75} />
-          <h1 className="text-lg font-semibold text-ink">PPE Safety Judge</h1>
+          <h1 className="text-lg font-semibold text-ink">Training and Development</h1>
           <p className="text-center text-sm text-ink-secondary">
             {sessionExpired
               ? "The server restarted, so your session ended. Sign in again. Nothing you saved was lost."

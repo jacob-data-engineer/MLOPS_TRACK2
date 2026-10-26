@@ -37,6 +37,22 @@ MODEL_PACKAGE_GROUPS = json.loads(os.environ.get("MODEL_PACKAGE_GROUPS_JSON", '[
 sns = boto3.client("sns", region_name=REGION)
 sm = boto3.client("sagemaker", region_name=REGION)
 
+# What each status is, for subscribers who chose kinds on the
+# Notifications page (an SNS filter policy on their subscription; see
+# src/ppe_pipeline_api/notify.py in the app). A failure is both an end
+# and an error, so it goes to whoever ticked either.
+EVENTS = {
+    "Executing": ["training_started"],
+    "Succeeded": ["training_ended"],
+    "Stopped": ["training_ended"],
+    "Failed": ["training_ended", "error"],
+}
+
+# The app's own pipeline. Its runs register into per-Model-Name groups,
+# not the four YOLO11 size groups, so the "newest candidate" lookup below
+# would name an unrelated package -- it is skipped for these.
+OPEN_PIPELINE = "track2-yolo-open-training-pipeline"
+
 SUBJECTS = {
     "Executing": "Training Started",
     "Succeeded": "Training Completed",
@@ -89,10 +105,13 @@ def handler(event, context):
     start_time = detail["executionStartTime"]
     end_time = detail.get("executionEndTime")
 
+    pipeline = detail.get("pipelineArn", "").rsplit("/", 1)[-1] or "training pipeline"
     subject = SUBJECTS.get(status, f"Training pipeline: {status}")
+    if display_name:
+        subject = f"{subject}: {display_name}"
 
     message = (
-        f"track2-yolo-training-pipeline execution {status}\n\n"
+        f"{pipeline} execution {status}\n\n"
         f"Execution: {execution_arn}\n"
         f"Display name: {display_name}\n"
         f"Started: {start_time}\n"
@@ -103,10 +122,15 @@ def handler(event, context):
     else:
         message += f"Ended: {end_time}\nDuration: {_duration(start_time, end_time)}\n"
 
-    if status == "Succeeded":
+    if status == "Succeeded" and pipeline != OPEN_PIPELINE:
         message += _latest_candidate_summary()
 
-    sns.publish(TopicArn=NOTIFY_TOPIC_ARN, Subject=subject, Message=message)
+    events = EVENTS.get(status, [])
+    attributes = ({"event": {"DataType": "String.Array",
+                             "StringValue": json.dumps(sorted(events))}}
+                  if events else {})
+    sns.publish(TopicArn=NOTIFY_TOPIC_ARN, Subject=subject[:100], Message=message,
+                MessageAttributes=attributes)
     print(f"Published '{subject}' notification for {execution_arn}")
 
     return {"status": status, "execution": execution_arn}

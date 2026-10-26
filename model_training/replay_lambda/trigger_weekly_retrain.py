@@ -60,6 +60,27 @@ def requested_datasets(event):
     return chosen
 
 
+def requested_base_model(event):
+    """An explicit choice of starting weights.
+
+    Absent, the run uses the production pointer exactly as it always has --
+    which is what the weekly schedule does, since its EventBridge event
+    carries no base model. Present, the operator picked a checkpoint (a
+    scratch seed, a registered package's artifact, or any .pt in the
+    bucket) and it must survive to the pipeline instead of being replaced.
+    """
+    uri = event.get("base_model_uri")
+    if not uri:
+        return {}
+    if not uri.startswith("s3://" + BUCKET + "/"):
+        raise ValueError("base_model_uri must be an object in s3://" + BUCKET + "/")
+    if not uri.endswith((".pt", ".tar.gz")):
+        raise ValueError("base_model_uri must be a .pt or .tar.gz checkpoint")
+    return {"base_model_uri": uri, "base_model_package_arn": "",
+            "base_model_selection": "operator_choice",
+            "base_model_selected_at": datetime.now(timezone.utc).isoformat()}
+
+
 def requested_hyperparameters(event):
     """The overrides this request carries, validated. Absent or blank keys
     are omitted entirely rather than defaulted here, so the pipeline's own
@@ -231,7 +252,8 @@ def handler(event, context):
                        # the values it was created with, not whatever a later
                        # caller happens to send.
                        "hyperparameters": requested_hyperparameters(event),
-                       "datasets": requested_datasets(event)}
+                       "datasets": requested_datasets(event),
+                       **requested_base_model(event)}
     key = ROOT + "runs/" + request["run_id"] + "/request.json"
     write(key, request)
     pending = read(ROOT + "pending.json", optional=True)
@@ -248,7 +270,11 @@ def handler(event, context):
         write(ROOT + "pending.json", request)
         write(key, request)
         return request
-    if request.get("base_model_selection") != "production_pointer":
+    # An operator's explicit choice is as final as the pointer's. Without
+    # "operator_choice" here, a chosen checkpoint was overwritten by
+    # production_baseline() a few lines before submission, which is why the
+    # base-model picker was decorative on this path.
+    if request.get("base_model_selection") not in {"production_pointer", "operator_choice"}:
         request.update(production_baseline())
         # Persist before preparing data/submitting; retries retain this selection.
         write(key, request)

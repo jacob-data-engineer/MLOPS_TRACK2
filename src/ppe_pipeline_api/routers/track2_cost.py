@@ -26,3 +26,18 @@ def get_cost(
     today's endpoint cost on every visit, and Cost Explorer charges per
     request. refresh=true is what the Cost tab's own button sends."""
     return t2.sagemaker_cost_breakdown(days=days, refresh=refresh)
+
+
+@router.get("/today")
+def cost_today(session=Depends(require_session)) -> dict:
+    """What today's runs have cost, measured from the jobs themselves.
+
+    Separate from `/track2/cost`, which reads Cost Explorer: CE is the
+    authority and lags roughly a day, so on the afternoon of a day spent
+    training it answers $0.00. A cost figure that reads "free" while the
+    GPU is warm is the one answer it must never give.
+
+    Cheap enough to call on a page load -- two list calls and a describe
+    per job, no Cost Explorer charge.
+    """
+    return t2.training_cost_today()

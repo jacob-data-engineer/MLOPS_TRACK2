@@ -8,6 +8,11 @@
 *.tfstate
 *.tfstate.*
 crash.log
+# Lambda zips, and the directory deploy.sh assembles the queue runner in:
+# a copy of src/ppe_pipeline_api plus PyYAML, rebuilt on every deploy.
+# Committing it would put a second, silently diverging copy of the
+# application source in the repo.
+terraform/*/.build/
 
 # Python
 __pycache__/

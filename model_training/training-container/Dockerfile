@@ -7,7 +7,13 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
-RUN pip install --no-cache-dir ultralytics==8.3.* boto3 "sagemaker>=2.220,<3"
+# 8.4, not 8.3, because 8.3 has NO yolo26 config at all -- the cfg/models
+# tree simply does not contain it, so a YOLO26 run dies at model
+# construction rather than at anything that reads like a version problem.
+# Bumped 2026-09-30 with YOLO26. YOLO11 runs move to 8.4 with it, which is
+# the real risk in this change and is why a YOLO11 run is re-verified
+# after the rebuild rather than assumed.
+RUN pip install --no-cache-dir ultralytics==8.4.* boto3 "sagemaker>=2.220,<3"
 
 COPY train.py /opt/ml/code/train.py
 # train.py copies this into the model artifact's own code/ dir at the end

@@ -49,8 +49,23 @@ resource "aws_iam_role_policy_attachment" "review_host_scheduler" {
   policy_arn = aws_iam_policy.review_host_scheduler.arn
 }
 
+# 2026-09-24: DISABLED. The host is now left running around the clock, so
+# the nightly stop is off. Changed directly on the schedule and recorded
+# here to match, because this stack has drift and cannot be applied to
+# land one setting.
+#
+# Kept rather than deleted: the cron, the target and the IAM role are all
+# still correct, so switching back to a nightly shutdown is one word here
+# and one `update-schedule` on the live schedule.
+#
+# Two things follow from always-on, both of them wanted:
+#   * the public IPv4 no longer changes, because only a stop releases it.
+#     The start-notification below therefore stops firing daily; it now
+#     announces only a genuine restart.
+#   * billing goes from ~65 hours a week to 168.
 resource "aws_scheduler_schedule" "review_host_stop" {
   name                         = "${var.project}-review-host-stop"
+  state                        = "DISABLED"
   schedule_expression          = "cron(0 22 * * ? *)" # every day, 22:00
   schedule_expression_timezone = var.schedule_timezone
 
@@ -68,6 +83,10 @@ resource "aws_scheduler_schedule" "review_host_stop" {
   }
 }
 
+# Left ENABLED even though nothing stops the host any more. It is a no-op
+# on an instance that is already running, and it is what brings the host
+# back if it is ever stopped by hand or lost to an underlying host
+# failure -- which is worth more now that nothing else would restart it.
 resource "aws_scheduler_schedule" "review_host_start" {
   name                         = "${var.project}-review-host-start"
   schedule_expression          = "cron(0 9 ? * MON-FRI *)" # weekdays only, 09:00
@@ -101,9 +120,13 @@ resource "aws_scheduler_schedule" "review_host_start" {
 # (see the app's Notifications tab) get this with nothing new to opt into.
 
 variable "notify_extra_ports" {
-  description = "Extra ports to include in the review-app URL email, alongside review_app_port (8501 is the track2_ui test container)"
+  # Empty now that review_app_port IS 8501. This list does double duty --
+  # it adds ports to the start-up email AND opens an ingress rule per
+  # entry (ec2.tf) -- so leaving 8501 here as well as in review_app_port
+  # would declare the same rule twice.
+  description = "Extra ports to include in the review-app URL email, alongside review_app_port"
   type        = list(number)
-  default     = [8501]
+  default     = []
 }
 
 data "archive_file" "review_host_started_notify" {

@@ -17,11 +17,22 @@ HYPERPARAMETER_ENV = {
     "TRAIN_IMG_SIZE": "img_size",
     "TRAIN_BATCH": "batch",
     "TRAIN_SEED": "seed",
+    # Everything else Ultralytics takes -- optimiser, learning rate,
+    # schedule, augmentation -- as one base64 blob rather than a key here
+    # per parameter. A new knob then needs no change in this file, in the
+    # pipeline definition, or in the training image.
+    "TRAIN_HYPERPARAMS": "hyperparams",
     # Folders the operator picked. Unset, the coordinator derives the
     # dataset from its pinned snapshot, which is what the weekly schedule
     # does and what every run did before these were forwarded.
     "TRAIN_DATA_S3_URI": "dataset_uri",
     "EVAL_DATA_S3_URI": "eval_dataset_uri",
+    # The checkpoint the operator chose to fine-tune from. Unset, the
+    # coordinator falls back to the production pointer, which is what the
+    # weekly schedule does. Until this line existed the app set
+    # BASE_MODEL_S3_URI on the build and nothing here read it, so the
+    # Training page's base-model picker had no effect whatsoever.
+    "BASE_MODEL_S3_URI": "base_model_uri",
 }
 
 def main():

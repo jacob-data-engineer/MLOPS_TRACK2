@@ -15,7 +15,15 @@ import {
   type Track2EvalRunStatus,
 } from "../lib/api";
 
-const GENERATION = "11";
+/** The generation this page USED to hard-code.
+ *
+ * `yolo11${size}-detector` was written straight into the group name, so
+ * a YOLO26 model could neither be listed nor evaluated here -- and the
+ * size dropdown was labelled "Size (YOLO11)" whatever was registered.
+ * The platform has had generation 26 in `GENERATION_SIZES` since
+ * 2026-09-30; this page simply never heard. It is a default now, not a
+ * constant. */
+const DEFAULT_GENERATION = "11";
 
 function statusTone(status: Track2EvalRunStatus): "confirmed" | "rejected" | "pending" | "neutral" {
   if (status === "completed") return "confirmed";
@@ -25,7 +33,11 @@ function statusTone(status: Track2EvalRunStatus): "confirmed" | "rejected" | "pe
 }
 
 function QueueForm({ data, onQueued }: { data: Track2EvalResponse; onQueued: (message: string) => void }) {
-  const sizes = data.generation_sizes[GENERATION] ?? [];
+  const generations = Object.keys(data.generation_sizes ?? {}).sort();
+  const [generation, setGeneration] = useState(
+    generations.includes(DEFAULT_GENERATION) ? DEFAULT_GENERATION : (generations[0] ?? DEFAULT_GENERATION),
+  );
+  const sizes = data.generation_sizes[generation] ?? [];
   const [size, setSize] = useState(sizes[0] ?? "s");
   const [weightsKind, setWeightsKind] = useState<"registry" | "s3">("registry");
   const [selectedArn, setSelectedArn] = useState("");
@@ -66,7 +78,7 @@ function QueueForm({ data, onQueued }: { data: Track2EvalResponse; onQueued: (me
     };
   }, [weightsPrefix]);
 
-  const group = `yolo11${size}-detector`;
+  const group = `yolo${generation}${size}-detector`;
   const approvedPackages = data.registries[group]?.packages.filter((p) => p.approval_status === "Approved") ?? [];
 
   async function handleAdd() {
@@ -103,8 +115,24 @@ function QueueForm({ data, onQueued }: { data: Track2EvalResponse; onQueued: (me
       )}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="flex flex-col gap-3">
+          {generations.length > 1 && (
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink-muted">Generation</span>
+              <select
+                className="w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm"
+                value={generation}
+                onChange={(e) => { setGeneration(e.target.value); setSelectedArn(""); }}
+              >
+                {generations.map((g) => (
+                  <option key={g} value={g}>{data.generation_labels?.[g] ?? `YOLO${g}`}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="block">
-            <span className="mb-1 block text-xs text-ink-muted">Size (YOLO{GENERATION})</span>
+            <span className="mb-1 block text-xs text-ink-muted">
+              Size ({data.generation_labels?.[generation] ?? `YOLO${generation}`})
+            </span>
             <select className="w-full rounded-md border border-black/15 bg-page px-3 py-2 text-sm" value={size} onChange={(e) => { setSize(e.target.value); setSelectedArn(""); }}>
               {sizes.map((s) => (
                 <option key={s} value={s}>{data.size_labels[s] ?? s}</option>

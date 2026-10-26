@@ -16,7 +16,10 @@ router = APIRouter()
 @router.get("")
 def get_export(browse_prefix: str = "", session=Depends(require_session)) -> dict:
     return {
-        "registries": t2.serialize_registries_brief(),
+        # Open-taxonomy groups included here but not on Deploy: exporting
+        # copies a .pt to a folder, so there is no inference path to
+        # mislabel a six-class model's predictions.
+        "registries": t2.serialize_registries_brief(include_open=True),
         "folders": t2.list_s3_folders(browse_prefix),
     }
 

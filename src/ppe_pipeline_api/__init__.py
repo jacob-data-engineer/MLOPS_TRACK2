@@ -1,4 +1,6 @@
-"""FastAPI backend for the React frontend in `web/`. Calls straight into
-the `ppe_pipeline` package and exposes it over HTTP. See CONTRACT.md for
-the endpoint list.
+"""FastAPI backend for the React frontend in `web/`.
+
+Everything this serves is Track2: the retraining platform -- datasets,
+training runs, the model registry, the pull and training queues. See
+CONTRACT.md for the endpoint list.
 """

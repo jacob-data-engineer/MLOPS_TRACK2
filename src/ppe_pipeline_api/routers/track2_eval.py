@@ -27,6 +27,11 @@ def get_eval(session=Depends(require_session)) -> dict:
         "queue": t2.eval_queue_snapshot(),
         "registries": t2.serialize_registries_brief(),
         "generation_sizes": t2.GENERATION_SIZES,
+        # Needed now that the page offers a generation rather than
+        # hard-coding 11: "YOLO26" is the label, "26" is the key, and
+        # building one from the other in the browser is how a third
+        # generation would quietly read as "YOLO<its key>".
+        "generation_labels": t2.GENERATION_LABELS,
         "size_labels": t2.SIZE_LABELS,
     }
 
