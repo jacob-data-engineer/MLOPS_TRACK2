@@ -14,6 +14,11 @@ remotes, or GitHub — not as a question, not as a closing note, not as a
 "still outstanding" item. It has been raised and answered. Commit only if
 asked to.
 
+Facts for when you ARE asked (not prompts to raise it): the GitHub repo is
+the private `jacob-data-engineer/MLOPS_TRACK2`, branch `mlops_track2`;
+this folder works on `mlops-track2-only`. Push only when asked, and never
+commit Terraform state -- `.gitignore` keeps `*.tfstate*` out on purpose.
+
 `README.md` describes the layout. `CONTINUE.md` is the running handover —
 current state, what changed, what is outstanding. **Read `CONTINUE.md`
 before starting anything**; it is where the open threads live.
@@ -185,9 +190,17 @@ the same, unauthenticated. If you relax the sweep further, keep the badge.
 new one: ~1 minute instead of ~7. Use it when only the instance-side step
 failed.
 
-`model_training/*` is **excluded** from the deploy archive. `train.py`
-lives in the `track2-yolo-train` image and needs its own build
-(`track2-yolo-train-images` in CodeBuild), not `deploy.sh`.
+`model_training/*` is **excluded** from the deploy archive, and the
+trainer and evaluator ship by different routes:
+
+| What | How it ships |
+|---|---|
+| `train.py` | repack `model_training/training-container-src.zip` (flat), upload to `s3://track2-s3/codebuild-source/training-container.zip` (local md5 = S3 ETag), build `track2-yolo-train-images`, re-pin the new digest in **`model_training/custom_training/pipeline.json`**, `aws sagemaker update-pipeline` |
+| `evaluate_any.py` | upload to `s3://track2-s3/custom/code/evaluate_any.py` -- a processing INPUT, no build; back the old one up under `custom/code/backup/` first |
+
+`pipeline.json` is the file equal to the live definition (checked
+2026-10-26); `pipeline_open.json` is stale. The image is pinned by DIGEST,
+so a build that is not re-pinned reaches nothing while looking deployed.
 
 ## Base images are mirrored — refresh them deliberately
 
@@ -256,7 +269,7 @@ Node is not installed here, so there is no local alternative anyway.
 Use `.venv/Scripts/python.exe` explicitly -- a bare `python`/`python3` on
 PATH is the Windows Store alias and fails.
 
-**1201 pass, 0 fail, 0 skip, and no `--ignore` flags.** The suite is
+**2338 pass, 0 fail, 0 skip, and no `--ignore` flags** (2026-10-26). The suite is
 green and all of it runs: a failure is a real failure, a skip would be a
 new fact, and there is no list of known-bad files to carry in your head.
 
@@ -523,13 +536,27 @@ directory and reads a file as a path list (`get_img_files`;
 `dataset_yaml.py` already uses the file-list form for retention). So the
 yaml can name folders anywhere, in any number.
 
-What is *ours* is that `train.py` downloads **one** S3 prefix, so files
-outside it are simply not on disk. That is a line of code in
-`model_training/training-container/train.py`, not a property of
-Ultralytics — and `EVAL_DATA_S3_URI` is already a second, independent
-prefix, so the evaluation set never had to live near the training set.
-Do not quote the one-prefix download at anybody as a limitation of "the
-system" without saying it is a limitation of this repo's trainer.
+`train.py` takes a comma-separated list of prefixes and lays files out by
+ONE rule: one prefix is stripped; several in one bucket keep full keys;
+several buckets keep `<bucket>/<key>`. `dataset_yaml.local_layout` is that
+rule on the app side -- the yaml, the remap block and snapshot paths all
+use it. Never decide a layout from "is this folder in another bucket".
+
+**A queued run trains on a dataset version, never a shared slot.** At
+queue time the yaml is resolved to the exact images and written once
+under `_datasets/<dv-id>/` (`dataset_versions.py`); the run gets that
+yaml, the version's `train/` list folder as an extra download prefix, and
+`_datasets/<id>/eval` (a KEY, not an `s3://` URI -- the start-up check
+reads keys) as its evaluation folder. `<folder>/data.yaml`,
+`_generated/<hash>/` and the evaluation yaml written into a val folder are
+overwritten by every build, which is how a golden-set-only run once
+trained on another run's evaluation yaml. Do not point a queued run at
+them.
+
+**A source's own `data.yaml` is the only record of its label numbering.**
+Assemble keeps a verbatim copy as `data.source.yaml` the first time it
+replaces one; a changed class list with no recoverable original is
+refused, not guessed.
 
 `assemble_dataset` copies scattered folders into that shape and writes
 `sources.json` beside `data.yaml`, mapping each copied file back to the
@@ -539,6 +566,26 @@ from; the assembled folder is deleted once the run finishes.
 **Class names exist only in `data.yaml`.** A label line is
 `0 0.51 0.22 0.26 0.08` — scanning labels gives you indices and counts,
 never names.
+
+## Ultralytics carries `single_cls` over from the starting checkpoint
+
+`Model._reset_ckpt_args` keeps `imgsz`, `data`, `task` and `single_cls`
+from a loaded `.pt`. One single-class ancestor (v14 of
+`yolo11s-helmet-detector`) made every continuation single-class, named
+the class `item`, and the evaluator refused it. So state every training
+argument that matters explicitly -- `train.py` passes `single_cls=False`
+now -- and suspect the base checkpoint when a run does something its
+parameters did not ask for.
+
+## Permission gaps that are known, not bugs to rediscover
+
+- The app's role has Scan/Put/Get/Delete on `track2-yolo-dataset-snapshots`
+  but **no UpdateItem** -- `dataset_versions.mark` reads, merges, puts.
+- The queue-runner Lambda (`track2-app-queue-runner`) can only read S3 and
+  has no snapshot-table access. It starts queued runs fine; a scheduled
+  chain that has to BUILD (yaml, dataset version) cannot write from it.
+- IAM changes from this session are blocked by the permission classifier
+  unless the user approves them; prepare the policy and ask.
 
 ## Windows / Git Bash
 
