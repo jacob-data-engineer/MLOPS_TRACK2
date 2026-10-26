@@ -809,15 +809,16 @@ export function Track2PullControlPanel({
    * This DOES take effect: `POST /config` rebuilds `sources` from the
    * picks itself, so a folder chosen here is one the next sweep collects
    * from. There is no staging step, and nothing in the UI should imply
-   * one. What Apply still does that this does not is arm the EventBridge
-   * trigger -- which is why it stays, and why its label is about the
-   * trigger rather than about saving.
+   * one. The Apply settings button that used to sit at the bottom is
+   * gone: it re-sent this same config, and the trigger is the toolbar's.
    *
    * `dirty` is the guard. It is false immediately after a load, so the
    * first render cannot write the values it has just read back over the
    * ones it read them from.
    */
   const configJson = JSON.stringify(currentConfig());
+  const latestConfigRef = useRef(configJson);
+  latestConfigRef.current = configJson;
   useEffect(() => {
     // BOTH guards. `dirty` alone was not enough: it says somebody typed,
     // not that the card has read what it is about to overwrite. Edit any
@@ -826,7 +827,15 @@ export function Track2PullControlPanel({
     // "my settings cleared themselves" report on this page.
     if (!loadedConfig || !dirty) return;
     const timer = window.setTimeout(() => {
-      saveTrack2PullConfig(JSON.parse(configJson)).catch(() => undefined);
+      const sent = configJson;
+      saveTrack2PullConfig(JSON.parse(sent))
+        .then(() => {
+          // Saved, so nothing on screen is pending any more -- unless it
+          // was edited while this was in flight, in which case that edit
+          // still needs its own save and must stay marked.
+          if (latestConfigRef.current === sent) setDirty(false);
+        })
+        .catch(() => undefined);
     }, 800);
     return () => window.clearTimeout(timer);
   }, [loadedConfig, dirty, configJson]);
@@ -853,7 +862,7 @@ export function Track2PullControlPanel({
           </p>
           <p className="mt-2">
             <strong>Manually:</strong> pick the source folders, set the cut-off
-            date, press <em>Apply settings</em>, then <em>Pull now</em>.
+            date (the card saves as you go), then press <em>Pull now</em>.
             <br />
             <strong>Automatically:</strong> in the <em>Pull</em> row of the
             toolbar pinned at the top of this page, choose{" "}
@@ -1410,7 +1419,7 @@ export function Track2PullControlPanel({
               <p className="mb-1.5 text-xs text-ink-muted">
                 Showing this card&apos;s settings, prefix{" "}
                 <span className="tabular text-ink-secondary">{weekPrefix}</span>
-                {dirty && " (not applied yet)"}.
+                {dirty && " (saving...)"}.
               </p>
             )}
 
@@ -2033,28 +2042,18 @@ export function Track2PullControlPanel({
               record what a run was given -- not inside the one card
               it used to be about. */}
 
-          {/* ------------------------------- 9. save, preview, run now */}
-          <div className="flex flex-wrap gap-2">
-            {/* The one button that makes the card real: the settings, the
-                sources rebuilt from the picks, and the trigger. Nothing
-                else on this card changes anything. */}
-            <button type="button" disabled={!!busy || !anyPicked || pullTimeBroken || unpaired}
-              onClick={() => withBusy("Applying...", async () => {
-                // No setTrack2PullMode here. This card cannot change the
-                // trigger -- the toolbar owns it -- so re-asserting it
-                // from values read at page load could only ever overwrite
-                // a change made there since.
-                await saveTrack2PullConfig(currentConfig());
-                await loadWeeks();
-                await load();
-                setNote("Settings applied and the weeks re-read.");
-              })}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium ${
-                dirty ? "bg-accent text-white"
-                      : "border border-black/15 text-ink-secondary"} disabled:opacity-40`}>
-              Apply settings{dirty ? " *" : ""}
-            </button>
-          </div>
+          {/* ------------------------------- 9. saved as you go */}
+          {/* No Apply settings button (removed 2026-10-26). Every change
+              is saved 800ms after it is made, and `POST /config` rebuilds
+              the sources from the picks itself -- so the button only
+              re-sent what had already been sent. The trigger is the
+              toolbar's. */}
+          {pullTimeBroken && (
+            <p className="text-xs text-critical">
+              The pull time is not a valid HH:MM, so the pull keeps the
+              time it had.
+            </p>
+          )}
           {!anyPicked && (
             <p className="text-xs text-ink-muted">Add at least one folder before saving.</p>
           )}

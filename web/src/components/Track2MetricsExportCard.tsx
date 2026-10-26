@@ -12,6 +12,8 @@ import {
   previewTrack2BestVersion,
   type Track2AutoExport,
   type Track2Bucket,
+  type Track2ExportCounts,
+  type Track2ExportScore,
   type Track2ExportCriterion,
   type Track2ExportGroup,
   type Track2ExportPick,
@@ -352,9 +354,16 @@ export function Track2MetricsExportCard({
   }, [group, criterion]);
 
   // --- the watcher -------------------------------------------------------
+  // How many .pt files are in the folder it writes to, and in archive/ --
+  // refreshed with the rest of the watcher, every 30 seconds while on.
+  const [autoCounts, setAutoCounts] = useState<Track2ExportCounts | null>(null);
   const refreshAuto = useCallback(() => {
     getTrack2AutoExport()
-      .then((r) => { setAuto(r.settings); setAutoPending(r.pending.reason); })
+      .then((r) => {
+        setAuto(r.settings);
+        setAutoPending(r.pending.reason);
+        setAutoCounts(r.counts ?? null);
+      })
       .catch(() => undefined);
   }, []);
   useEffect(refreshAuto, [refreshAuto]);
@@ -649,10 +658,14 @@ export function Track2MetricsExportCard({
               have walked to IS the destination, which the line below
               states. */}
           <div className="mt-2">
+            {/* allowCreate: a new folder is the folder you walk into, and
+                becomes real in S3 when the export writes the .pt there --
+                the same as the History card's Export .pt to S3. */}
             <Track2S3FolderBrowser
               prefix={prefix}
               folders={folders}
               onNavigate={(next) => set({ prefix: next })}
+              allowCreate
             />
           </div>
 
@@ -891,6 +904,50 @@ export function Track2MetricsExportCard({
             <dd className={watched.retention === "keep_latest" ? "font-medium text-critical" : "text-ink"}>
               {watchedRetentionLabel}
             </dd>
+            {/* The running count, worded for the rule in force: archiving
+                says where the rest went; keeping everything is one number. */}
+            {autoCounts && (
+              <>
+                <dt className="text-ink-muted">In the folder</dt>
+                <dd className="tabular text-ink">
+                  {autoCounts.in_folder.toLocaleString()} .pt file{autoCounts.in_folder === 1 ? "" : "s"}
+                  {watched.retention === "archive_oldest" && (
+                    <> &middot; {autoCounts.archived.toLocaleString()} archived in{" "}
+                      <span className="text-ink-secondary">archive/</span></>
+                  )}
+                </dd>
+                {/* WHICH version a consumer of the folder gets now, scored
+                    by the measure being watched -- and the group's best by
+                    that measure beside it, so "will the next run replace
+                    it" can be read off the two numbers. */}
+                <dt className="text-ink-muted">Version in the folder</dt>
+                <dd className="tabular text-ink">
+                  {autoCounts.latest ? (
+                    <>
+                      <span className="font-medium">v{autoCounts.latest.version}</span>
+                      {scoreText(autoCounts.latest, watchedCriterionLabel, watched.criterion)}
+                      <span className="text-ink-muted">
+                        {" "}&middot; exported {stampText(autoCounts.latest.stamp)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-ink-muted">none yet -- the first export puts one here</span>
+                  )}
+                </dd>
+                {autoCounts.best && (
+                  <>
+                    <dt className="text-ink-muted">Best by {watchedCriterionLabel}</dt>
+                    <dd className="tabular text-ink">
+                      <span className="font-medium">v{autoCounts.best.version}</span>
+                      {scoreText(autoCounts.best, watchedCriterionLabel, watched.criterion)}
+                      {autoCounts.latest && autoCounts.best.version === autoCounts.latest.version && (
+                        <span className="text-ink-muted"> &middot; the one in the folder</span>
+                      )}
+                    </dd>
+                  </>
+                )}
+              </>
+            )}
             {armed && auto && (
               <>
                 <dt className="text-ink-muted">Seen up to</dt>
@@ -922,8 +979,9 @@ export function Track2MetricsExportCard({
                   same production data, and a file written by the other
                   one is otherwise unexplainable. */}
               <span className="text-ink-muted">
-                Switched on per container. Doing it here does not do it on the
-                other one.
+                Runs with the app closed: the same switch is read by both app
+                windows and by the always-on 2-minute Lambda, and only one of
+                them exports each version.
               </span>
             </div>
           )}
@@ -942,3 +1000,35 @@ export function Track2MetricsExportCard({
     </Card>
   );
 }
+
+
+/** " · F1 0.912 (1,748 validation images)", flagged when the score rests
+ * on too few images to mean much. Nothing for "newest", which ranks on
+ * the version number and has no score to show. */
+function scoreText(score: Track2ExportScore, label: string, criterion: string) {
+  if (criterion === "newest") return null;
+  if (score.value === null || score.value === undefined) {
+    return <span className="text-ink-muted"> &middot; no {label} recorded</span>;
+  }
+  return (
+    <>
+      {" "}&middot; {label} <span className="font-medium">{Number(score.value).toFixed(3)}</span>
+      {score.validation_images != null && (
+        <span className={score.thin_validation ? "text-critical" : "text-ink-muted"}>
+          {" "}({score.validation_images.toLocaleString()} validation image
+          {score.validation_images === 1 ? "" : "s"}
+          {score.thin_validation ? " -- too few for that score to mean much" : ""})
+        </span>
+      )}
+    </>
+  );
+}
+
+/** `20261026-122117` (UTC, as the file is named) in the reader's time. */
+function stampText(stamp: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(stamp);
+  if (!m) return stamp;
+  const when = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+  return when.toLocaleString();
+}
+

@@ -125,9 +125,10 @@ def test_the_running_state_is_the_same_block():
 
 def test_every_field_the_block_showed_before_is_still_there():
     code = _block()
-    for field in ("Epochs:", "Image size:", "Batch:", "Seed:",
-                  "Training images:", "Evaluation images:"):
+    for field in ("Epochs:", "Image size:", "Batch:", "Seed:"):
         assert field in code, field
+    # Both folder lists, now one box headed Training and Evaluation.
+    assert 'title: "Training"' in code and 'title: "Evaluation"' in code
 
 
 def test_the_snapshot_line_survives():

@@ -649,8 +649,10 @@ resource "aws_lambda_function" "queue_runner" {
   handler       = "ppe_pipeline_api.queue_runner.lambda_handler"
   runtime       = "python3.12"
   # One advance per invocation, and an advance is a few API calls plus a
-  # dataset validation. It does not wait for the run.
-  timeout          = 120
+  # dataset validation. It does not wait for the run. 300, not 120, since
+  # it also runs the automatic export, which may unpack a large model.pt
+  # from its registry tarball once per newly winning version.
+  timeout          = 300
   memory_size      = 512
   filename         = data.archive_file.queue_runner.output_path
   source_code_hash = data.archive_file.queue_runner.output_base64sha256
@@ -713,6 +715,32 @@ data "aws_iam_policy_document" "queue_runner" {
     effect    = "Allow"
     actions   = ["codebuild:StartBuild", "codebuild:BatchGetBuilds"]
     resources = ["*"]
+  }
+
+  # The automatic export, run here so it works with the app off
+  # (metrics_export.check): read the registry versions it ranks...
+  statement {
+    sid       = "RankRegistryVersions"
+    effect    = "Allow"
+    actions   = ["sagemaker:ListModelPackages"]
+    resources = ["*"]
+  }
+  statement {
+    sid     = "DescribeDetectorVersions"
+    effect  = "Allow"
+    actions = ["sagemaker:DescribeModelPackage"]
+    resources = [
+      "arn:aws:sagemaker:${var.region}:${local.account_id}:model-package/yolo*-detector/*",
+    ]
+  }
+  # ...and write the winner's .pt, then archive or delete the older ones,
+  # in the pipeline bucket. Another bucket chosen as the destination needs
+  # its own grant.
+  statement {
+    sid       = "WriteExportedCheckpoints"
+    effect    = "Allow"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["${data.aws_s3_bucket.pipeline.arn}/*"]
   }
 
   # Read-only on SageMaker: this decides whether the slot is free, it does

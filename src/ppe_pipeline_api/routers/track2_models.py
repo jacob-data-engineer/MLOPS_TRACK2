@@ -160,7 +160,8 @@ def export_training_audit(audit_id: str, session=Depends(require_session)) -> Re
         raise HTTPException(status_code=404, detail="Run not found.")
     started = str(audit.get("submitted_at") or "")[:10]
     return Response(
-        content=t2.audit_as_csv(audit),
+        # Older runs' hyperparameters are read back from their execution.
+        content=t2.audit_as_csv(audit, t2.run_settings_for(audit)),
         media_type="text/csv",
         headers={
             "Content-Disposition":
@@ -567,6 +568,11 @@ class DatasetYamlInPlaceRequest(DatasetLayoutRequest):
     #: name. With it off, a write naming fewer classes than the labels use
     #: is refused; the preview reports the mismatch either way.
     drop_undeclared: bool = False
+    #: Add Pull Control's week folders to the training side, as the run
+    #: does when Pull Control is a ticked source -- the retention list
+    #: when the policy is on, the week folders whole when it is off.
+    #: Preview only: the write route never takes it.
+    include_pull: bool = False
 
 
 class DiscoverRequest(BaseModel):
@@ -619,12 +625,39 @@ def dataset_yaml_preview(payload: DatasetYamlInPlaceRequest,
     names -- and it should be read once before a GPU run depends on it.
     """
     try:
-        return dy.build_in_place(
-            splits=_splits_of(payload),
+        splits = _splits_of(payload)
+        retained = None
+        if payload.include_pull:
+            # The weeks, named exactly as the run names them -- one
+            # function for both, in retrain_schedule.
+            from .. import pull_control as pc
+            from .. import retrain_schedule as rs
+            config = pc.read_config()
+            root = str(config.get("root") or "").strip("/")
+            if root:
+                pulled = rs.pull_train_entries(config, root, write=False)
+                splits["train"] = list(splits["train"]) + [
+                    (e["images"], e["labels"]) for e in pulled["entries"]]
+                retained = pulled["retained"]
+        out = dy.build_in_place(
+            splits=splits,
             classes=payload.classes,
             overwrite=payload.overwrite,
             drop_undeclared=payload.drop_undeclared,
         )
+        if retained:
+            # The list file holds whatever the LAST build wrote; the run
+            # rewrites it first. So count what the policy keeps NOW.
+            counts = (out.get("image_counts") or {}).get("train")
+            if counts:
+                for row in counts["folders"]:
+                    if row["folder"].rstrip("/").endswith(retained["entry"]):
+                        row["images"] = retained["images"]
+                        row["retained_of"] = retained["available"]
+                        row["weeks"] = retained.get("weeks") or []
+                if all(r["images"] is not None for r in counts["folders"]):
+                    counts["total"] = sum(r["images"] for r in counts["folders"])
+        return out
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:                                       # noqa: BLE001

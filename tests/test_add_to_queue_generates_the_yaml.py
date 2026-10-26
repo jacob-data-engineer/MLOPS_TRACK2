@@ -38,10 +38,13 @@ def test_add_to_queue_runs_the_chain_for_the_assembled_dataset():
     assert '(!datasetFolder && dataSource !== "assembled")' in PAGE
 
 
-def test_the_generate_button_says_it_is_for_checking():
+def test_the_build_card_is_a_preview_with_no_button():
+    """2026-10-26: the Generate button went. The run builds the yaml, so
+    the card shows what it will be and writes nothing."""
     flat = " ".join(CARD.split())
-    assert "For checking only." in flat
-    assert "generated again from these settings when you press" in flat
+    assert "Generate yaml training file" not in flat
+    assert "Preview only -- nothing is written." in flat
+    assert "writeTrack2DatasetYaml" not in flat
 
 
 def test_enqueue_does_not_start_the_queue():

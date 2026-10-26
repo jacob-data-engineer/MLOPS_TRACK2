@@ -278,7 +278,7 @@ def test_the_card_has_the_field_under_the_model_names_classes():
 
 
 def test_it_is_saved_in_both_writers_and_restored_on_load():
-    assert PANEL.count("label_classes: parseLabelClasses(labelClassesText),") == 2
+    assert PANEL.count("label_classes: parseLabelClasses(labelClassesText),") == 1
     assert "setLabelClassesText(formatLabelClasses(saved.label_classes));" in FLAT
     assert "labelClassesText," in FLAT  # in the debounced writer's deps
 

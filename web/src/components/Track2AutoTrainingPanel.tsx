@@ -60,11 +60,7 @@ function naturally(a: string, b: string): number {
  * removes: a retrain that quietly misses the newest data because somebody
  * forgot to add a folder.
  */
-export function Track2AutoTrainingPanel({
-  onAssembled,
-}: {
-  onAssembled?: (folder: string) => void;
-}) {
+export function Track2AutoTrainingPanel() {
   // Blank means "not set yet, use the name below it". Seeded from the
   // pull control so the two cards agree without anybody typing twice.
   const [root, setRoot] = useState("");
@@ -619,7 +615,7 @@ export function Track2AutoTrainingPanel({
           older week the assembly above takes, so reading it anywhere else
           meant scrolling away from the folder list it is describing. */}
       <div className="mt-4 border-t border-hairline pt-4">
-        <Track2RetentionPanel onUseForTraining={onAssembled} />
+        <Track2RetentionPanel />
       </div>
     </Card>
   );

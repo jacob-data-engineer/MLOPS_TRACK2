@@ -90,8 +90,25 @@ def allowed_triggers(plan: dict) -> list:
 
 
 def settings(config: dict | None = None) -> dict:
+    """The chain's settings -- with `enabled` and `triggers` DERIVED from
+    the pull's own mode, not stored (2026-10-26).
+
+    The PULL, BUILD, QUEUE, TRAIN strip is the one switch: "On a
+    schedule" chains every scheduled pull, "When files arrive" every
+    arrival pull (behind `min_files` and `cooldown_minutes`), "Off"
+    nothing. The separate "Run after every scheduled pull" tick, its
+    trigger boxes and step 6's "Enabled for scheduling" were three more
+    answers to the same question, and the strip could read "On a
+    schedule" while all of them said off. Stored values for these two
+    keys are ignored; the guards and `even_if_nothing_moved` still are
+    settings.
+    """
     config = config if config is not None else pc.read_config()
-    return {**DEFAULTS, **(config.get(KEY) or {})}
+    plan = {**DEFAULTS, **(config.get(KEY) or {})}
+    mode = str(config.get("mode") or "off")
+    plan["enabled"] = mode in ("schedule", "arrival")
+    plan["triggers"] = [mode] if plan["enabled"] else ["schedule"]
+    return plan
 
 
 def _finished_pulls(limit: int = 10, plan: dict | None = None) -> list:
@@ -288,7 +305,12 @@ def check(config: dict | None = None) -> dict:
 
     try:
         outcome = rs.run_chain(
-            config=config,
+            # From the TICKED SOURCES, always: the week folders, the
+            # golden set and the Assemble folders, each when its card is
+            # ticked. A frozen snapshot picked in step 6 is for runs
+            # queued by hand; an automatic run after a pull exists to
+            # train on what the pull just brought in.
+            config=rs.automatic(config),
             trigger="after-pull",
             submit="queue",
         )

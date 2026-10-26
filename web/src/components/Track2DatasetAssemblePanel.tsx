@@ -5,7 +5,6 @@ import { onGoldenChanged } from "../lib/useGoldenSync";
 import {
   ApiError,
   previewTrack2DatasetYaml,
-  writeTrack2DatasetYaml,
   checkTrack2Pairing,
   getTrack2DatasetLayout,
   getTrack2Detectors,
@@ -23,7 +22,6 @@ import {
   type Track2Detector,
 } from "../lib/api";
 import { Card } from "./Card";
-import { ConfirmDialog } from "./ConfirmDialog";
 import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
 
 /** "0 helmet, 1 gloves, 2 vest" -- or one per line, or "0: helmet" --
@@ -174,7 +172,7 @@ function YamlPreview({
         </div>
       )}
       <p className="text-xs font-medium text-ink">
-        {preview.written ? "Written to" : "Would be written to"}{" "}
+        {preview.written ? "Written to" : "The run writes it to"}{" "}
         <span className="tabular font-normal text-ink-secondary">{preview.uri}</span>
       </p>
       <pre className="tabular mt-2 max-h-64 overflow-auto rounded-sm border border-hairline bg-page p-2 text-xs leading-relaxed text-ink-secondary">
@@ -193,9 +191,25 @@ function YamlPreview({
                 {preview.image_counts?.[split].total?.toLocaleString() ?? "?"} images
               </p>
               {preview.image_counts?.[split].folders.map((row) => (
-                <p key={row.folder} className="truncate" title={row.folder}>
+                <div key={row.folder}>
+                <p className="truncate" title={row.folder}>
                   {row.images === null ? "?" : row.images.toLocaleString()} &middot; {row.folder}
+                  {/* The retention list: the week folders, thinned. */}
+                  {row.retained_of != null && (
+                    <span className="text-ink-muted">
+                      {" "}(week folders -- retention keeps {row.images?.toLocaleString()} of{" "}
+                      {row.retained_of.toLocaleString()})
+                    </span>
+                  )}
                 </p>
+                {/* Every week the list draws from, by name -- the list
+                    file on its own says nothing about which weeks. */}
+                {row.weeks?.map((w) => (
+                  <p key={w.folder} className="truncate pl-4 text-ink-muted" title={w.folder}>
+                    {w.keep.toLocaleString()} of {w.available.toLocaleString()} &middot; {w.folder}
+                  </p>
+                ))}
+                </div>
               ))}
             </div>
           ))}
@@ -241,7 +255,7 @@ function YamlPreview({
       )}
       {preview.existing?.ours && !preview.written && (
         <p className="mt-1 text-xs text-ink-muted">
-          A data.yaml from an earlier build is already there; writing replaces it.
+          A data.yaml from an earlier build is already there; the run replaces it.
         </p>
       )}
     </div>
@@ -249,15 +263,11 @@ function YamlPreview({
 }
 
 export function Track2DatasetAssemblePanel({
-  onAssembled,
   multiSource = false,
   only,
   onOnlyChange,
   modelSlug = "",
 }: {
-  /** The folder to train from, and the separate one to evaluate
-   * against when validation lives under another prefix. */
-  onAssembled?: (folder: string, evalFolder?: string) => void;
   /** Several folders per split, merged into one dataset. A site's images
    * are rarely all in one place, and copying them together by hand first
    * is the step this removes. */
@@ -319,15 +329,10 @@ export function Track2DatasetAssemblePanel({
   // what a scheduled run builds from, and "Enabled for scheduling"
   // beside them turns it on -- so a copy of that answer here could only
   // ever disagree with it.
-  /** The refusal, when a data.yaml this card did not write is already
-   * there. Held as the dialog's content so the server's own sentence is
-   * what the operator reads. */
-  const [confirming, setConfirming] = useState<Track2DatasetYamlInPlace | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState("");
-  // The yaml as it would be written, plus what the run would
-  // download. Null until Preview has been pressed.
+  // The yaml as the run will build it, plus what the run would
+  // download. Kept current as the card changes; null until complete.
   const [preview, setPreview] = useState<Track2DatasetYamlInPlace | null>(null);
   // Replace a data.yaml this card did not write. Off unless ticked.
   const [overwrite, setOverwrite] = useState(false);
@@ -651,82 +656,45 @@ export function Track2DatasetAssemblePanel({
     setLabelClassesText(formatLabelClasses(merged));
   }
 
-  /** Writes it.
+  /* THE PREVIEW, kept current (2026-10-26). There is no Generate button:
+   * the run builds the data.yaml itself at Add to Queue and on the
+   * schedule, from these saved settings, so pressing one here only wrote
+   * a file nothing trained on. This reads /dataset-yaml-preview, which
+   * writes nothing, whenever the folders, classes or filter change.
    *
-   * This used to be disabled until "Preview the yaml" had been pressed,
-   * and said nothing about why -- so a complete card showed a dead
-   * button and the control that would have woken it was a separate
-   * press with no arrow pointing at it. The preview is still there for
-   * anyone who wants to read the file first; it is no longer a toll
-   * gate.
-   *
-   * `force` is the answer the overwrite dialog sends back.
-   */
-  async function handleWrite(force = false) {
-    if (!chosen || !complete) return;
-    setBusy(true);
-    setError("");
-    try {
-      if (!force) {
-        // Asked BEFORE writing, so a data.yaml this card did not write
-        // becomes a dialog naming it -- rather than a refusal arriving
-        // after the press, from a server the button cannot quote.
-        const check = await previewTrack2DatasetYaml(
-          await foldersForBuild(), classesOf(), false, dropUndeclared);
-        setPreview(check);
-        if (check.needs_overwrite) {
-          setConfirming(check);
-          setBusy(false);
-          return;
-        }
-      }
-      const out = await writeTrack2DatasetYaml(await foldersForBuild(), classesOf(), force || overwrite, dropUndeclared);
-      setPreview(out);
-      setResult(
-        (out.written_uris ?? [out.uri]).join("  +  ") + " written -- nothing copied.",
-      );
-      // The folder the run trains from is the PARENT, because that is the
-      // one prefix the trainer downloads and the yaml sits at its root.
-      // The eval side is passed separately when it has its own prefix:
-      // that is EVAL_DATA_S3_URI, a different download entirely.
-      const record = {
-        folder: out.folder,
-        eval_folder: out.eval?.folder,
-        at: new Date().toISOString(),
-      };
-      setBuilt(record);
-      // Written NOW, not by the debounced writer below.
-      //
-      // Step 6 fills "Use the assembled dataset" by re-reading
-      // `dataset_assemble.built` from the config, and it re-reads as
-      // soon as `onAssembled` fires. A 600ms debounce between the two
-      // means that read lands BEFORE the value it is looking for --
-      // the option stays greyed out saying "Nothing assembled yet"
-      // beside a yaml that exists, and nothing on screen says a reload
-      // is what it wants. Awaited for the same reason: the order is the
-      // point, not the saving.
-      await saveTrack2PullConfig({
-        dataset_assemble: {
-          only: onOnlyChange ? !!only : savedOnly,
-          use: useFolders,
-          label_classes: parseLabelClasses(labelClassesText),
-          drop_undeclared_labels: dropUndeclared,
-          train_sources: trainSources,
-          eval_sources: evalSources,
-          folders,
-          detector_slug: detectorSlug,
-          overwrite,
-          built: record,
-        },
-      }).catch(() => undefined);
-      onAssembled?.(out.folder, out.eval?.folder);
-      setConfirming(null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not write the yaml.");
-    } finally {
-      setBusy(false);
+   * `overwrite` is sent true because the chain sends it true: the run
+   * replaces the yaml it wrote last time, so the preview must not raise
+   * a "replace this file?" question the run never asks. */
+  useEffect(() => {
+    if (!chosen || !complete) {
+      setPreview(null);
+      setError("");
+      return;
     }
-  }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setBusy(true);
+      foldersForBuild()
+        .then((f) => previewTrack2DatasetYaml(f, classesOf(), true, dropUndeclared,
+          // The week folders, when Pull Control is a ticked source -- the
+          // run trains on them, so the preview has to show them.
+          Boolean(multiSource && onOnlyChange && !only)))
+        .then((out) => {
+          if (cancelled) return;
+          setPreview(out);
+          setError("");
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setPreview(null);
+          setError(err instanceof ApiError ? err.detail : "Could not build the preview.");
+        })
+        .finally(() => { if (!cancelled) setBusy(false); });
+    }, 700);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chosen, complete, trainSources, evalSources, folders, multiSource, useGolden,
+      useFolders, labelClassesText, dropUndeclared, only]);
 
   useEffect(() => {
     getTrack2Buckets()
@@ -799,10 +767,10 @@ export function Track2DatasetAssemblePanel({
    * it is ticked -- the same composition the chain makes at run time, so
    * the yaml previewed and written here is the one the run trains on.
    *
-   * Golden's train side joins training; its val side REPLACES the val
-   * folders as the held-out set. Pull Control is never added here: this
-   * card is the hand-picked path, and the pull's week folders are not
-   * part of it.
+   * Golden's train side joins training; its val side is ADDED to the val
+   * folders as the held-out set. Pull Control's weeks are added by the
+   * SERVER (`include_pull` on the preview), because how they are named
+   * depends on the retention policy -- one function, shared with the run.
    *
    * Read fresh from the config each time, because the Golden Set card
    * saves its folder and split independently of this one. */
@@ -958,8 +926,8 @@ export function Track2DatasetAssemblePanel({
             nowhere to copy it to. The yaml is written at the common
             parent of the folders above, because that is the one prefix
             the run downloads and a data.yaml has to sit at its root. */}
-        Nothing is copied. One <span className="tabular">data.yaml</span> is
-        written naming these folders where they already are, and the class
+        Nothing is copied. The run&apos;s <span className="tabular">data.yaml</span>{" "}
+        names these folders where they already are, and the class
         indices in your .txt files are not rewritten &mdash; so they must
         already match the order above. Labels are never named in the file:
         Ultralytics finds them by swapping{" "}
@@ -968,51 +936,19 @@ export function Track2DatasetAssemblePanel({
         its labels sibling in that exact shape.
       </p>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {/* ONE button. It builds the yaml (what the old Preview did),
-            shows it below, and writes it -- or, when something must be
-            decided first (an existing hand-written yaml, labels the yaml
-            cannot name, no validation folder), stops and shows that
-            instead, with its answer beside it. */}
-        <button
-          type="button"
-          disabled={busy || !complete || !detectorSlug}
-          onClick={() => void handleWrite()}
-          className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
-        >
-          {busy ? "Generating..." : "Generate yaml training file"}
-        </button>
-        {/* What the button is FOR, beside it (2026-10-26): Add to Queue
-            and the schedule now generate the yaml themselves, so this is a
-            check, not a step. Accurate about the write -- it does put the
-            file in S3 -- because "preview" alone would promise nothing
-            changes. */}
-        <span className="max-w-md text-xs text-ink-muted">
-          <span className="font-medium text-ink-secondary">For checking only.</span>{" "}
-          Builds the data.yaml now so you can read it and see any class
-          problems. You don&apos;t need to press it: the yaml a run uses is
-          generated again from these settings when you press{" "}
-          <em>Add to Queue</em> in step 6, and when the schedule runs.
-        </span>
-        {/* The scheduling tick that used to live here has moved to
-            "Enabled for scheduling" beside the Training data radios in
-            step 6.
-
-            It was a SECOND answer to a question that group already asks:
-            pick "Use the assembled dataset" there and this card is what
-            the schedule builds from. Two switches that can disagree is
-            how an unattended run trains something nobody chose, and
-            nothing on screen said which one won. */}
-      </div>
-      {/* Where the button is, not three hundred pixels above it. Both of
-          these answer "Preview the yaml" and "Write it", and nothing
-          else on this card sets them -- rendered at the top, a failed
-          write scrolled out of view and read as the button doing
-          nothing, which is exactly how it was reported. */}
+      {/* No Generate button (2026-10-26). The yaml below is a preview,
+          kept current as the card changes, like "What will be built"
+          above. The run builds the real one. */}
+      <p className="mt-3 text-xs text-ink-muted">
+        <span className="font-medium text-ink-secondary">Preview only -- nothing is written.</span>{" "}
+        It updates as you change the folders, classes or filter. The data.yaml
+        a run trains on is built when you press <em>Add to Queue</em> in step 6,
+        and each time the schedule runs &mdash; after the retention policy has
+        been applied, when Pull Control&apos;s week folders are one of the
+        ticked sources.
+        {busy && <span className="ml-1">Checking...</span>}
+      </p>
       {error && <p className="mt-2 text-xs text-critical">{error}</p>}
-      {result && (
-        <p className="tabular mt-2 text-xs text-ink-secondary">{result}</p>
-      )}
       {!detectorSlug && complete && (
         <p className="mt-1 text-xs text-info">
           Pick a Model Name above &mdash; its classes are what the yaml declares.
@@ -1034,38 +970,6 @@ export function Track2DatasetAssemblePanel({
         />
       )}
 
-      {/* The refusal IS the dialog, rather than a red line somewhere else
-          and a second control to find. It names the file, says what is
-          kept, and carries the harsher answer as its own button. */}
-      <ConfirmDialog
-        open={!!confirming}
-        title="Replace the data.yaml already there?"
-        destructive
-        busy={busy}
-        confirmLabel="Replace it"
-        cancelLabel="Cancel"
-        body={
-          <>
-            <p>
-              <span className="tabular">{confirming?.key}</span> already exists
-              and was not written by this card, so it is somebody's own file.
-            </p>
-            <p className="mt-2">
-              Replacing it changes which folders and class names the next run
-              trains on. <strong>No images or labels are touched</strong>, and
-              no dataset or trained weights are affected &mdash; only this one
-              file.
-            </p>
-            {confirming?.existing?.bytes != null && (
-              <p className="mt-2 text-xs text-ink-muted">
-                The file there now is {confirming.existing.bytes} bytes.
-              </p>
-            )}
-          </>
-        }
-        onConfirm={() => void handleWrite(true)}
-        onCancel={() => setConfirming(null)}
-      />
     </>
   );
 
@@ -1142,13 +1046,10 @@ export function Track2DatasetAssemblePanel({
       )}
       {!open ? (
         <p className="tabular text-xs text-ink-muted">
-          {result
-            ? `Wrote ${result}`
-            : sourcesChosen
-              ? `${sourcesChosen} source${sourcesChosen === 1 ? "" : "s"} chosen`
-                + `${layout?.total_paired ? `, ${layout.total_paired.toLocaleString()} paired` : ""}`
-                + ", not assembled yet"
-              : "Nothing chosen yet."}
+          {sourcesChosen
+            ? `${sourcesChosen} source${sourcesChosen === 1 ? "" : "s"} chosen`
+              + `${layout?.total_paired ? `, ${layout.total_paired.toLocaleString()} paired` : ""}`
+            : "Nothing chosen yet."}
         </p>
       ) : (
       <>
@@ -1501,8 +1402,8 @@ export function Track2DatasetAssemblePanel({
       </>
       )}
       {buildSlot && createPortal(
-        <Card title="Build the data.yaml" collapsible={false}
-              caption="From the folders picked in Assemble a dataset. Generate it before starting the run.">
+        <Card title="Preview the data.yaml" collapsible={false}
+              caption="What the run's data.yaml will be, from the folders picked in Assemble a dataset. Nothing is written here -- the run builds it at Add to Queue and on the schedule, after the retention policy.">
           {buildSection}
         </Card>,
         buildSlot,

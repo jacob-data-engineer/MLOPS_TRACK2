@@ -66,7 +66,7 @@ def test_the_setting_still_decides_when_folders_are_not_hand_picked():
 def test_the_after_pull_chain_stands_down(monkeypatch):
     """Two triggers on one GPU slot is two ways to start a run nobody
     expected."""
-    decision = qap.pending({**BY_HAND, "queue_after_pull": {"enabled": True}})
+    decision = qap.pending({**BY_HAND, "mode": "schedule"})
     assert decision["act"] is False
     assert "the pull is not the trigger" in decision["reason"]
 
@@ -74,6 +74,7 @@ def test_the_after_pull_chain_stands_down(monkeypatch):
 def test_it_still_chains_on_a_pull_when_that_is_the_mode():
     """Removing the pull path would break anyone who uses Pull Control."""
     decision = qap.pending({
+        "mode": "schedule",
         "dataset_assemble": {"only": False},
         "retrain_schedule": {"follow_pull": True},
         "queue_after_pull": {"enabled": True},
@@ -243,7 +244,7 @@ def test_it_never_raises_into_the_tick():
 
 def test_it_runs_the_same_chain_as_everything_else():
     code = inspect.getsource(rs.check_training_schedule)
-    assert 'run_chain(config=config, trigger="schedule", submit="queue")' in code
+    assert 'run_chain(config=automatic(config), trigger="schedule", submit="queue")' in code
 
 
 # --- wired to tickers that already exist ------------------------------------------------------

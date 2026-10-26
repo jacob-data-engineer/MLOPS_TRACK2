@@ -87,6 +87,15 @@ def lambda_handler(event=None, _context=None):
     except Exception as exc:                                       # noqa: BLE001
         print(f"Training schedule check failed: {exc}")
 
+    # Automatic export of the best checkpoint, on the same tick -- so it
+    # still runs with the app off (2026-10-26). The app ticks it too; the
+    # claim inside `check` means one of them acts per version.
+    try:
+        from . import metrics_export
+        print(f"Auto export: {metrics_export.check()}")
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"Auto export check failed: {exc}")
+
     before = t2.queue_snapshot() if hasattr(t2, "queue_snapshot") else None
     try:
         t2.try_advance_queue()

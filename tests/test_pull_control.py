@@ -716,6 +716,49 @@ def test_copying_twice_changes_nothing(monkeypatch, config):
     assert len(s3.copied) == 1
 
 
+def test_already_filed_files_do_not_use_up_the_cap(monkeypatch, config):
+    """A copy source keeps its originals, so every sweep walks past the
+    ones already filed. Counting those toward the cap stalled the pull for
+    good: 2026-10-26 stopped at 5,000 of 5,240, and the next sweep would
+    have skipped the same 5,000 and stopped again before the last 240."""
+    files = {f"pulls/p1/images/train/{i}.jpg": _at(3) for i in range(5)}
+    s3 = FakeS3(files)
+    monkeypatch.setattr(pc, "s3", s3)
+    monkeypatch.setattr(pc, "list_weeks", lambda: list(WEEKS))
+    monkeypatch.setattr(pc, "_record_run", lambda *a, **k: None)
+    cfg = {**config, "sources": [SPLIT_SOURCE]}
+
+    first = pc.route_pending(config=cfg, limit=3)
+    assert first["moved"] == 3 and first["limit_reached"] is True
+
+    second = pc.route_pending(config=cfg, limit=3)
+    assert second["moved"] == 2, "the second sweep must reach the files the first left"
+    assert second["limit_reached"] is False
+    assert len(s3.copied) == 5
+
+
+def test_a_sweep_has_no_cap_by_default(monkeypatch, config):
+    """Asked for on 2026-10-26: no limit when sweeping or pulling."""
+    import inspect
+    assert inspect.signature(pc.route_pending).parameters["limit"].default is None
+    assert inspect.signature(pc.plan_routing).parameters["limit"].default is None
+    files = {f"pulls/p1/images/train/{i}.jpg": _at(3) for i in range(12)}
+    s3 = FakeS3(files)
+    monkeypatch.setattr(pc, "s3", s3)
+    monkeypatch.setattr(pc, "list_weeks", lambda: list(WEEKS))
+    monkeypatch.setattr(pc, "_record_run", lambda *a, **k: None)
+    out = pc.route_pending(config={**config, "sources": [SPLIT_SOURCE]})
+    assert out["moved"] == 12 and out["limit_reached"] is False
+
+
+def test_the_manual_pull_route_passes_no_cap():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1] / "src" / "ppe_pipeline_api"
+           / "routers" / "track2_pull_control.py").read_text(encoding="utf-8")
+    assert 'pc.route_pending(trigger="manual", run_id=run_id)' in src
+    assert "min(payload.limit, 20000)" not in src
+
+
 def test_move_is_still_available_for_a_real_staging_folder(monkeypatch, config):
     s3 = FakeS3({"drop/train/a.jpg": _at(3)})
     monkeypatch.setattr(pc, "s3", s3)

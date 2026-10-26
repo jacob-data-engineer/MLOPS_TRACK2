@@ -154,4 +154,4 @@ def test_the_snapshot_option_is_still_always_pickable():
     """Picking one is how it gets filled, so greying it until it has a
     value would be a control that can never be reached."""
     code = _flat()
-    assert 'const ready = option.key === "snapshot" || Boolean(option.folder);' in code
+    assert 'const ready = option.key === "snapshot" || (option.key === "assembled"' in code

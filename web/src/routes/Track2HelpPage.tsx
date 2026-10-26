@@ -24,7 +24,7 @@ import { Card } from "../components/Card";
  *
  * Rewritten 2026-10-20 against the code as it stands: the three training
  * sources are independent ticks that combine into one data.yaml, the
- * Assemble card has one "Generate yaml training file" button, frozen
+ * Assemble card previews the yaml (the run builds it), frozen
  * snapshots are picked and deleted from the run card, and the unattended
  * chain's triggers are a setting with two guards.
  *
@@ -211,19 +211,19 @@ const TRAINING_STEPS: StepList = [
     ),
   },
   {
-    title: "Assemble a dataset: pick folders and generate the yaml",
+    title: "Assemble a dataset: pick folders and check the preview",
     body: (
       <>
         Pick the image folders (labels must sit beside them as{" "}
         <span className={K}>labels/</span> in place of{" "}
         <span className={K}>images/</span>). Folders can come from more
         than one bucket, and each shows its image count. Nothing is copied:
-        one <span className={K}>data.yaml</span> is written naming the
-        folders where they already are. Then press{" "}
-        <strong>Generate yaml training file</strong> &mdash; the one button.
-        It shows the yaml and writes it, or stops and shows the decision it
-        needs first (an existing yaml to replace, labels it cannot name, no
-        validation folder).
+        one <span className={K}>data.yaml</span> names the folders where
+        they already are. <strong>Preview the data.yaml</strong> shows it as
+        you pick, with any class problem it would hit. Nothing is written
+        there: the run builds the yaml itself when you press{" "}
+        <strong>Add to Queue</strong> and when the schedule fires &mdash;
+        after the retention policy, when Pull Control is ticked.
       </>
     ),
   },
@@ -252,9 +252,8 @@ const TRAINING_STEPS: StepList = [
         prefix (<span className={K}>week_</span> by default) and the{" "}
         <strong>cut-off</strong>. The cut-off alone decides which week folder
         a file goes into: week 1 is the backlog, week 2 starts at the
-        cut-off, and so on. Press <strong>Apply settings</strong> &mdash;
-        nothing is armed until you do &mdash; and <strong>Pull now</strong>{" "}
-        to pull by hand. <em>When</em> it pulls on its own is set in the{" "}
+        cut-off, and so on. The card saves as you change it; press{" "}
+        <strong>Pull now</strong> to pull by hand. <em>When</em> it pulls on its own is set in the{" "}
         <strong>PULL, BUILD, QUEUE, TRAIN</strong> row pinned at the top
         (Off, When files arrive, or On a schedule, in SGT); that is
         unrelated to the week boundary.
@@ -310,17 +309,18 @@ const TRAINING_STEPS: StepList = [
     title: "Let it run unattended, once you trust it",
     body: (
       <>
-        Tick <strong>Enabled for scheduling</strong> on step 6 (the same
-        switch as <em>Run after every scheduled pull</em> in Retention).
-        After each qualifying pull it runs the whole chain:{" "}
+        Set <strong>PULL, BUILD, QUEUE, TRAIN</strong> at the top to{" "}
+        <strong>On a schedule</strong> (or <strong>When files arrive</strong>).
+        That is the one switch: each of those pulls runs the whole chain
+        &mdash;{" "}
         <em>pull &rarr; rebuild lists &rarr; data.yaml &rarr; freeze snapshot
         &rarr; queue &rarr; start</em> &mdash; through to a trained model,
-        with nobody watching. <strong>Which pulls chain</strong> is a setting:
-        On a schedule (the default), When files arrive, Pull now (by hand).
-        Two guards sit with it: <strong>Files that count as a batch</strong>{" "}
-        and <strong>Wait between runs (minutes)</strong>. Set both before
-        ticking <em>When files arrive</em> &mdash; it fires once per upload
-        burst, and without them one photo is one GPU run.
+        with nobody watching. It builds from the ticked sources: the week
+        folders (after retention), the golden set and the Assemble folders,
+        each when its card is ticked. <strong>When files arrive</strong>{" "}
+        shows two guards beside it &mdash; a batch size and a wait between
+        runs. Set both: it fires once per upload burst, and without them one
+        photo is one GPU run. <strong>Off</strong> runs nothing.
       </>
     ),
   },
@@ -591,8 +591,8 @@ const CONTENT: Record<TabKey, { blurb: ReactNode; steps: StepList; closing?: Rea
     closing: (
       <>
         <strong>Two things cost GPU hours without asking.</strong>{" "}
-        <em>Enabled for scheduling</em> trains all the way to a model with
-        nobody watching, and <em>When files arrive</em> as a chain trigger
+        <em>On a schedule</em> on the top strip trains all the way to a model
+        with nobody watching, and <em>When files arrive</em>
         without a batch size and a wait fires a run per upload. And a folder
         ticked on two sources at once trains twice.
       </>

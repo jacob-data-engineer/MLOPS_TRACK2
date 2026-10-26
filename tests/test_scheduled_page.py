@@ -36,9 +36,11 @@ def test_pulls_and_the_training_they_set_off(monkeypatch):
     assert out["next"]["kind"] == "train" and out["next"]["at"] == pulls[0]["at"]
 
 
-def test_a_pull_that_does_not_chain_trains_nothing():
+def test_a_scheduled_pull_always_trains_now():
+    """The strip's mode is the switch (2026-10-26): a stored
+    `enabled: False` from the old tick no longer stops the chain."""
     out = tr.scheduled_events(_config(queue_after_pull={"enabled": False}), days=21, now=NOW)
-    assert all(e["kind"] == "pull" for e in out["events"]) and out["next"] is None
+    assert [e for e in out["events"] if e["kind"] == "train"]
 
 
 def test_the_training_clock_on_its_own(monkeypatch):

@@ -319,6 +319,9 @@ export interface Track2QueueEntry {
    * already the origin. */
   dataset_source_folders?: string[];
   eval_source_folders?: string[];
+  /** Images used from each folder, keyed as the two lists above. */
+  dataset_source_counts?: Record<string, number>;
+  eval_source_counts?: Record<string, number>;
   /** The frozen dataset this entry trains on (dataset_versions.py). */
   dataset_version_id?: string;
   dataset_version_train_images?: number;
@@ -781,7 +784,13 @@ export interface Track2DatasetYamlInPlace {
   /** Images per folder the yaml names, per split. `images` null when a
    * folder could not be listed. */
   image_counts?: Record<"train" | "val", {
-    folders: { folder: string; images: number | null }[];
+    /** `retained_of`: on the retention list's row, how many images the
+     * week folders hold -- `images` is how many the decay keeps. */
+    folders: {
+      folder: string; images: number | null; retained_of?: number | null;
+      /** On the retention list's row: each week folder it draws from. */
+      weeks?: { folder: string; keep: number; available: number }[];
+    }[];
     total: number | null;
   }>;
   drop_undeclared?: boolean;
@@ -815,9 +824,12 @@ export function previewTrack2DatasetYaml(
   classes: Record<string, string>,
   overwrite = false,
   dropUndeclared = false,
+  /** Add Pull Control's week folders, as the run does when it is ticked. */
+  includePull = false,
 ): Promise<Track2DatasetYamlInPlace> {
   return apiPost("/track2/models/dataset-yaml-preview",
-    { ...folders, classes, overwrite, drop_undeclared: dropUndeclared });
+    { ...folders, classes, overwrite, drop_undeclared: dropUndeclared,
+      include_pull: includePull });
 }
 
 export function writeTrack2DatasetYaml(
@@ -1451,9 +1463,30 @@ export interface Track2AutoExport {
   armed_at: string;
 }
 
+/** One version as the export card states it: its score on the measure
+ * the watcher ranks by, and how many images that score rests on. */
+export interface Track2ExportScore {
+  version: string;
+  value?: number | null;
+  validation_images?: number | null;
+  thin_validation?: boolean;
+}
+
+export interface Track2ExportCounts {
+  in_folder: number;
+  archived: number;
+  /** The newest .pt in the folder -- the version a consumer gets now. */
+  latest?: (Track2ExportScore & { file: string; stamp: string }) | null;
+  /** The group's best by the watched measure, right now. */
+  best?: Track2ExportScore | null;
+  criterion?: string;
+}
+
 export function getTrack2AutoExport(): Promise<{
   settings: Track2AutoExport;
   pending: { act: boolean; reason: string; version: number };
+  /** This Model Name's .pt files in the folder, and in its archive/. */
+  counts?: Track2ExportCounts | null;
 }> {
   return apiGet("/track2/metrics/export/auto");
 }

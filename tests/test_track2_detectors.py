@@ -1439,13 +1439,14 @@ def test_the_csv_export_lists_every_file_not_the_sample(files_table):
     }
     text = t2.audit_as_csv(audit)
     lines = text.splitlines()
-    assert lines[0] == "section,key,value"
-    assert len([r for r in lines if r.startswith("train_dataset_files,")]) == 1500
-    assert "run,epochs,50" in text
-    assert "run,model.version,3" in text
+    assert lines[0] == "TRAINING RUN RECORD"
+    files = lines[lines.index("TRAINING FILES (1500 files)") + 2:]
+    assert len([r for r in files[:1501] if r.startswith("data/site/images/train/")]) == 1500
+    assert "epochs,50" in text
+    assert "Registered model > version,3" in text
     # Qualified: "images/val/v1.jpg" on its own names a file in no
     # particular dataset, and those names recur in every pull.
-    assert "eval_dataset_files,,data/site/images/val/v1.jpg" in text
+    assert "\ndata/site/images/val/v1.jpg\n" in text
 
 
 def test_the_csv_falls_back_for_runs_predating_the_file_table(files_table):
@@ -1456,8 +1457,7 @@ def test_the_csv_falls_back_for_runs_predating_the_file_table(files_table):
     text = t2.audit_as_csv(audit)
     # No rows for this run, so it falls back to the audit's own sample.
     # Those names are bare, not relative paths, so they go out as-is.
-    assert "train_dataset_files,,a.jpg" in text
-    assert "train_dataset_files,,b.jpg" in text
+    assert "TRAINING FILES (2 files)\nPath\na.jpg\nb.jpg\n" in text
 
 
 def test_assemble_records_where_each_image_came_from(scattered):

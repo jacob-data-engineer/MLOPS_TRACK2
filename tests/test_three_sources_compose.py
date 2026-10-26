@@ -115,15 +115,17 @@ def test_every_ticked_source_is_added_to_training():
 def test_retentions_selection_arrives_as_its_path_list():
     """The decay curve is a .txt of image paths. Naming the week folders
     instead would train every week whole and discard the policy."""
-    code = inspect.getsource(rs._run_chain_body)
-    assert "written = rl.write(root=root, config=retention)" in code
-    assert 'entry = written["train_entry"].strip("/")' in code
+    # Named by `pull_train_entries`, shared with the Assemble preview.
+    assert "pull_train_entries(config, root, write=True)" in inspect.getsource(rs._run_chain_body)
+    code = inspect.getsource(rs.pull_train_entries)
+    assert "chosen = rl.write(root=root, config=retention)" in code
+    assert 'entry = chosen["train_entry"].strip("/")' in code
 
 
 def test_with_retention_off_the_week_folders_go_in_whole():
-    code = " ".join(inspect.getsource(rs._run_chain_body).split())
-    assert "weeks = dy.scan_root(root," in code
-    assert '{"images": week["images_path"], "labels": week["labels_path"]}' in code
+    code = " ".join(inspect.getsource(rs.pull_train_entries).split())
+    assert "weeks = [w for w in dy.scan_root(root," in code
+    assert '{"images": w["images_path"], "labels": w["labels_path"]}' in code
 
 
 def test_nothing_ticked_stops_the_chain_rather_than_training_on_nothing():
@@ -371,7 +373,7 @@ def test_nothing_ticked_says_so_here_too():
 
 def test_the_folder_line_admits_it_is_not_the_whole_dataset():
     code = _flat(PAGE)
-    assert "plus the other ticked sources, composed at run time" in code
+    assert "after the retention policy when Pull Control is ticked." in code
 
 
 def test_the_field_the_card_reads_is_declared_on_the_type():

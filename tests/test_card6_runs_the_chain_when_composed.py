@@ -135,7 +135,7 @@ def test_the_label_that_promised_composition_is_now_true():
     """The radio has said 'composed at run time' since the sources
     could be combined. Until this, nothing under it composed."""
     code = _flat(PAGE)
-    assert "composed at run time" in code
+    assert "after the retention policy when Pull Control is ticked." in code
     assert 'runTrack2Retrain(composed ? "queue" : "enqueue")' in code
 
 

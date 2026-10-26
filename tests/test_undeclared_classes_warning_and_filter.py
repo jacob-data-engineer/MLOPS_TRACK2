@@ -302,10 +302,10 @@ def test_name_the_rest_fills_placeholders_without_touching_real_names():
 
 
 def test_the_tick_is_saved_restored_and_sent():
-    assert PANEL.count("drop_undeclared_labels: dropUndeclared,") == 2
+    assert PANEL.count("drop_undeclared_labels: dropUndeclared,") == 1
     assert "setDropUndeclared(saved.drop_undeclared_labels)" in FLAT
-    assert "previewTrack2DatasetYaml( await foldersForBuild(), classesOf(), false, dropUndeclared)" in FLAT
-    assert "writeTrack2DatasetYaml(await foldersForBuild(), classesOf(), force || overwrite, dropUndeclared)" in FLAT
+    # Sent with the live preview; the run reads the saved tick itself.
+    assert "previewTrack2DatasetYaml(f, classesOf(), true, dropUndeclared," in FLAT
 
 
 def test_the_client_declares_the_new_shapes():

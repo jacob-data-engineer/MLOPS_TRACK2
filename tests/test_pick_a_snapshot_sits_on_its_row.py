@@ -125,4 +125,4 @@ def test_the_snapshot_list_and_note_still_follow_below():
 
 def test_the_snapshot_option_is_still_always_pickable():
     block = " ".join(_options_block().split())
-    assert 'const ready = option.key === "snapshot" || Boolean(option.folder);' in block
+    assert 'const ready = option.key === "snapshot" || (option.key === "assembled"' in block

@@ -43,6 +43,9 @@ export function Track2TrainingCostToday() {
   const [explorer, setExplorer] = useState<{ amount: number; currency: string; date: string } | null>(null);
   const [measured, setMeasured] = useState<Track2CostToday | null>(null);
   const [open, setOpen] = useCardOpen("cost_today", false);
+  // Newest first, or oldest first. Kept in the shared card-state record
+  // with the open/closed state, so it is restored with the settings file.
+  const [newestFirst, setNewestFirst] = useCardOpen("cost_today_newest_first", false);
   const [busy, setBusy] = useState(false);
   const [at, setAt] = useState<Date | null>(null);
 
@@ -183,6 +186,16 @@ export function Track2TrainingCostToday() {
             {open ? "Hide the jobs" : `Show the ${measured.jobs.length} jobs`}
           </button>
           {open && (
+            <button
+              type="button"
+              onClick={() => setNewestFirst((v) => !v)}
+              title="Change the order the jobs are listed in"
+              className="ml-3 mt-1 text-xs font-medium text-ink-secondary underline"
+            >
+              {newestFirst ? "Newest first ↓" : "Oldest first ↑"}
+            </button>
+          )}
+          {open && (
             // Three rows tall, then it scrolls: a busy day lists a dozen
             // jobs and pushed everything below the strip off the screen.
             // 1rem line-height x 3 + two 0.125rem gaps = 3.25rem.
@@ -191,8 +204,12 @@ export function Track2TrainingCostToday() {
                   day happened. The server orders by cost; that answers a
                   different question. A job still waiting for an instance
                   has no start yet and goes last. */}
+              {/* Either way round: a job still waiting for an instance has no
+                  start yet, so it is last when oldest-first and first when
+                  newest-first -- it is the newest thing on the list. */}
               {[...measured.jobs]
-                .sort((a, b) => (a.started_at ?? "￿").localeCompare(b.started_at ?? "￿"))
+                .sort((a, b) => (a.started_at ?? "￿").localeCompare(b.started_at ?? "￿")
+                  * (newestFirst ? -1 : 1))
                 .map((job) => (
                 <span key={job.name} className="shrink-0 truncate" title={job.name}>
                   ${job.cost.toFixed(3)} &middot; {job.instance_type} &middot;{" "}

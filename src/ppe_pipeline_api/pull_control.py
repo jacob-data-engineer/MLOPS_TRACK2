@@ -1062,7 +1062,7 @@ def placement(key: str, source: dict, config: dict,
     return root, sub
 
 
-def plan_routing(*, config: dict | None = None, limit: int = 5000) -> dict:
+def plan_routing(*, config: dict | None = None, limit: int | None = None) -> dict:
     """What would move, and where -- without moving anything.
 
     The same walk the move does, which is the point: a preview produced by
@@ -1086,7 +1086,8 @@ def plan_routing(*, config: dict | None = None, limit: int = 5000) -> dict:
             continue
         bucket = source_bucket(source)
         for obj in _list_objects(prefix + "/", bucket):
-            if len(planned) + len(skipped) >= limit:
+            # No cap by default, like the sweep it previews.
+            if limit and len(planned) >= limit:
                 break
             key = obj["Key"]
             name = key.rsplit("/", 1)[-1]
@@ -1385,7 +1386,7 @@ def filed_names(root: str) -> set:
     return names
 
 
-def count_pending(config: dict | None = None, *, limit: int = 100000) -> int:
+def count_pending(config: dict | None = None, *, limit: int | None = None) -> int:
     """How many objects a sweep will walk. The progress denominator.
 
     A LIST-only pass, which is two or three calls for a few thousand
@@ -1401,7 +1402,8 @@ def count_pending(config: dict | None = None, *, limit: int = 100000) -> int:
             continue
         for _ in _list_objects(prefix + "/", source_bucket(source)):
             total += 1
-            if total >= limit:
+            # Uncapped by default, like the sweep it is the total for.
+            if limit and total >= limit:
                 return total
     return total
 
@@ -1431,7 +1433,7 @@ def unpaired_sides(config: dict | None = None) -> list:
     return out
 
 
-def route_pending(*, config: dict | None = None, limit: int = 5000,
+def route_pending(*, config: dict | None = None, limit: int | None = None,
                   trigger: str = "manual", run_id: str = "") -> dict:
     """Moves every waiting file into the week folder its time says.
 
@@ -1473,6 +1475,7 @@ def route_pending(*, config: dict | None = None, limit: int = 5000,
     # the convention should be visible, not merely survivable.
     fell_back = 0
     seen_files = 0
+    limit_reached = False
     total_files = count_pending(config) if run_id else 0
     if run_id:
         write_run_state(run_id, status="running", trigger=trigger,
@@ -1495,7 +1498,21 @@ def route_pending(*, config: dict | None = None, limit: int = 5000,
         action = _action_of(source)
         bucket = source_bucket(source)
         for obj in _list_objects(prefix + "/", bucket):
-            if len(moved) + len(skipped) >= limit:
+            # NO CAP by default (2026-10-26): a sweep files everything
+            # waiting. The old 5,000 stopped a 5,240-file pull short and
+            # left the last 240 -- the val labels, last in the source
+            # list -- under images that had landed. And it counted skips,
+            # so a copy source re-skipped the same 5,000 every sweep and
+            # never reached the rest.
+            #
+            # The ceiling that remains is AWS's: the pull Lambda is
+            # stopped at 15 minutes (~10,000 copies at the measured 12 a
+            # second). A sweep cut off there is reported `lost`, and the
+            # next one carries on -- copies already filed are skipped.
+            # `limit` is still accepted for tests and callers that want a
+            # bounded run; it counts files COPIED, never files skipped.
+            if limit and len(moved) >= limit:
+                limit_reached = True
                 break
             seen_files += 1
             if run_id and seen_files % PROGRESS_EVERY == 0:
@@ -1619,6 +1636,9 @@ def route_pending(*, config: dict | None = None, limit: int = 5000,
         "run_id": run_id,
         "dated_by": str(config.get("week_by") or "scan"),
         "fell_back_to_upload_time": fell_back,
+        # The sweep stopped at its cap with files still waiting; the next
+        # one carries on from where this one left off.
+        "limit_reached": limit_reached,
     }
 
     stopped = aborted == "stopped by hand"
@@ -1934,7 +1954,7 @@ def active_run() -> dict | None:
     return None
 
 
-def pending_summary(*, config: dict | None = None, limit: int = 20000) -> dict:
+def pending_summary(*, config: dict | None = None, limit: int | None = None) -> dict:
     """What is waiting to be pulled, and which week each file would land in.
 
     The same decisions a sweep makes -- placement, week, dedup -- but
@@ -1967,7 +1987,7 @@ def pending_summary(*, config: dict | None = None, limit: int = 20000) -> dict:
         bucket = source_bucket(source)
         for obj in _list_objects(prefix + "/", bucket):
             scanned += 1
-            if scanned > limit:
+            if limit and scanned > limit:
                 capped = True
                 break
             key = obj["Key"]

@@ -121,14 +121,8 @@ def test_the_failure_is_shown_beside_the_button():
     """Not at the top of the card. A refusal four hundred pixels above
     the control that caused it reads as nothing happening."""
     code = _panel()
-    buttons = code.index("Generate yaml training file")
-    assert code.index('{error && <p className="mt-2 text-xs text-critical">') > buttons
-
-
-def test_the_result_moved_with_it():
-    code = _panel()
-    buttons = code.index("Generate yaml training file")
-    assert code.index('{result && (') > buttons
+    note = code.index("Preview only -- nothing is written.")
+    assert code.index('{error && <p className="mt-2 text-xs text-critical">') > note
 
 
 def test_neither_is_still_at_the_top():
@@ -200,4 +194,6 @@ def test_the_slug_is_still_saved_for_the_schedule():
 
 def test_the_buttons_are_still_gated_on_having_one():
     code = " ".join(_panel().split())
-    assert code.count("disabled={busy || !complete || !detectorSlug}") == 1
+    # The preview runs only once the card is complete and a Model Name
+    # is chosen -- the gate the button had.
+    assert "if (!chosen || !complete) {" in code

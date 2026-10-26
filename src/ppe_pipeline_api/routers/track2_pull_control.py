@@ -432,14 +432,16 @@ def run_now(payload: RunRequest, session=Depends(require_session)) -> dict:
         )
 
     run_id = pc.new_run_id()
-    limit = max(1, min(payload.limit, 20000))
+    # `payload.limit` is still REQUIRED -- that is what makes `POST {}` a
+    # 422 rather than a sweep -- but no longer caps it: a pull files
+    # everything waiting (2026-10-26).
     pc.write_run_state(run_id, status="running", trigger="manual", total=0, done=0,
                        moved=0, skipped=0, errors=0, stop_requested=False,
                        started_at=pc._now().isoformat())
 
     def work():
         try:
-            pc.route_pending(limit=limit, trigger="manual", run_id=run_id)
+            pc.route_pending(trigger="manual", run_id=run_id)
         except Exception as exc:                       # noqa: BLE001
             # The thread has nowhere to raise to, so the failure goes
             # where the card is already looking.

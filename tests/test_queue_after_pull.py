@@ -75,7 +75,7 @@ def test_an_arrival_pull_does_NOT_chain_by_default(runs):
     as it did.
     """
     runs.append(ARRIVED)
-    decision = qap.pending({qap.KEY: {"enabled": True, "even_if_nothing_moved": True}})
+    decision = qap.pending({"mode": "schedule", qap.KEY: {"even_if_nothing_moved": True}})
     assert decision["act"] is False
     assert "trigger that may chain" in decision["reason"]
     assert "schedule" in decision["reason"]
@@ -84,8 +84,7 @@ def test_an_arrival_pull_does_NOT_chain_by_default(runs):
 def test_an_arrival_pull_chains_once_arrival_is_ticked(runs):
     """What the setting is for: arrival can now be chosen deliberately."""
     runs.append(ARRIVED)
-    decision = qap.pending({qap.KEY: {
-        "enabled": True, "triggers": ["schedule", "arrival"]}})
+    decision = qap.pending({"mode": "arrival", qap.KEY: {}})
     assert decision["act"] is True, decision["reason"]
     assert decision["run"]["run_id"] == ARRIVED["run_id"]
 
@@ -95,16 +94,16 @@ def test_a_small_arrival_is_held_back_by_min_files(runs):
     per upload burst, and on 2026-10-06 one that moved a SINGLE file
     started a full GPU run."""
     runs.append({**ARRIVED, "moved": 1})
-    decision = qap.pending({qap.KEY: {
-        "enabled": True, "triggers": ["arrival"], "min_files": 25}})
+    decision = qap.pending({"mode": "arrival", qap.KEY: {
+        "min_files": 25}})
     assert decision["act"] is False
     assert "below the 25" in decision["reason"]
 
 
 def test_a_real_batch_passes_min_files(runs):
     runs.append({**ARRIVED, "moved": 400})
-    decision = qap.pending({qap.KEY: {
-        "enabled": True, "triggers": ["arrival"], "min_files": 25}})
+    decision = qap.pending({"mode": "arrival", qap.KEY: {
+        "min_files": 25}})
     assert decision["act"] is True, decision["reason"]
 
 
@@ -115,8 +114,8 @@ def test_the_cooldown_caps_a_burst(runs):
 
     runs.append({**ARRIVED, "moved": 400})
     just_now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
-    decision = qap.pending({qap.KEY: {
-        "enabled": True, "triggers": ["arrival"], "cooldown_minutes": 60,
+    decision = qap.pending({"mode": "arrival", qap.KEY: {
+        "cooldown_minutes": 60,
         "last_result": {"at": just_now},
     }})
     assert decision["act"] is False
@@ -129,8 +128,8 @@ def test_the_cooldown_lets_the_next_one_through_once_it_has_passed(runs):
     runs.append({**ARRIVED, "moved": 400})
     long_ago = (_dt.datetime.now(_dt.timezone.utc)
                 - _dt.timedelta(hours=4)).isoformat(timespec="seconds")
-    decision = qap.pending({qap.KEY: {
-        "enabled": True, "triggers": ["arrival"], "cooldown_minutes": 60,
+    decision = qap.pending({"mode": "arrival", qap.KEY: {
+        "cooldown_minutes": 60,
         "last_result": {"at": long_ago},
     }})
     assert decision["act"] is True, decision["reason"]
@@ -140,7 +139,7 @@ def test_a_scheduled_pull_is_unaffected_by_the_arrival_guards(runs):
     """The guards exist for arrival. A schedule fires on a timer somebody
     chose, so a quiet week must still retrain."""
     runs.append(DONE)
-    decision = qap.pending({qap.KEY: {"enabled": True, "min_files": 1}})
+    decision = qap.pending({"mode": "schedule", qap.KEY: {"min_files": 1}})
     assert decision["act"] is True, decision["reason"]
 
 
@@ -148,7 +147,7 @@ def test_a_manual_pull_does_NOT_chain(runs):
     """Pressing Pull now is somebody looking at the screen; they can press
     Run it now too if that is what they meant."""
     runs.append(BY_HAND)
-    assert qap.pending({qap.KEY: {"enabled": True}})["act"] is False
+    assert qap.pending({"mode": "schedule", qap.KEY: {}})["act"] is False
 
 
 def test_an_arrival_pull_does_not_mask_the_scheduled_one_behind_it(runs):
@@ -158,7 +157,7 @@ def test_an_arrival_pull_does_not_mask_the_scheduled_one_behind_it(runs):
     never fire that day."""
     runs.append(DONE)        # the scheduled sweep
     runs.insert(0, ARRIVED)  # a file arrived afterwards -- newer
-    decision = qap.pending({qap.KEY: {"enabled": True}})
+    decision = qap.pending({"mode": "schedule", qap.KEY: {}})
     assert decision["act"] is True
     assert decision["run"]["run_id"] == "r2"
 
@@ -169,7 +168,7 @@ def test_the_durable_marker_stops_a_repeat(runs, monkeypatch):
     while `pending` answered "act" every tick. The claim row cannot."""
     runs.append(DONE)
     monkeypatch.setattr(qap.pc, "claim_exists", lambda what, key: key == "r2")
-    decision = qap.pending({qap.KEY: {"enabled": True, "last_run_id": ""}})
+    decision = qap.pending({"mode": "schedule", qap.KEY: {"last_run_id": ""}})
     assert decision["act"] is False
     assert decision["reason"] == "Already queued for this pull."
 
@@ -178,7 +177,7 @@ def test_a_lost_claim_stops_the_chain(runs, monkeypatch):
     """The other container got there first. No GPU work, and a reason
     that says so rather than a silent False."""
     runs.append(DONE)
-    monkeypatch.setattr(qap.pc, "read_config", lambda: {qap.KEY: {"enabled": True}})
+    monkeypatch.setattr(qap.pc, "read_config", lambda: {"mode": "schedule", qap.KEY: {}})
     monkeypatch.setattr(qap.pc, "claim_once", lambda what, key, **kw: False)
     started: list = []
     from ppe_pipeline_api import retrain_schedule as rs
@@ -197,7 +196,7 @@ def test_off_by_default(runs):
 
 def test_a_finished_pull_that_moved_files_is_acted_on(runs):
     runs.append(DONE)
-    decision = qap.pending({qap.KEY: {"enabled": True}})
+    decision = qap.pending({"mode": "schedule", qap.KEY: {}})
     assert decision["act"] is True
     assert decision["run"]["run_id"] == "r2"
 
@@ -207,7 +206,7 @@ def test_the_same_pull_is_never_queued_twice(runs):
     seconds, so without this one sweep would queue a run per tick until
     somebody noticed the queue filling up."""
     runs.append(DONE)
-    config = {qap.KEY: {"enabled": True, "last_run_id": "r2"}}
+    config = {"mode": "schedule", qap.KEY: {"last_run_id": "r2"}}
     decision = qap.pending(config)
     assert decision["act"] is False
     assert "Already queued" in decision["reason"]
@@ -218,7 +217,7 @@ def test_a_sweep_still_running_is_left_alone(runs):
     dataset would be built half way through the pull."""
     runs.insert(0, RUNNING)
     runs.append(DONE)
-    assert qap.pending({qap.KEY: {"enabled": True}})["run"]["run_id"] == "r2"
+    assert qap.pending({"mode": "schedule", qap.KEY: {}})["run"]["run_id"] == "r2"
 
 
 def test_an_empty_scheduled_sweep_is_visible_at_all(runs):
@@ -228,7 +227,7 @@ def test_an_empty_scheduled_sweep_is_visible_at_all(runs):
     was written for."""
     runs.append(EMPTY)
     assert qap._finished_pulls() == [EMPTY]
-    forced = qap.pending({qap.KEY: {"enabled": True, "even_if_nothing_moved": True}})
+    forced = qap.pending({"mode": "schedule", qap.KEY: {"even_if_nothing_moved": True}})
     assert forced["act"] is True and forced["run"]["run_id"] == "r3"
 
 
@@ -236,19 +235,19 @@ def test_an_aborted_sweep_does_not_trigger_one(runs):
     """What landed is by definition not what was meant to. `aborted` IS
     on the summary, unlike the two fields this used to check."""
     runs.append(ABORTED)
-    assert qap.pending({qap.KEY: {"enabled": True}})["act"] is False
+    assert qap.pending({"mode": "schedule", qap.KEY: {}})["act"] is False
 
 
 def test_a_pull_that_moved_nothing_is_skipped_by_default(runs):
     """The corpus is unchanged, so the run would reproduce the model
     that already exists and bill for it."""
     runs.append(EMPTY)
-    decision = qap.pending({qap.KEY: {"enabled": True}})
+    decision = qap.pending({"mode": "schedule", qap.KEY: {}})
     assert decision["act"] is False
     assert "moved no files" in decision["reason"]
 
     # ...but it is a choice, not a rule.
-    forced = qap.pending({qap.KEY: {"enabled": True, "even_if_nothing_moved": True}})
+    forced = qap.pending({"mode": "schedule", qap.KEY: {"even_if_nothing_moved": True}})
     assert forced["act"] is True
 
 
@@ -258,7 +257,7 @@ def test_check_records_the_run_id_even_when_the_chain_failed(runs, monkeypatch):
     runs.append(DONE)
     written: dict = {}
     monkeypatch.setattr(qap.pc, "read_config",
-                        lambda: {qap.KEY: {"enabled": True}})
+                        lambda: {"mode": "schedule", qap.KEY: {}})
     monkeypatch.setattr(qap.pc, "write_config", lambda patch: written.update(patch))
 
     from ppe_pipeline_api import retrain_schedule as rs
@@ -278,7 +277,7 @@ def test_check_queues_through_the_chain_not_a_second_implementation(runs, monkey
     runs.append(DONE)
     calls: list = []
     monkeypatch.setattr(qap.pc, "read_config",
-                        lambda: {qap.KEY: {"enabled": True}})
+                        lambda: {"mode": "schedule", qap.KEY: {}})
     monkeypatch.setattr(qap.pc, "write_config", lambda patch: None)
 
     from ppe_pipeline_api import retrain_schedule as rs
@@ -320,3 +319,32 @@ def test_it_reads_the_row_type_that_covers_every_sweep():
     assert '{"S": "run_state"}' in inspect.getsource(pc.recent_run_states)
     # The event writer really does drop empty scheduled sweeps.
     assert 'summary["trigger"] == "schedule"' in inspect.getsource(pc._record_run)
+
+
+# --- the strip's mode is the switch (2026-10-26) -----------------------------------
+
+def test_the_pull_mode_switches_the_chain_on_and_off():
+    """"On a schedule" chains scheduled pulls, "When files arrive" arrival
+    pulls, "Off" nothing -- whatever an old stored `enabled` says."""
+    assert qap.settings({"mode": "schedule"})["enabled"] is True
+    assert qap.settings({"mode": "schedule"})["triggers"] == ["schedule"]
+    assert qap.settings({"mode": "arrival"})["triggers"] == ["arrival"]
+    assert qap.settings({"mode": "off", qap.KEY: {"enabled": True}})["enabled"] is False
+
+
+def test_the_guards_are_still_settings():
+    plan = qap.settings({"mode": "arrival", qap.KEY: {"min_files": 50, "cooldown_minutes": 90}})
+    assert plan["min_files"] == 50 and plan["cooldown_minutes"] == 90
+
+
+def test_an_automatic_run_builds_from_the_ticked_sources(runs, monkeypatch):
+    """Never a frozen snapshot picked for hand-queued runs."""
+    runs.append(DONE)
+    monkeypatch.setattr(qap.pc, "read_config",
+                        lambda: {"mode": "schedule", "data_source": "snapshot"})
+    from ppe_pipeline_api import retrain_schedule as rs
+    seen: list = []
+    monkeypatch.setattr(rs, "run_chain", lambda **kw: seen.append(kw) or {"ok": True, "steps": []})
+    monkeypatch.setattr(qap.pc, "write_config", lambda *a, **k: None, raising=False)
+    qap.check()
+    assert seen and seen[0]["config"]["data_source"] == "assembled"

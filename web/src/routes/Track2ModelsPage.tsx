@@ -1,5 +1,5 @@
 import { AlertCircle, Cpu, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatDayTime } from "../lib/format";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
@@ -32,7 +32,6 @@ import {
   getTrack2QueueAfterPull,
   saveTrack2QueueAfterPull,
   getTrack2Retrain,
-  saveTrack2Retrain,
   type Track2QueueAfterPull,
   type Track2RetrainStatus,
   getTrack2DatasetClasses,
@@ -109,8 +108,49 @@ function runPhase(progress?: Track2TrainingProgress | null): string {
  * belong on the card; the copy is an implementation detail of getting
  * them into the trainer's layout.
  */
-function sourceLabel(folders: string[] | undefined, fallback: string): string {
-  return folders && folders.length > 0 ? folders.join(", ") : fallback;
+/** A queue card's folders, training and evaluation in ONE scrolling box.
+ *
+ * One folder per line, with how many of its images the run uses beside it
+ * -- for a week folder that is what retention kept. It was a comma-joined
+ * line truncated after two folders, then two boxes; one box reads as the
+ * one dataset it is. */
+function plural(n: number, one: string, many: string): string {
+  return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+}
+
+function FolderBox({ sides, note }: {
+  sides: { title: string; folders: string[]; counts?: Record<string, number> }[];
+  note?: ReactNode;
+}) {
+  return (
+    <div className="col-span-2 sm:col-span-3">
+      <span>
+        Images:{" "}
+        {sides.map((side) => `${plural(side.folders.length, "folder", "folders")} for ${side.title.toLowerCase()}`)
+          .join(", ")}
+        {note && <> {note}</>}
+      </span>
+      <div className="mt-0.5 max-h-[7.5rem] overflow-auto rounded-sm border border-hairline bg-page px-2 py-0.5">
+        {sides.map((side) => (
+          <div key={side.title}>
+            <p className="mt-0.5 font-medium text-ink-secondary">
+              {side.title} &middot; {plural(side.folders.length, "folder", "folders")}
+            </p>
+            {side.folders.map((folder) => (
+              <p key={folder} className="whitespace-nowrap">
+                <span className="tabular inline-block w-24 text-right text-ink-secondary">
+                  {side.counts?.[folder] !== undefined
+                    ? plural(side.counts[folder], "image", "images")
+                    : ""}
+                </span>
+                {"  "}{folder}
+              </p>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function QueueEntryBlock({
@@ -183,34 +223,26 @@ function QueueEntryBlock({
               )}
             </span>
           )}
-          <span
-            className="col-span-2 truncate sm:col-span-3"
-            title={sourceLabel(entry.dataset_source_folders, entry.dataset_folder)}
-          >
-            Training images: {sourceLabel(entry.dataset_source_folders, entry.dataset_folder)}
-          </span>
-          {/* Never "same as training" any more. The evaluator runs
-              model.val(split="val"), so what it measures on is whichever
-              split the folder's data.yaml declares as val -- for an
-              assembled dataset that is a held-out images/val, and calling
-              it the training set was simply wrong. */}
-          <span
-            className="col-span-2 truncate sm:col-span-3"
-            title={sourceLabel(
-              entry.eval_source_folders ?? entry.dataset_source_folders,
-              entry.eval_dataset_folder || entry.dataset_folder,
+          <FolderBox
+            sides={[
+              {
+                title: "Training",
+                folders: entry.dataset_source_folders?.length
+                  ? entry.dataset_source_folders : [entry.dataset_folder].filter(Boolean),
+                counts: entry.dataset_source_counts,
+              },
+              {
+                title: "Evaluation",
+                folders: (entry.eval_source_folders ?? entry.dataset_source_folders)?.length
+                  ? (entry.eval_source_folders ?? entry.dataset_source_folders) as string[]
+                  : [entry.eval_dataset_folder || entry.dataset_folder].filter(Boolean),
+                counts: entry.eval_source_folders ? entry.eval_source_counts : entry.dataset_source_counts,
+              },
+            ]}
+            note={!entry.dataset_version_id && (
+              <span className="text-ink-muted">(evaluation is the val split its data.yaml declares)</span>
             )}
-          >
-            Evaluation images:{" "}
-            {sourceLabel(
-              entry.eval_source_folders ?? entry.dataset_source_folders,
-              entry.eval_dataset_folder || entry.dataset_folder,
-            )}
-            {" "}
-            {!entry.dataset_version_id && (
-              <span className="text-ink-muted">(the val split its data.yaml declares)</span>
-            )}
-          </span>
+          />
           {/* Which frozen definition, if any. Without it a run on a
               deliberately chosen snapshot was indistinguishable
               afterwards from one on the live corpus -- same folder name,
@@ -321,14 +353,6 @@ interface TrainingSelection {
  *
  * These are written UTC-aware, and printing the raw ISO string is how a
  * 12:37 run came to read as 04:37 elsewhere on this page. */
-/** The radio's own words, so the scheduling tick and the "Training
- * data" group above cannot describe the source differently. */
-function sourceLabelFor(source: "assembled" | "snapshot" | "pull"): string {
-  if (source === "snapshot") return "the frozen snapshot";
-  if (source === "pull") return "the snapshot generated during auto pull";
-  return "the assembled dataset";
-}
-
 /** Named for what it used to be -- the viewer's local clock -- and kept
  * because eight call sites read it, but it renders Singapore time now.
  *
@@ -347,7 +371,6 @@ function TrainingForm({
   setSelection,
   onSubmitted,
   detectorsVersion,
-  assembledVersion,
 }: {
   selection: TrainingSelection;
   setSelection: (patch: Partial<TrainingSelection>) => void;
@@ -360,14 +383,6 @@ function TrainingForm({
   /** Bumped when the Detectors panel saves or deletes one, so the picker
    * below is never offering a list that no longer exists. */
   detectorsVersion: number;
-  /** Bumped when the Assemble card writes a data.yaml.
-   *
-   * `assembled` is read from the config, and that read happened once on
-   * mount -- so writing a yaml left "Use the assembled dataset" greyed
-   * out, saying "Nothing assembled yet" beside a file that existed,
-   * until the page was reloaded. Nothing on screen said a reload was
-   * what it wanted. */
-  assembledVersion: number;
 }) {
   const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, evalFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
@@ -603,7 +618,7 @@ function TrainingForm({
         // Nothing saved under the chosen source. Fall back to the frozen
         // slot AND move the radio with it, rather than showing one
         // answer and running another.
-        if (!settled?.folder && built.folder) {
+        if (!settled?.folder && built.folder && source !== "assembled") {
           settled = built;
           settledSource = "snapshot";
           setDataSource("snapshot");
@@ -655,10 +670,8 @@ function TrainingForm({
     };
     // Refetched on an import too: importing a checkpoint adds a version to
     // the very table this populates, and without this it would not appear
-    // until the page was reloaded. Same for the Assemble card writing a
-    // yaml: `dataset_assemble.built` is what fills the "assembled"
-    // option, and it is read right here.
-  }, [detectorsVersion, assembledVersion]);
+    // until the page was reloaded.
+  }, [detectorsVersion]);
 
 
   // The folder browsers that used to live here are gone: the dataset is
@@ -704,11 +717,19 @@ function TrainingForm({
     const lines: { tone: "ok" | "warn" | "bad"; text: string }[] = [];
     let blocking = false;
 
-    if (!datasetFolder) {
+    if (dataSource === "assembled") {
+      // Built at Add to Queue from the ticked sources -- there is no
+      // folder to have chosen first.
+      if (!datasetFolder) {
+        lines.push({
+          tone: "ok",
+          text: "The data.yaml is built from the ticked sources when you press Add to Queue.",
+        });
+      }
+    } else if (!datasetFolder) {
       lines.push({
         tone: "warn",
-        text: "No dataset chosen yet -- assemble one, or press \"Use for "
-              + "training\" under a built data.yaml.",
+        text: "No dataset chosen yet -- pick a frozen snapshot above.",
       });
     } else if (!datasetClasses) {
       lines.push({ tone: "warn", text: `Could not read data.yaml in ${datasetFolder}.` });
@@ -848,8 +869,8 @@ function TrainingForm({
     setBusy(true);
     setError(null);
     try {
-      // THE ASSEMBLED DATASET IS GENERATED HERE, not taken from whenever
-      // "Generate yaml training file" was last pressed (2026-10-26). The
+      // THE ASSEMBLED DATASET IS GENERATED HERE -- there is no other
+      // place it is built from the cards (2026-10-26). The
       // chain rebuilds the data.yaml from the Assemble card's saved
       // settings -- the same build the schedule runs -- freezes it, and
       // queues it. That is also what carries the card's "filter
@@ -898,12 +919,11 @@ function TrainingForm({
             and sends it.
           </p>
           <p className="mt-2">
-            The dataset arrives here by itself. Pressing <em>Write it</em> on{" "}
-            <em>Assemble a dataset</em> fills it in, and so does{" "}
-            <em>Use for training</em> under a data.yaml in step 5, or{" "}
-            <em>Train on this</em> on a frozen snapshot. Until one of those
-            happens this says &ldquo;Nothing chosen yet&rdquo;, and you can
-            always pick a folder here instead.
+            The dataset comes from the radio below. <em>Use the assembled
+            dataset</em> builds the data.yaml from the ticked sources when you
+            press <em>Add to Queue</em> &mdash; after the retention policy,
+            when Pull Control is one of them. A frozen snapshot is trained
+            exactly as it was frozen.
           </p>
           <p className="mt-2">
             When the validation set lives under a different prefix &mdash; its
@@ -973,13 +993,12 @@ function TrainingForm({
                     : "")
                 : "No source is ticked. Tick at least one on the cards above.",
               folder: assembled?.folder,
-              detail: assembled?.folder
-                ? `${assembled.folder}${assembled.at ? ` · built ${localDate(assembled.at)}` : ""}`
-                  + (sources.golden || sources.pull
-                    ? " · plus the other ticked sources, composed at run time"
-                    : "")
-                : "",
-              missing: "Nothing assembled yet. Pick folders in Assemble a dataset above and press Write data.yaml.",
+              // The data.yaml is built when Add to Queue is pressed (and
+              // when the schedule fires), so there is nothing to have
+              // pressed first -- the option is ready once a source is.
+              detail: "The data.yaml is built when you press Add to Queue, "
+                + "after the retention policy when Pull Control is ticked.",
+              missing: "No source is ticked. Tick at least one of the cards above.",
             },
             {
               key: "snapshot" as const,
@@ -1005,7 +1024,10 @@ function TrainingForm({
             // The snapshot option is always offered: picking one is how
             // it gets filled, so greying it until it has a value would
             // be a control that can never be reached.
-            const ready = option.key === "snapshot" || Boolean(option.folder);
+            const ready = option.key === "snapshot"
+              || (option.key === "assembled"
+                ? sources.folders || sources.golden || sources.pull
+                : Boolean(option.folder));
             const chosen = dataSource === option.key;
             // Keyed here as well as on the wrapper below: whichever of
             // the two is returned IS the list item, so both need one.
@@ -1426,8 +1448,7 @@ function TrainingForm({
         <p className="mt-3 text-xs text-ink-muted">
           Add to Queue generates the data.yaml from <em>Assemble a dataset</em>{" "}
           first -- from the folders, classes and filter saved there right now --
-          then freezes a snapshot and adds the run to the queue. You do not need
-          to press <em>Generate yaml training file</em> beforehand.
+          then freezes a snapshot and adds the run to the queue.
         </p>
       )}
       {composed && (
@@ -1466,76 +1487,43 @@ function TrainingForm({
           the rebuild, the freeze and the queueing, and leaves the
           expensive irreversible part a human decision. */}
       <div className="mt-3 rounded-md border border-black/15 p-3">
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="checkbox"
-            className="mt-0.5 shrink-0"
-            disabled={afterPullBusy || !afterPull}
-            checked={!!afterPull?.settings.enabled}
-            onChange={async (e) => {
-              const on = e.target.checked;
-              setAfterPullBusy(true);
-              try {
-                // BOTH, to the same value. Which mechanism is in charge
-                // depends on "Use these folders only", and a tick that
-                // armed one of them would be a switch that does nothing
-                // in half the configurations -- silently, because the
-                // other one is what the schedule actually reads.
-                setAfterPull(await saveTrack2QueueAfterPull({ enabled: on }));
-                setRetrain(await saveTrack2Retrain({ enabled: on }));
-              } catch {
-                // Left as it was; the next click tries again.
-              } finally {
-                setAfterPullBusy(false);
-              }
-            }}
-          />
-          <span>
-            <span className="font-medium text-ink">
-              Enabled for scheduling
-            </span>
-            <span className="mt-0.5 block text-xs text-ink-muted">
-              {/* It DOES start it. `run_chain(submit="queue")` calls
-                  `queue_start()`, and has since the chain was written --
-                  so the old "It does NOT start it" was describing
-                  something the code has never done. A schedule that
-                  stopped at a queued entry would produce a to-do item,
-                  not a model. */}
-              Each scheduled pull builds the training data from{" "}
-              <strong>{sourceLabelFor(dataSource)}</strong> above, queues one
-              run and starts it &mdash; through to a trained model, with
-              nobody watching.
-            </span>
-            <span className="mt-0.5 block text-xs text-ink-muted">
-              {dataSource === "assembled"
-                ? "The folders on the Assemble card are rebuilt into a data.yaml each time, then frozen."
-                : "That snapshot is trained exactly as it was frozen -- nothing is rebuilt or re-frozen, so every run reads the same images."}
-            </span>
-            {/* The CADENCE is not set here. It lives in one place --
-                the PULL, BUILD, QUEUE, TRAIN strip at the top, which
-                mirrors its interval and time onto this clock when the
-                training clock is the one in charge. Two interval fields
-                on one page, one of them deciding nothing, is how
-                somebody sets the wrong one.
-
-                What stays is the ANSWER: when it will next run, read
-                from the same settings the strip just wrote. */}
-            {retrain && retrain.follows_pull === false && (
-              <span className="mt-2 block text-xs text-ink-muted">
-                {retrain.settings.enabled && retrain.next_runs?.length
-                  ? `Next run ${localDate(retrain.next_runs[0])} · set it in `
-                    + `PULL, BUILD, QUEUE, TRAIN at the top.`
-                  : "Not armed -- set “On a schedule” in PULL, BUILD, "
-                    + "QUEUE, TRAIN at the top."}
-                {retrain.problems?.some((p) => p.level === "blocking") && (
-                  <span className="mt-1 block text-critical">
-                    {retrain.problems.filter((p) => p.level === "blocking")[0].text}
-                  </span>
-                )}
-              </span>
-            )}
+        {/* READ-ONLY (2026-10-26). "Enabled for scheduling" was a tick
+            here, a third switch for the chain beside the Retention card's
+            and the strip's mode. The strip is the one switch now:
+            `queue_after_pull.settings` derives on/off from the pull mode. */}
+        <p className="text-sm">
+          <span className="font-medium text-ink">Runs automatically: </span>
+          <span className={afterPull?.settings.enabled ? "text-ink" : "text-ink-muted"}>
+            {afterPull?.settings.enabled
+              ? (afterPull.settings.triggers ?? []).includes("arrival")
+                ? "when files arrive"
+                : "after each scheduled pull"
+              : "off"}
           </span>
-        </label>
+          <span className="mt-0.5 block text-xs text-ink-muted">
+            Switched on and off by <strong>PULL, BUILD, QUEUE, TRAIN</strong> at
+            the top. Each automatic run builds the data.yaml from the ticked
+            sources -- the week folders (after the retention policy), the golden
+            set and the Assemble folders, each when its card is ticked -- then
+            queues the run and starts it. The Training data radio above is for
+            runs you add here by hand.
+          </span>
+          {/* When the training clock is in charge -- Pull Control is not
+              a source, so no sweep runs -- its next slot, from the same
+              settings the strip writes. */}
+          {retrain && retrain.follows_pull === false && (
+            <span className="mt-2 block text-xs text-ink-muted">
+              {retrain.settings.enabled && retrain.next_runs?.length
+                ? `Next run ${localDate(retrain.next_runs[0])}.`
+                : "Not armed -- set “On a schedule” in PULL, BUILD, QUEUE, TRAIN at the top."}
+              {retrain.problems?.some((p) => p.level === "blocking") && (
+                <span className="mt-1 block text-critical">
+                  {retrain.problems.filter((p) => p.level === "blocking")[0].text}
+                </span>
+              )}
+            </span>
+          )}
+        </p>
 
         {afterPull?.settings.enabled && (
           <div className="mt-2 space-y-1 border-t border-hairline pt-2">
@@ -1635,9 +1623,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
   const [historyKey, setHistoryKey] = useState(0);
   // Same idea for the detector list the training form below holds.
   const [detectorsVersion, setDetectorsVersion] = useState(0);
-  /** Bumped when the Assemble card writes a data.yaml, so step 6 re-reads
-   * `dataset_assemble.built` and can offer it. */
-  const [assembledVersion, setAssembledVersion] = useState(0);
   // Whether the dataset is picked by hand on the Assemble card, which
   // switches Pull Control, Auto Training and Retention off.
   //
@@ -2149,12 +2134,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               // The Model Name chosen in step 1, so the classes written
               // into data.yaml are the ones the run registers under.
               modelSlug={modelChoice.slug}
-              onAssembled={(folder) => {
-                setSelection({ datasetFolder: folder, evalFolder: folder });
-                // So step 6 re-reads what was just written, rather than
-                // staying on the answer it read when the page loaded.
-                setAssembledVersion((n) => n + 1);
-              }}
             />
           )}
 
@@ -2173,17 +2152,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               modelSlug={modelChoice.slug}
               only={pickFoldersByHand}
               onOnlyChange={setPickFoldersByHand}
-              // Two folders, not one. The eval set is a SEPARATE download
-              // (EVAL_DATA_S3_URI, read by a different container), so when
-              // it has its own prefix the run must be told about it --
-              // falling back to the training folder would evaluate on the
-              // images it trained on and report that as held-out.
-              onAssembled={(folder, evalFolder) => {
-                setSelection({
-                  datasetFolder: folder, evalFolder: evalFolder || folder,
-                });
-                setAssembledVersion((n) => n + 1);
-              }}
             />
           )}
 
@@ -2221,9 +2189,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               reason={<>The run is using the folders picked above. Retention
                 lives inside this card, so it is off with it.</>}
             >
-              <Track2AutoTrainingPanel
-                onAssembled={(folder) => setSelection({ datasetFolder: folder, evalFolder: folder })}
-              />
+              <Track2AutoTrainingPanel />
             </SwitchedOff>
           )}
 
@@ -2237,7 +2203,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             setSelection={setSelection}
             onSubmitted={handleSubmitted}
             detectorsVersion={detectorsVersion}
-            assembledVersion={assembledVersion}
           />
 
           {/* The two queues, side by side. Pull first because it is

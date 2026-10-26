@@ -77,8 +77,13 @@ def _with_prefix(settings: dict) -> dict:
     Never saved: `save_settings` writes `_settings()` back, and the prefix
     belongs to Pull Control, not to retention.
     """
+    config = pc.read_config()
     return {**settings,
-            "week_prefix": str(pc.read_config().get("week_prefix") or "week_")}
+            "week_prefix": str(config.get("week_prefix") or "week_"),
+            # Weeks unticked on Auto Training: the list writer skips them,
+            # so every preview built on it does too.
+            "excluded_weeks": sorted(str(w) for w in
+                                     ((config.get("auto_training") or {}).get("excluded") or []))}
 
 
 @router.get("")
@@ -938,6 +943,7 @@ def dataset_yaml(payload: DatasetYamlRequest, session=Depends(require_session)) 
             names={int(k): v for k, v in (payload.names or {}).items()},
             retained_train=train_entry,
             retained_val=val_entry,
+            excluded_weeks=_with_prefix({})["excluded_weeks"],
         )
         if train_entry:
             # What the policy would actually select, so the preview can
@@ -1010,6 +1016,7 @@ def save_dataset_yaml(payload: DatasetYamlSaveRequest,
             names={int(k): v for k, v in (payload.names or {}).items()},
             retained_train=train_entry,
             retained_val=val_entry,
+            excluded_weeks=_with_prefix({})["excluded_weeks"],
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

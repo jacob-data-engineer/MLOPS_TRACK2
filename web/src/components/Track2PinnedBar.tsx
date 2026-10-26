@@ -12,6 +12,7 @@ import {
   getTrack2SettingsFiles,
   loadTrack2SettingsFile,
   saveTrack2SettingsFile,
+  saveTrack2QueueAfterPull,
   setTrack2PullMode,
   type Track2SettingsFile,
 } from "../lib/api";
@@ -78,16 +79,11 @@ export function Track2PinnedBar() {
   const [startDate, setStartDate] = useState("");
   const [nextRun, setNextRun] = useState("");
   const [scheduleDirty, setScheduleDirty] = useState(false);
-  /** Whether a finished SCHEDULED pull goes on to rebuild, freeze, queue
-   * and start a run. Read because the row's label names those steps, and
-   * a label naming work that is switched off is worse than a short one:
-   * the chain is off by default, and a manual pull or a file arrival
-   * never sets it off whatever this says. */
-  const [chains, setChains] = useState(false);
-  // Which pulls set the chain off -- a setting since the triggers were
-  // made selectable. Defaults to the old hardcoded answer.
-  const [chainOn, setChainOn] = useState<string[]>(["schedule"]);
+  // The arrival trigger's batch guard. Whether a pull chains at all is the
+  // mode itself now (see the status line under the mode buttons).
   const [minFiles, setMinFiles] = useState(1);
+  // The arrival trigger's second guard: shortest gap between two runs.
+  const [cooldown, setCooldown] = useState(0);
 
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
@@ -119,9 +115,8 @@ export function Track2PinnedBar() {
         getTrack2QueueAfterPull().catch(() => null),
         getTrack2Retrain().catch(() => null),
       ]);
-      setChains(Boolean(after?.settings.enabled));
-      setChainOn(after?.settings.triggers ?? ["schedule"]);
       setMinFiles(Number(after?.settings.min_files ?? 1) || 1);
+      setCooldown(Number(after?.settings.cooldown_minutes ?? 0) || 0);
       setFiles(out.files);
       const live = status?.config.settings_file || "";
       setCurrent(live);
@@ -443,10 +438,10 @@ export function Track2PinnedBar() {
             configures. Constant, because a heading that changes as you
             click the buttons under it reads as a status, and this is not
             one -- the buttons choose WHEN it fires and the line below
-            says what will actually happen. Only a scheduled pull runs
-            the chain; arrival and a manual Pull now deliberately do not,
-            because they fire unpredictably often and each run holds the
-            single GPU. */}
+            says what will actually happen. A scheduled pull runs the
+            chain; an arrival pull does too, behind its batch size and
+            wait; a manual Pull now does not -- Add to Queue in step 6 is
+            the by-hand way to train. */}
         <span className="font-medium text-ink">PULL, BUILD, QUEUE, TRAIN</span>
 
         {/* Run it automatically: off / on arrival / on a schedule. The
@@ -559,28 +554,65 @@ export function Track2PinnedBar() {
         {mode === "off" && (
           <span className="text-ink-muted">nothing runs on its own</span>
         )}
-        {/* Whether THIS mode's pulls chain is a setting now: the
-            triggers on "Run after every pull" (step 4b). It used to be
-            hardcoded here as "arrivals never train", which stopped being
-            true when arrival became selectable. */}
-        {(mode === "arrival" || mode === "schedule") && !(chains && chainOn.includes(mode)) && (
-          <span className="text-ink-muted">
-            pulls only &mdash; tick <em>{mode === "arrival" ? "Arrival" : "Schedule"}</em>{" "}
-            under <em>Run after every pull</em> in step 4b to build, queue and train
-          </span>
-        )}
-        {mode === "schedule" && chains && chainOn.includes("schedule") && (
+        {/* THE MODE IS THE SWITCH (2026-10-26). A scheduled or arrival
+            pull goes on to build, queue and start a run by itself --
+            `queue_after_pull.settings` derives its on/off and trigger from
+            this mode. The separate "Do it automatically" section and step
+            6's "Enabled for scheduling" were more switches for the same
+            thing, and could say off while this said on. */}
+        {mode === "schedule" && (
           <span className="text-ink-secondary">
-            builds, queues and trains after each scheduled pull
+            builds, queues and trains after each scheduled pull, from the ticked sources
           </span>
         )}
-        {mode === "arrival" && chains && chainOn.includes("arrival") && (
-          <span className="text-ink-secondary">
-            builds, queues and trains when an arrival pull moves at least{" "}
-            {minFiles} file{minFiles === 1 ? "" : "s"}
-          </span>
+        {/* Arrival fires once per upload burst. Never offered without its
+            two guards: on 6 October three arrival pulls fired in ten
+            minutes, one moving a single file, and each would have been a
+            GPU run. Saved on blur, as settings beside the mode. */}
+        {mode === "arrival" && (
+          <>
+            <label className="flex items-center gap-1 text-ink-muted">
+              trains when a pull brings at least
+              <input
+                type="number"
+                min={1}
+                key={`min-${minFiles}`}
+                defaultValue={minFiles}
+                disabled={!!busy}
+                className="tabular w-16 rounded border border-black/15 bg-page px-1 py-1"
+                onBlur={(e) => {
+                  const value = Math.max(1, Number(e.target.value) || 1);
+                  void run("Saving", async () => {
+                    await saveTrack2QueueAfterPull({ min_files: value });
+                    setMinFiles(value);
+                  });
+                }}
+              />
+              file(s), at most one run every
+              <input
+                type="number"
+                min={0}
+                key={`cool-${cooldown}`}
+                defaultValue={cooldown}
+                disabled={!!busy}
+                className="tabular w-14 rounded border border-black/15 bg-page px-1 py-1"
+                onBlur={(e) => {
+                  const value = Math.max(0, Number(e.target.value) || 0);
+                  void run("Saving", async () => {
+                    await saveTrack2QueueAfterPull({ cooldown_minutes: value });
+                    setCooldown(value);
+                  });
+                }}
+              />
+              min
+            </label>
+            {minFiles <= 1 && cooldown === 0 && (
+              <span className="text-critical">
+                every upload will start a GPU run -- set a batch size and a wait
+              </span>
+            )}
+          </>
         )}
-
       </div>
 
       {/* ---- THIRD ROW: what the chain is doing right now ----

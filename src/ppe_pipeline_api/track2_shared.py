@@ -5248,7 +5248,7 @@ def start_training_run(generation, size, epochs, dataset_folder, base_model_fold
         dataset_folder=dataset_folder, eval_dataset_folder=eval_dataset_folder,
         base_model_folder=base_model_folder or base_model_s3_uri, notes=notes, source=source,
         architecture=architecture, base_model_package_arn=base_model_package_arn,
-        base_model_source=base_model_source,
+        base_model_source=base_model_source, hyperparams=hyperparams,
     )
     return build_id
 
@@ -5693,6 +5693,12 @@ def start_custom_training_run(
         architecture=architecture, base_model_package_arn=base_model_package_arn,
         base_model_source=base_model_source,
         detector_slug=detector_slug, snapshot=snapshot,
+        patience=patience, hyperparams=hyperparams,
+        training_options={
+            "classes": list(class_filter.get("classes") or []),
+            "single_cls": bool(class_filter.get("single_cls")),
+            "drop_undeclared_classes": bool(drop_undeclared_classes),
+        },
     )
     # Linked immediately, which the replay path cannot do.
     try:
@@ -5754,7 +5760,9 @@ def queue_snapshot() -> dict:
     # were carried on the entry: filled from the version, so the card
     # names where the images come from rather than `_datasets/<id>`.
     for e in pending + ([running] if running else []):
-        if e.get("dataset_version_id") and not e.get("dataset_version_train_images"):
+        # ...or before the per-folder counts were (2026-10-26).
+        if e.get("dataset_version_id") and (not e.get("dataset_version_train_images")
+                                            or not e.get("dataset_source_counts")):
             try:
                 from . import dataset_versions as _dsv
                 e.update(_dsv.card_fields(e["dataset_version_id"]))
@@ -6648,64 +6656,221 @@ def _weights_download_name(key: str, fallback: str) -> str:
     return fallback
 
 
-def audit_as_csv(audit: dict) -> str:
-    """One run, flattened to CSV -- every field and every file name.
+def run_settings_for(audit: dict) -> dict:
+    """Patience, hyperparameters and class options for a run's record.
 
-    `section,key,value` rather than a wide row per run: the record is
-    deeply nested and holds two variable-length file lists, which no fixed
-    column set represents without either losing data or leaving hundreds
-    of empty columns. Three columns parse anywhere and stay readable.
+    From the record itself for runs submitted since these were stored
+    (2026-10-26). For older runs, read back from the SageMaker execution's
+    own parameters -- the values the job was really sent -- so their
+    export is complete too. `recorded_in` says which.
     """
-    rows: list[tuple[str, str, str]] = []
+    if "hyperparams" in audit:
+        return {
+            "patience": (audit.get("parameters") or {}).get("patience"),
+            "hyperparams": dict(audit.get("hyperparams") or {}),
+            "training_options": dict(audit.get("training_options") or {}),
+            "recorded_in": "the training record",
+        }
+    arn = str(audit.get("execution_arn") or "")
+    if not arn:
+        return {"recorded_in": ""}
+    try:
+        params = {p["Name"]: p.get("Value", "") for p in
+                  sm.list_pipeline_parameters_for_execution(
+                      PipelineExecutionArn=arn).get("PipelineParameters", [])}
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"Could not read the parameters of {arn}: {exc}")
+        return {"recorded_in": ""}
+    hyper: dict = {}
+    if params.get("Hyperparams"):
+        import base64
+        try:
+            hyper = json.loads(base64.b64decode(params["Hyperparams"]).decode())
+        except Exception:                                          # noqa: BLE001
+            hyper = {"(could not decode)": params["Hyperparams"]}
+    classes = [c for c in str(params.get("Classes") or "").split(",") if c.strip()]
+    return {
+        "patience": int(params["Patience"]) if str(params.get("Patience") or "").isdigit() else None,
+        "hyperparams": hyper,
+        "training_options": {
+            "classes": classes,
+            "single_cls": str(params.get("SingleCls") or "").lower() == "true",
+            "drop_undeclared_classes": str(params.get("DropUndeclaredClasses") or "").lower() == "true",
+        },
+        "recorded_in": "the SageMaker execution's parameters",
+    }
 
-    def flatten(section: str, value, path: str) -> None:
+
+def audit_as_csv(audit: dict, settings: dict | None = None) -> str:
+    """One run as a CSV a person can read -- in SECTIONS, two columns each.
+
+    Run, Model, Training settings, Hyperparameters, Class options, Data
+    version and snapshot, Training data, Evaluation data, Metrics, then
+    anything else the record holds, and last every file name used. A
+    section is a title row, a header row, its rows and a blank line, so it
+    reads top to bottom in Excel and still parses as CSV.
+
+    It was `section,key,value` with dotted keys (`model.version`) and no
+    hyperparameters at all, which parsed fine and read badly.
+
+    `settings` is `run_settings_for(audit)`; left out, only what the record
+    itself holds is used, so this never reaches AWS on its own.
+    """
+    from .hyperparams import GROUPS
+
+    settings = settings if settings is not None else (
+        run_settings_for(audit) if "hyperparams" in audit else {"recorded_in": ""})
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    shown: set = set()
+
+    def text(value) -> str:
+        if value is None or value == "":
+            return ""
+        if isinstance(value, bool):
+            return "yes" if value else "no"
+        if isinstance(value, (list, tuple)):
+            return "; ".join(text(v) for v in value)
+        if isinstance(value, dict):
+            return "; ".join(f"{k}={text(v)}" for k, v in value.items())
+        return str(value)
+
+    def section(title: str, rows: list, header=("Field", "Value")) -> None:
+        # The name in capitals, a trailing "(N files)" left as it is.
+        head, _, tail = title.partition(" (")
+        writer.writerow([head.upper() + (f" ({tail}" if tail else "")])
+        writer.writerow(list(header))
+        if rows:
+            writer.writerows(rows)
+        else:
+            writer.writerow(["(nothing recorded)"])
+        writer.writerow([])
+
+    def flat(value, path: str = "") -> list:
+        """Nested dicts as `a > b` rows, file name samples left out."""
+        rows: list = []
         if isinstance(value, dict):
             for key, inner in value.items():
                 if key == "file_names":
-                    continue  # listed in full from the manifest below
-                flatten(section, inner, f"{path}.{key}" if path else key)
-        elif isinstance(value, list):
-            rows.append((section, path, "; ".join(str(v) for v in value)))
+                    continue
+                rows += flat(inner, f"{path} > {key}" if path else str(key))
         else:
-            rows.append((section, path, "" if value is None else str(value)))
+            rows.append([path, text(value)])
+        return rows
 
-    for key, value in audit.items():
-        if key in {"train_dataset", "eval_dataset"}:
-            continue
-        flatten("run", value, key)
-    for role in ("train_dataset", "eval_dataset"):
-        flatten(role, audit.get(role) or {}, "")
+    def take(*keys):
+        shown.update(keys)
+        return [audit.get(k) for k in keys]
+
+    writer.writerow(["TRAINING RUN RECORD"])
+    writer.writerow(["Run ID", text(audit.get("id"))])
+    writer.writerow([])
+
+    status, submitted, started, ended, source, notes, arn, build = take(
+        "status", "submitted_at", "started_at", "ended_at", "source", "notes",
+        "execution_arn", "build_id")
+    shown.update({"id", "record_type"})
+    section("Run", [
+        ["Status", text(status)],
+        ["Submitted", text(submitted)],
+        ["Started", text(started)],
+        ["Ended", text(ended)],
+        ["Started by", text(source)],
+        ["Notes", text(notes)],
+        ["SageMaker execution", text(arn)],
+        *([["Build", text(build)]] if build else []),
+    ])
+
+    slug, arch, gen, size, base, model = take(
+        "detector_slug", "architecture", "generation", "size", "base_model", "model")
+    base = base or {}
+    section("Model", [
+        ["Model Name", text(slug)],
+        ["Architecture", text(arch or size)],
+        ["Pipeline", text(gen)],
+        ["Started from", text(base.get("source"))],
+        ["Base model package", text(base.get("package_arn"))],
+        ["Base model folder", text(base.get("folder"))],
+        *[[f"Registered model > {k}", text(v)] for k, v in (model or {}).items()],
+    ])
+
+    params = (take("parameters")[0] or {})
+    patience = settings.get("patience", params.get("patience"))
+    section("Training settings", [
+        ["Epochs", text(params.get("epochs"))],
+        ["Image size", text(params.get("img_size"))],
+        ["Batch", text(params.get("batch"))],
+        ["Seed", text(params.get("seed"))],
+        ["Patience (early stopping)",
+         "not recorded" if patience is None
+         else "not set (Ultralytics default)" if int(patience) == 0 else text(patience)],
+        *[[k, text(v)] for k, v in params.items()
+          if k not in {"epochs", "img_size", "batch", "seed", "patience"}],
+    ])
+
+    shown.update({"hyperparams", "training_options"})
+    hyper = settings.get("hyperparams")
+    if hyper is None:
+        hyper_rows = [["", "Not recorded for this run", ""]]
+    else:
+        hyper_rows = []
+        for group, keys in GROUPS.items():
+            for key in keys:
+                hyper_rows.append([group, key, text(hyper[key]) if key in hyper
+                                   else "default"])
+        grouped = {k for keys in GROUPS.values() for k in keys}
+        hyper_rows += [["Other", k, text(v)] for k, v in hyper.items() if k not in grouped]
+        set_count = len(hyper)
+        hyper_rows.insert(0, ["", f"{set_count} changed from Ultralytics' default"
+                              + (f" -- from {settings['recorded_in']}" if settings.get("recorded_in") else ""),
+                              ""])
+    section("Hyperparameters", hyper_rows, header=("Group", "Setting", "Value"))
+
+    options = settings.get("training_options")
+    section("Class options", [] if options is None else [
+        ["Classes trained (indices)", text(options.get("classes")) or "all the yaml declares"],
+        ["Single class", text(bool(options.get("single_cls")))],
+        ["Undeclared boxes dropped", text(bool(options.get("drop_undeclared_classes")))],
+    ])
+
+    snapshot, artifacts = take("snapshot", "artifacts")
+    section("Dataset version and snapshot", flat(snapshot or {}, "Snapshot")
+            + flat(artifacts or {}, "Copied artifacts"))
+
+    for role, title in (("train_dataset", "Training data"), ("eval_dataset", "Evaluation data")):
+        shown.add(role)
+        section(title, flat(audit.get(role) or {}))
+
+    metrics = take("metrics")[0]
+    section("Metrics", flat(metrics or {}))
+
+    rest = {k: v for k, v in audit.items() if k not in shown}
+    if rest:
+        section("Other recorded fields", flat(rest))
 
     # Every name, from the per-file rows rather than the capped sample on
     # the audit row -- the point of the export is completeness.
     audit_id = str(audit.get("id") or "")
-    for role, prefix in (("train_dataset", "train"), ("eval_dataset", "eval")):
-        # Fully qualified, and the ORIGIN where one was recorded: a row
-        # reading "images/train/x.jpg" names a file in no particular
-        # dataset, and the assembled folder is a copy nobody chose.
+    for role, prefix, title in (("train_dataset", "train", "Training files"),
+                                ("eval_dataset", "eval", "Evaluation files")):
         names = read_file_row_paths(audit_id, prefix)
         block = audit.get(role) or {}
         if not names:
             # Runs audited before the file table existed still export what
             # they have, rather than exporting nothing.
             names = list(block.get("file_names") or [])
-        # Qualify only what is not already qualified. Audits written since
-        # the paths were resolved store them whole; older ones store a name
-        # relative to the folder, and prefixing both alike would double the
-        # newer ones. A leading "images/" or "labels/" is what a relative
-        # one always starts with -- that is the whole test.
+        # Qualify only what is not already qualified: a leading "images/"
+        # or "labels/" is what a relative name always starts with.
         folder = str(block.get("folder") or "").strip("/")
-        for name in names:
-            relative = name.startswith(("images/", "labels/"))
-            rows.append((
-                f"{role}_files", "",
-                f"{folder}/{name}" if (relative and folder) else name,
-            ))
+        paths = [f"{folder}/{n}" if (n.startswith(("images/", "labels/")) and folder) else n
+                 for n in names
+                 # A dataset version's own list files (train.txt, val.txt)
+                 # were recorded beside the images; they are not training
+                 # files, and listed here they made 7,996 images read 7,999.
+                 if not (n.startswith("_datasets/") and n.endswith(".txt"))]
+        # No thousands separator: a comma in the title would quote the cell.
+        section(f"{title} ({len(paths)} files)", [[p] for p in paths], header=("Path",))
 
-    out = io.StringIO()
-    writer = csv.writer(out, lineterminator="\n")
-    writer.writerow(["section", "key", "value"])
-    writer.writerows(rows)
     return out.getvalue()
 
 
@@ -6883,6 +7048,10 @@ def write_training_audit(
     detector_slug="", snapshot=None,
     # A composed run: the prefixes and yaml it really reads.
     train_data_uris="", data_yaml_uri="", eval_extra_uris="", eval_uri="",
+    # Everything else the job was sent (2026-10-26). Without these the
+    # record named four of the run's settings and the CSV export said
+    # nothing about the learning rate, optimiser or augmentation used.
+    patience=None, hyperparams=None, training_options=None,
 ) -> dict:
     """One row per submitted run, written before the run is under way so
     the operator's exact inputs are captured even if the run later fails.
@@ -6908,7 +7077,16 @@ def write_training_audit(
             "img_size": int(img_size),
             "batch": int(batch),
             "seed": int(seed),
+            **({"patience": int(patience or 0)} if patience is not None else {}),
         },
+        # The extra Ultralytics arguments exactly as sent -- typed by
+        # `normalize_hyperparams`, so 0.01 is a number and False a bool.
+        # {} means every one was left at Ultralytics' default; a MISSING
+        # key means the run predates this field (see run_settings_for).
+        "hyperparams": _decimalize(normalize_hyperparams(hyperparams)),
+        # Which classes, single-class or not, and whether undeclared boxes
+        # were dropped -- the three choices that change what is learned.
+        "training_options": _decimalize(dict(training_options or {})),
         "notes": notes or "",
         # The yaml and the file lists, copied into a folder of this run's
         # own. Copied rather than pointed at: the live slots are

@@ -16,6 +16,8 @@ What this pins, and why each one is here rather than being obvious:
 """
 from __future__ import annotations
 
+import pathlib
+
 import datetime as _dt
 import importlib
 import json
@@ -42,7 +44,17 @@ def row(version, *, mAP50=None, recall=None, status="Approved", val=None,
 def settings_dir(tmp_path, monkeypatch):
     folder = tmp_path / "export"
     monkeypatch.setattr(router, "EXPORT_SETTINGS_DIR", str(folder))
+    # `check` claims each version before acting, so the app containers and
+    # the queue Lambda never both export it. Granted here; the claim has
+    # its own tests below.
+    monkeypatch.setattr(_pc_of_mx(), "claim_once", lambda what, key, **kw: True)
     return folder
+
+
+def _pc_of_mx():
+    """The pull_control `mx` itself imports -- `src.ppe_pipeline_api...`
+    here, a different module object from `ppe_pipeline_api.pull_control`."""
+    return importlib.import_module(mx.__name__.rsplit(".", 1)[0] + ".pull_control")
 
 
 # --- picking ------------------------------------------------------------
@@ -290,21 +302,31 @@ def test_rearming_on_another_group_forgets_what_it_exported(settings_dir, monkey
     assert mx.auto_settings()["last_exported_version"] == ""
 
 
-def test_the_watcher_file_is_written_whole(settings_dir, monkeypatch):
-    """A half-written file read back by the next tick is a watcher with no
-    marker, which re-exports whatever it last exported."""
+def test_the_watcher_record_is_written_whole(settings_dir, monkeypatch):
+    """One put of the whole record -- a single DynamoDB item, so a reader
+    never sees half a watcher (it was a file renamed into place)."""
     import inspect
 
-    source = inspect.getsource(mx.write_auto)
-    assert "os.replace(" in source and ".tmp" in source
+    assert "_shared_put(plan)" in inspect.getsource(mx.write_auto)
+    # From the file: conftest swaps `_shared_put` for an in-memory one.
+    source = pathlib.Path(mx.__file__).read_text(encoding="utf-8")
+    body = source[source.index("def _shared_put("):source.index("def _file_settings(")]
+    assert "pc.ddb.put_item(" in body
 
 
 def test_it_survives_a_corrupt_watcher_file(settings_dir):
     """Returning the defaults -- i.e. OFF -- is the safe reading. A parse
     error that armed something would be the worst possible answer."""
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    (settings_dir / mx.AUTO_FILE).write_text("{not json", encoding="utf-8")
-    assert mx.auto_settings()["enabled"] is False
+    def corrupt():
+        raise ValueError("not json")
+
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(mx, "_shared_get", corrupt)
+    try:
+        assert mx.auto_settings()["enabled"] is False
+    finally:
+        mp.undo()
 
 
 def test_the_tick_calls_it(settings_dir):
@@ -620,10 +642,7 @@ def test_arming_with_a_mode_that_is_not_one_is_refused(settings_dir):
 
 def test_a_watcher_armed_before_retention_existed_keeps_everything(settings_dir):
     """The safe reading of silence: a mode nobody chose must not delete."""
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    (settings_dir / mx.AUTO_FILE).write_text(
-        json.dumps({"enabled": True, "group_name": "g", "bucket": "b"}),
-        encoding="utf-8")
+    mx._shared_put({"enabled": True, "group_name": "g", "bucket": "b"})
     assert mx.auto_settings()["retention"] == "keep_all"
 
 
@@ -751,3 +770,47 @@ def test_a_cached_read_is_a_copy_not_the_cache(monkeypatch):
     first[0]["status"] = "TAMPERED"
     assert mx.group_versions("g", max_age=60)[0]["status"] == "Approved"
     mx._versions_cache.clear()
+
+
+
+# --- runs with the app off (2026-10-26) -----------------------------------
+
+def test_an_armed_container_file_is_carried_over_once(settings_dir, monkeypatch):
+    """The watcher armed on dev before the shared record existed keeps
+    running: the old file is copied into the record the first time."""
+    monkeypatch.setattr(mx, "_file_settings",
+                        lambda: {"enabled": True, "group_name": "g", "bucket": "b",
+                                 "retention": "archive_oldest", "last_version": 27})
+    assert mx.auto_settings()["enabled"] is True
+    monkeypatch.setattr(mx, "_file_settings", lambda: None)
+    got = mx.auto_settings()
+    assert got["retention"] == "archive_oldest" and got["last_version"] == 27
+
+
+def test_only_one_instance_exports_a_version(settings_dir, monkeypatch):
+    pc = _pc_of_mx()
+
+    monkeypatch.setattr(mx, "newest_version", lambda group: 14)
+    mx.arm(group_name="yolo11s-helmet-detector", criterion="mAP50", bucket="b", prefix="")
+    monkeypatch.setattr(mx, "newest_version", lambda group: 15)
+    monkeypatch.setattr(pc, "claim_once", lambda what, key, **kw: False)
+    called = []
+    monkeypatch.setattr(mx, "export_checkpoint", lambda *a, **k: called.append(1))
+    out = mx.check()
+    assert out["exported"] is False and "Another instance" in out["reason"]
+    assert called == []
+
+
+def test_the_queue_lambda_runs_the_watcher():
+    import inspect
+    from ppe_pipeline_api import queue_runner
+
+    assert "metrics_export.check()" in inspect.getsource(queue_runner.lambda_handler)
+
+
+def test_the_lambda_is_allowed_to_do_it():
+    tf = (pathlib.Path(__file__).resolve().parents[1] / "terraform" / "app"
+          / "pull_control.tf").read_text(encoding="utf-8")
+    for needed in ('"sagemaker:ListModelPackages"', '"sagemaker:DescribeModelPackage"',
+                   '"s3:PutObject", "s3:DeleteObject"', "timeout          = 300"):
+        assert needed in tf, needed

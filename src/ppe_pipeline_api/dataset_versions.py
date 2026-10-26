@@ -158,6 +158,17 @@ def source_folders(images: list, home: str) -> list:
     return sorted(out)
 
 
+def folder_counts(images: list, home: str) -> dict:
+    """How many of the images sit in each folder -- the queue card shows a
+    count beside every folder, so "week_3" says how much of it is used."""
+    out: dict = {}
+    for b, k in images:
+        d = posixpath.dirname(k)
+        d = d if b == home else f"s3://{b}/{d}"
+        out[d] = out.get(d, 0) + 1
+    return out
+
+
 def _from_manifest(version: dict) -> dict:
     """Folders and counts for a version made before they were recorded."""
     m = json.loads(_read(version["bucket"], f"{version['folder']}/manifest.json"))
@@ -167,6 +178,8 @@ def _from_manifest(version: dict) -> dict:
         return [tuple(n.split("/", 1)) for n in names if "/" in n]
     train, val = pairs(m.get("train") or []), pairs(m.get("val") or [])
     return {"train_folders": source_folders(train, home), "val_folders": source_folders(val, home),
+            "train_folder_counts": folder_counts(train, home),
+            "val_folder_counts": folder_counts(val, home),
             "train_images": len(train), "val_images": len(val)}
 
 
@@ -301,6 +314,9 @@ def create(*, home: str, yaml_text: str, prefixes: list,
         # folder holds only lists, and naming it says nothing.
         "train_folders": train_folders,
         "val_folders": val_folders,
+        # Images per folder, for the count beside each one on the card.
+        "train_folder_counts": folder_counts(train, home),
+        "val_folder_counts": folder_counts(val, home),
         "classes": list(train_doc["names"].values()),
         "sources": list(sources or []),
         "drop_undeclared": bool(drop_undeclared),
@@ -456,6 +472,10 @@ def run_fields(version: dict) -> dict:
         "eval_source_folders": list(version.get("val_folders") or []),
         "dataset_version_train_images": int(version.get("train_images") or 0),
         "dataset_version_val_images": int(version.get("val_images") or 0),
+        "dataset_source_counts": {k: int(v) for k, v in
+                                  (version.get("train_folder_counts") or {}).items()},
+        "eval_source_counts": {k: int(v) for k, v in
+                               (version.get("val_folder_counts") or {}).items()},
     }
 
 
@@ -468,10 +488,11 @@ def card_fields(version_id: str) -> dict:
     a version never changes."""
     if version_id not in _card_cache:
         v = get(version_id)
-        if not v.get("train_folders"):
+        if not v.get("train_folders") or not v.get("train_folder_counts"):
             v = {**v, **_from_manifest(v)}
         f = run_fields(v)
         _card_cache[version_id] = {k: f[k] for k in (
             "dataset_source_folders", "eval_source_folders",
-            "dataset_version_train_images", "dataset_version_val_images")}
+            "dataset_version_train_images", "dataset_version_val_images",
+            "dataset_source_counts", "eval_source_counts")}
     return _card_cache[version_id]

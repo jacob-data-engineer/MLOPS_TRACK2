@@ -314,3 +314,17 @@ def test_the_card_shows_the_version_and_drops_the_folder_caveat():
     page = (ROOT / "web" / "src" / "routes" / "Track2ModelsPage.tsx").read_text(encoding="utf-8")
     assert "Dataset version: <span" in page
     assert "this run trains on the dataset version above" in page
+
+
+def test_each_folder_is_counted_for_the_queue_card():
+    """2026-10-26: the card shows how many images each folder gives."""
+    from ppe_pipeline_api import dataset_versions as dsv
+    imgs = [("b", "r/week_1/images/train/a.jpg"), ("b", "r/week_1/images/train/c.jpg"),
+            ("b", "r/week_2/images/train/d.jpg"), ("o", "x/images/val/e.jpg")]
+    assert dsv.folder_counts(imgs, "b") == {
+        "r/week_1/images/train": 2, "r/week_2/images/train": 1, "s3://o/x/images/val": 1}
+    f = dsv.run_fields({"eval_dataset_folder": "_datasets/v/eval", "folder": "_datasets/v",
+                        "train_data_uris": "", "data_yaml_uri": "", "eval_extra_uris": "",
+                        "version_id": "v", "bucket": "b",
+                        "train_folder_counts": {"r/week_1/images/train": 2}})
+    assert f["dataset_source_counts"] == {"r/week_1/images/train": 2}

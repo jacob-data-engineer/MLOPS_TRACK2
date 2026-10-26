@@ -182,15 +182,6 @@ def _flat() -> str:
     return " ".join(PAGE.read_text(encoding="utf-8").split())
 
 
-def test_the_tick_is_named_enabled_for_scheduling():
-    assert "Enabled for scheduling" in _flat()
-
-
-def test_the_caption_names_the_chosen_source():
-    code = _flat()
-    assert "{sourceLabelFor(dataSource)}" in code
-
-
 def test_the_caption_no_longer_claims_it_does_not_start():
     """`run_chain(submit="queue")` calls `queue_start()`, and has since
     the chain was written -- so the old sentence described something the
@@ -201,18 +192,17 @@ def test_the_caption_no_longer_claims_it_does_not_start():
     assert "press Start Queue for that" not in _flat()
 
 
-def test_the_caption_says_it_runs_through_to_a_model():
+
+
+def test_the_card_says_automatic_runs_use_the_ticked_sources():
+    """An automatic run composes from the ticked sources; the radio is for
+    runs added by hand (2026-10-26)."""
     code = _flat()
-    assert "queues one run and starts it" in code
+    assert "Switched on and off by <strong>PULL, BUILD, QUEUE, TRAIN</strong>" in code
+    assert "queues the run and starts it" in code
+    assert "The Training data radio above is for runs you add here by hand." in code
 
 
-def test_the_caption_says_a_frozen_source_is_not_rebuilt():
-    code = _flat()
-    assert "nothing is rebuilt or re-frozen" in code
-
-
-def test_the_source_label_matches_the_radio_wording():
-    code = _flat()
-    for phrase in ("the assembled dataset", "the frozen snapshot",
-                   "the snapshot generated during auto pull"):
-        assert phrase in code, phrase
+def test_unattended_runs_ignore_a_frozen_radio():
+    assert rs.automatic({"data_source": "snapshot"})["data_source"] == "assembled"
+    assert "run_chain(config=automatic(config), trigger=\"schedule\", submit=\"queue\")"         in inspect.getsource(rs.check_training_schedule)

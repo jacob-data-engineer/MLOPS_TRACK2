@@ -83,11 +83,18 @@ def select(*, root: str, config: dict | None = None, bucket: str = "",
     planned = rt.plan_inventory(inventory, config)
     kept_by_week = {row["week"]: row for row in planned["weeks"]}
 
+    # Weeks unticked on the Auto Training card (`auto_training.excluded`).
+    # Skipped AFTER planning, so the weeks that remain keep the age and the
+    # share the curve gave them: leaving week_2 out must not change how
+    # much of week_1 is kept. Saved by that card since it existed and read
+    # by nothing until 2026-10-26 -- an unticked week_2 trained anyway.
+    excluded = set(config.get("excluded_weeks") or [])
+
     train: list = []
     rows: list = []
     for week in names:
         row = kept_by_week.get(week) or {}
-        kept = row.get("stems") or []
+        kept = [] if week in excluded else (row.get("stems") or [])
         train += [_relative(train_keys[week][stem], root)
                   for stem in kept if stem in train_keys[week]]
         rows.append({
@@ -97,11 +104,14 @@ def select(*, root: str, config: dict | None = None, bucket: str = "",
             "age_weeks": row.get("age_weeks", 0),
             "fraction": row.get("fraction", 1.0),
             "val": len(val_keys[week]),
+            "excluded": week in excluded,
         })
 
     # The val side, whole.
     val: list = []
     for week in names:
+        if week in excluded:
+            continue
         val += [_relative(key, root) for key in sorted(val_keys[week].values())]
 
     train.sort()
@@ -112,8 +122,9 @@ def select(*, root: str, config: dict | None = None, bucket: str = "",
         "train": train,
         "val": val,
         "weeks": rows,
-        "train_available": sum(r["available"] for r in rows),
-        "val_available": sum(r["val"] for r in rows),
+        # Of the weeks still IN: an unticked week is not available to train.
+        "train_available": sum(r["available"] for r in rows if not r["excluded"]),
+        "val_available": sum(r["val"] for r in rows if not r["excluded"]),
         "enabled": bool(config.get("enabled")),
     }
 

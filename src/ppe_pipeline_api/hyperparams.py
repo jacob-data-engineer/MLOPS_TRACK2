@@ -103,6 +103,19 @@ SCHEMA: dict[str, dict[str, Any]] = {
         "randaugment", "autoaugment", "augmix")},
 }
 
+#: The same groups the Advanced card shows, in its order -- so the training
+#: record export lists the settings the way somebody set them.
+GROUPS: dict[str, tuple[str, ...]] = {
+    "Optimiser": ("optimizer", "lr0", "lrf", "momentum", "weight_decay",
+                  "warmup_epochs", "warmup_momentum", "warmup_bias_lr", "cos_lr"),
+    "Fine-tuning": ("freeze", "dropout", "multi_scale", "rect", "amp", "fraction"),
+    "Loss weights": ("box", "cls", "dfl", "nbs"),
+    "Augmentation": ("hsv_h", "hsv_s", "hsv_v", "degrees", "translate", "scale",
+                     "shear", "perspective", "flipud", "fliplr", "mosaic",
+                     "close_mosaic", "mixup", "cutmix", "copy_paste", "erasing",
+                     "bgr", "auto_augment"),
+}
+
 _TRUE = {"true", "1", "yes"}
 _FALSE = {"false", "0", "no"}
 _AMP_MODES = {"fp16", "bf16", "fp32"}

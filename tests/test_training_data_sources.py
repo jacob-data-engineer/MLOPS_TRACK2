@@ -65,8 +65,9 @@ def test_the_assemble_card_records_what_it_built():
     # in state and written to the config immediately -- see
     # tests/test_assembled_option_lights_up.py. Two literals would be
     # two chances for the screen and the file to say different things.
-    assert "setBuilt(record)" in code
-    assert "const record = {" in code
+    # Nothing writes it from the card any more; an old record is still
+    # restored and carried, so a saved file round-trips unchanged.
+    assert "if (saved.built?.folder) setBuilt(saved.built);" in code
     assert "built," in code, "it has to ride in the same writer as the rest"
 
 
@@ -122,7 +123,7 @@ def test_the_snapshot_option_is_never_greyed():
     """Picking one is how it gets filled, so greying it until it has a
     value would be a control that can never be reached."""
     code = _code(PAGE)
-    assert 'option.key === "snapshot" || Boolean(option.folder)' in code
+    assert 'option.key === "snapshot" || (option.key === "assembled"' in " ".join(code.split())
 
 
 def test_choosing_a_source_points_the_run_at_that_folder():

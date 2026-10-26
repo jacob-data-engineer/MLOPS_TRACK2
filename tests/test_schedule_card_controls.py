@@ -61,20 +61,6 @@ def test_the_rule_is_not_restated_in_typescript():
 
 # --- the tick arms both --------------------------------------------------------------
 
-def test_the_tick_writes_both_enables():
-    code = _flat()
-    block = code.split("const on = e.target.checked;")[1][:700]
-    assert "saveTrack2QueueAfterPull({ enabled: on })" in block
-    assert "saveTrack2Retrain({ enabled: on })" in block
-
-
-def test_it_says_why_both():
-    code = _flat()
-    # A fragment that sits on ONE line: flattening joins lines with a
-    # space, so a phrase spanning two picks up the comment's `//`.
-    assert "would be a switch that does nothing" in code
-
-
 # --- the cadence controls ---------------------------------------------------------------
 
 def test_the_cadence_is_not_set_twice():
@@ -163,3 +149,11 @@ def test_a_failed_read_does_not_block_the_page():
     code = _flat()
     block = code.split("getTrack2Retrain()")[1][:400]
     assert ".catch(() => undefined)" in block
+
+
+def test_the_tick_is_gone_and_the_strip_decides():
+    """2026-10-26: the pull mode on the strip is the one switch."""
+    code = _flat()
+    assert "saveTrack2Retrain({ enabled: on })" not in code
+    assert "saveTrack2QueueAfterPull({ enabled: on })" not in code
+    assert "Runs automatically: " in code

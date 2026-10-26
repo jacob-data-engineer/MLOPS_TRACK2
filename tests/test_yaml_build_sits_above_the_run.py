@@ -21,7 +21,7 @@ def test_the_panel_portals_its_build_section_there():
     assert 'import { createPortal } from "react-dom";' in PANEL
     assert 'document.getElementById("track2-yaml-build-slot")' in PANEL
     assert "{buildSlot && createPortal(" in PANEL
-    assert 'title="Build the data.yaml"' in PANEL
+    assert 'title="Preview the data.yaml"' in PANEL
 
 
 def test_it_renders_in_place_when_there_is_no_slot():
@@ -35,7 +35,7 @@ def test_the_portal_is_outside_the_open_shut_branch():
 
 def test_the_build_section_carries_the_whole_yaml_flow():
     s = PANEL[PANEL.index("const buildSection = ("):PANEL.index("return (", PANEL.index("const buildSection = ("))]
-    for piece in ("Label classes", "Filter undeclared classes", "Generate yaml training file", "<YamlPreview", "<ConfirmDialog"):
+    for piece in ("Label classes", "Filter undeclared classes", "Preview only -- nothing is written.", "<YamlPreview"):
         assert piece in s, piece
 
 
@@ -43,8 +43,7 @@ def test_the_build_section_carries_the_whole_yaml_flow():
 
 def test_preview_and_write_compose_the_golden_set_when_ticked():
     assert "async function foldersForBuild(): Promise<Track2DatasetRequest>" in PANEL
-    assert "previewTrack2DatasetYaml( await foldersForBuild()," in PANEL
-    assert "writeTrack2DatasetYaml(await foldersForBuild()," in PANEL
+    assert "foldersForBuild() .then((f) => previewTrack2DatasetYaml(f, classesOf(), true, dropUndeclared," in PANEL
     assert "currentFolders(), classesOf()" not in PANEL
 
 
@@ -55,6 +54,9 @@ def test_golden_train_joins_and_golden_val_replaces_like_the_chain():
     assert "eval_sources: [...(useFolders ? base.eval_sources ?? [] : []), ...(goldenVal ?? [])]," in PANEL
 
 
-def test_pull_control_is_never_added_by_the_card():
+def test_the_weeks_are_added_when_pull_control_is_ticked():
+    """2026-10-26: the preview shows Pull Control's weeks, as the run uses
+    them. Named by the server, so the card never guesses the form."""
+    assert "Boolean(multiSource && onOnlyChange && !only)))" in PANEL
     s = PANEL[PANEL.index("async function foldersForBuild"):PANEL.index("const pickers")]
-    assert "scan_root" not in s and "retraining" not in s and "only" not in s.replace("Pull Control is never added", "")
+    assert "scan_root" not in s and "retraining" not in s

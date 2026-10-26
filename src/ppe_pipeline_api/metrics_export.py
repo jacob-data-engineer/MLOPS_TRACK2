@@ -36,6 +36,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import re
 import time
 
 from . import track2_shared as t2
@@ -380,6 +381,35 @@ def export_siblings(bucket: str, prefix: str, group_name: str,
     return sorted(found)
 
 
+def export_counts(bucket: str, prefix: str, group_name: str) -> dict:
+    """How many of this Model Name's .pt exports sit in the folder, and how
+    many in its archive/ -- the card's running count (2026-10-26).
+
+    Counted with `export_siblings`, the same rule the housekeeping acts
+    on, so the number is exactly what "the rest" refers to: this Model
+    Name's files only, directly in that folder (or directly in archive/).
+    """
+    folder = (prefix or "").strip("/")
+    archive = f"{folder}/{ARCHIVE_FOLDER}" if folder else ARCHIVE_FOLDER
+    keys = export_siblings(bucket, prefix, group_name)
+    # Which version the folder holds now: the NEWEST file by the stamp in
+    # its name (`-v21-20261026-202117.pt`). By stamp, not by sorting the
+    # names, which would put v9 after v10.
+    latest = None
+    for key in keys:
+        found = _EXPORT_NAME.search(key)
+        if found and (latest is None or found.group(2) > latest["stamp"]):
+            latest = {"file": key.rsplit("/", 1)[-1], "version": found.group(1),
+                      "stamp": found.group(2)}
+    return {"in_folder": len(keys),
+            "archived": len(export_siblings(bucket, archive, group_name)),
+            "latest": latest}
+
+
+#: `<stem>-v<version>-<YYYYmmdd-HHMMSS>.pt`, as `export_filename` writes it.
+_EXPORT_NAME = re.compile(r"-v([0-9]+)-([0-9]{8}-[0-9]{6})[.]pt$")
+
+
 def apply_retention(bucket: str, prefix: str, group_name: str, *,
                     mode: str, keep_key: str) -> dict:
     """What happens to the earlier exports once the new one has landed.
@@ -509,32 +539,70 @@ def _auto_path() -> str:
     return os.path.join(_settings_dir(), AUTO_FILE)
 
 
-def auto_settings() -> dict:
-    """What the watcher is armed with, or the defaults when it is not."""
+#: The watcher's ONE shared record (2026-10-26), in the pull-control
+#: table beside the configuration. It was a file in each container, so the
+#: watcher ran only while that container was up, and dev and production
+#: were armed separately. Now the app containers AND the always-on queue
+#: Lambda read the same record, so an export still happens with the app
+#: off, and `claim_once` in `check` makes exactly one of them act.
+AUTO_KIND = "metrics_auto_export"
+
+
+def _shared_get():
+    from . import pull_control as pc
+    got = pc.ddb.get_item(
+        TableName=pc.TABLE_NAME,
+        Key={"kind": {"S": AUTO_KIND}, "sort": {"S": "v1"}},
+        ConsistentRead=True,
+    ).get("Item")
+    return json.loads(got["body"]["S"]) if got and "body" in got else None
+
+
+def _shared_put(plan: dict) -> None:
+    from . import pull_control as pc
+    pc.ddb.put_item(
+        TableName=pc.TABLE_NAME,
+        Item={"kind": {"S": AUTO_KIND}, "sort": {"S": "v1"},
+              "body": {"S": json.dumps(plan)}},
+    )
+
+
+def _file_settings():
+    """The container's old per-container file, read once to carry an armed
+    watcher over to the shared record. Never present in the Lambda --
+    nor importable there, as it reaches the FastAPI router for its path."""
     try:
         with open(_auto_path(), encoding="utf-8") as handle:
             stored = json.load(handle)
-    except (OSError, ValueError):
-        return dict(AUTO_DEFAULTS)
+    except Exception:                                              # noqa: BLE001
+        return None
+    return stored if isinstance(stored, dict) else None
+
+
+def auto_settings() -> dict:
+    """What the watcher is armed with, or the defaults when it is not."""
+    try:
+        stored = _shared_get()
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"Could not read the auto-export record: {exc}")
+        stored = None
+    if stored is None:
+        # Nothing shared yet: carry this container's old file over, once.
+        stored = _file_settings()
+        if stored:
+            try:
+                _shared_put(stored)
+            except Exception as exc:                               # noqa: BLE001
+                print(f"Could not carry the auto-export file over: {exc}")
     if not isinstance(stored, dict):
         return dict(AUTO_DEFAULTS)
     return {**AUTO_DEFAULTS, **stored}
 
 
 def write_auto(values: dict) -> dict:
-    """Merges into the watcher's file. Written whole then moved.
-
-    A half-written file read back by the next tick would be a watcher with
-    no marker, which re-exports whatever it last exported.
-    """
+    """Merges into the shared record and writes it whole."""
     plan = {**auto_settings(), **values}
-    folder = _settings_dir()
-    os.makedirs(folder, exist_ok=True)
-    path = _auto_path()
-    temporary = path + ".tmp"
-    with open(temporary, "w", encoding="utf-8") as handle:
-        json.dump(plan, handle, indent=2)
-    os.replace(temporary, path)
+    _shared_put(plan)
     return plan
 
 
@@ -626,6 +694,12 @@ def check() -> dict:
         return {"exported": False, "reason": decision["reason"]}
 
     newest = decision["version"]
+    # One actor per version. Both app containers and the queue Lambda run
+    # this on their own ticks against the one shared record; the claim is a
+    # conditional put, so exactly one of them exports.
+    from . import pull_control as pc
+    if not pc.claim_once("metrics_auto_export", f"{plan.get('group_name')}:v{newest}"):
+        return {"exported": False, "reason": "Another instance is handling this version."}
     exported = ""
     result = {
         "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),

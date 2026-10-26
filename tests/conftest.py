@@ -51,9 +51,42 @@ class _NoLiveWrites:
         return getattr(self._inner, call)
 
 
+def _loaded(name: str) -> list:
+    """Every loaded copy of `ppe_pipeline_api.<name>`.
+
+    There can be two. Some test files import the package as
+    `src.ppe_pipeline_api` (by file path), which Python treats as a
+    DIFFERENT module with its own `ddb` -- and a guard installed on only
+    one copy left the other writing to live AWS. On 2026-10-26 that wrote
+    a fake armed watcher and a claim into the live pull-control table.
+    """
+    import importlib
+    import sys
+
+    found = []
+    for prefix in ("ppe_pipeline_api", "src.ppe_pipeline_api"):
+        module = sys.modules.get(f"{prefix}.{name}")
+        if module is None and prefix == "ppe_pipeline_api":
+            module = importlib.import_module(f"{prefix}.{name}")
+        if module is not None:
+            found.append(module)
+    return found
+
+
+@pytest.fixture(autouse=True)
+def _auto_export_record_in_memory(monkeypatch):
+    """The automatic export's shared record, kept in memory. READS of it
+    would otherwise see the live armed watcher and make tests depend on
+    whatever the card is set to today."""
+    store: dict = {}
+    for _mx in _loaded("metrics_export"):
+        monkeypatch.setattr(_mx, "_shared_get", lambda: store.get("plan"))
+        monkeypatch.setattr(_mx, "_shared_put", lambda plan: store.__setitem__("plan", dict(plan)))
+        monkeypatch.setattr(_mx, "_file_settings", lambda: None)
+
+
 @pytest.fixture(autouse=True)
 def _no_live_aws_writes(monkeypatch):
-    from ppe_pipeline_api import pull_control as _pc
-
-    monkeypatch.setattr(_pc, "ddb", _NoLiveWrites(_pc.ddb, "pull_control.ddb"), raising=False)
-    monkeypatch.setattr(_pc, "s3", _NoLiveWrites(_pc.s3, "pull_control.s3"), raising=False)
+    for _pc in _loaded("pull_control"):
+        monkeypatch.setattr(_pc, "ddb", _NoLiveWrites(_pc.ddb, "pull_control.ddb"), raising=False)
+        monkeypatch.setattr(_pc, "s3", _NoLiveWrites(_pc.s3, "pull_control.s3"), raising=False)

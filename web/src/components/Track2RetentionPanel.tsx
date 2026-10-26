@@ -1,4 +1,3 @@
-import { formatDayTime } from "../lib/format";
 import { useCallback, useEffect, useState } from "react";
 import { useCardOpen } from "../lib/cardState";
 import {
@@ -7,22 +6,14 @@ import {
   getTrack2Buckets,
   getTrack2PullControl,
   saveTrack2PullConfig,
-  getTrack2QueueAfterPull,
-  getTrack2Retrain,
-  runTrack2Retrain,
-  saveTrack2QueueAfterPull,
-  type Track2QueueAfterPull,
   getTrack2SettingsFiles,
   takeTrack2Snapshot,
   getTrack2Retention,
   previewTrack2Retention,
-  saveTrack2DatasetYaml,
   saveTrack2Retention,
   track2RetentionMatrix,
   type Track2Bucket,
   type Track2DatasetYaml,
-  type Track2RetrainRun,
-  type Track2RetrainStatus,
   type Track2SettingsFile,
   type Track2RetentionMatrix,
   type Track2RetentionPlan,
@@ -77,16 +68,7 @@ function shade(fraction: number): { background: string; color: string } {
   };
 }
 
-export function Track2RetentionPanel({
-  onUseForTraining,
-}: {
-  /** Hand this root to the training form. Building a data.yaml used to
-   * leave no way to train on it: the form's dataset came only from the
-   * assemble cards, so a yaml could be written, saved and then not
-   * offered anywhere -- "Nothing assembled yet" beside a yaml sitting
-   * ready in the bucket. */
-  onUseForTraining?: (folder: string) => void;
-} = {}) {
+export function Track2RetentionPanel() {
   const [settings, setSettings] = useState<Track2RetentionSettings | null>(null);
   const [plan, setPlan] = useState<Track2RetentionPlan | null>(null);
   const [open, setOpen] = useCardOpen("retention", false);
@@ -119,35 +101,19 @@ export function Track2RetentionPanel({
   // Picking the golden folder rather than typing its prefix.
   const [root, setRoot] = useState("");
 
-  // The generated data.yaml. Held rather than written straight out: a
-  // yaml is a training decision, and one nobody read is one nobody
-  // checked the class order of.
+  // The data.yaml PREVIEW (2026-10-26). Read through /dataset-yaml, which
+  // writes nothing: the chain builds the real one when a run is queued or
+  // the schedule fires, after the retention lists. Building and saving it
+  // by hand here was a second copy that could disagree with what the run
+  // trained on.
   const [built, setBuilt] = useState<Track2DatasetYaml | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
-  // Whether the yaml names FILE LISTS holding what the policy chose, or
-  // the week folders whole. Off is the old behaviour, and the old
-  // behaviour is a policy that reaches nothing.
-  const [applyRetention, setApplyRetention] = useState(true);
-  // The class list as the operator has it, index -> name. Seeded from
-  // whatever the build found, then theirs to change.
-  //
-  // Names only. The INDEX is what every label file carries -- a line
-  // reads `2 0.51 0.22 ...` and means "class 2" -- so renaming index 2
-  // renames every box numbered 2, and adding or removing an entry
-  // changes what those numbers refer to. Editing the set is how a
-  // dataset silently starts training the wrong thing, so this edits
-  // names and leaves the set alone.
-  const [classNames, setClassNames] = useState<Record<string, string>>({});
-  const [classesEdited, setClassesEdited] = useState(false);
+  const [yamlBusy, setYamlBusy] = useState(false);
+  const [yamlError, setYamlError] = useState("");
 
   // One file, holding every card's choices. It is written from the LIVE
   // server-side config, which is why it can cover four cards from here
   // without this one knowing anything about them.
-  // The unattended retrain, and the last pass of it.
-  const [retrain, setRetrain] = useState<Track2RetrainStatus | null>(null);
-  // The flag that actually gates the after-a-pull retrain.
-  const [afterPull, setAfterPull] = useState<Track2QueueAfterPull | null>(null);
-  const [lastRun, setLastRun] = useState<Track2RetrainRun | null>(null);
 
   // The settings-file controls that lived here are gone; the pinned
   // toolbar owns them. `settingsFiles` is still LISTED, because the card
@@ -229,26 +195,38 @@ export function Track2RetentionPanel({
   // on open made every shut card claim the policy was off.
   useEffect(() => { void load(); }, [open, load]);
 
+  // Re-read whenever the policy changes, and after the auto-save has had
+  // time to land: the server selects with the SAVED policy, which is the
+  // one the chain uses. `enabled` decides file lists or week folders --
+  // the same switch the chain reads, so the preview cannot show one
+  // while the run builds the other.
+  useEffect(() => {
+    if (!yamlOpen || !root) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setYamlBusy(true);
+      buildTrack2DatasetYaml({ root, apply_retention: enabled })
+        .then((got) => {
+          if (cancelled) return;
+          setBuilt(got);
+          setYamlError("");
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setBuilt(null);
+          setYamlError(err instanceof ApiError ? err.detail : "Could not read the weeks.");
+        })
+        .finally(() => { if (!cancelled) setYamlBusy(false); });
+    }, 1200);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [yamlOpen, root, enabled, policyJson]);
+
   // Which buckets the stack grants reads to. Mirrors the Golden Set
   // card, which is where these folders are written in the first place.
   useEffect(() => {
     if (!open) return;
     getTrack2Buckets().then((r) => setBuckets(r.buckets)).catch(() => undefined);
   }, [open]);
-
-  const loadRetrain = useCallback(async () => {
-    try {
-      setRetrain(await getTrack2Retrain());
-      setAfterPull(await getTrack2QueueAfterPull());
-    } catch {
-      setRetrain(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    void loadRetrain();
-  }, [open, loadRetrain]);
 
   const loadSettingsFiles = useCallback(async () => {
     try {
@@ -373,11 +351,11 @@ export function Track2RetentionPanel({
             thinned.
           </p>
           <p className="mt-2">
-            <strong>2. Build the data.yaml.</strong> This is the file the
-            trainer reads. <em>Build it</em> shows what it would be,{" "}
-            <em>Save to S3</em> writes it. With &ldquo;Apply the retention
-            policy&rdquo; ticked it also writes the exact image list, which is
-            what makes the decay reach the run at all.
+            <strong>2. Check the data.yaml preview.</strong> This is the file
+            the trainer reads, shown as it would be built. Nothing is written
+            here: the run builds it when it is queued or the schedule fires,
+            applying the retention policy first when it is on -- the exact
+            image list is what makes the decay reach the run at all.
           </p>
           <p className="mt-2">
             <strong>3. Freeze it</strong> under Repeatable runs, so the same
@@ -385,8 +363,10 @@ export function Track2RetentionPanel({
             grown.
           </p>
           <p className="mt-2">
-            <strong>4. Press <em>Use for training</em></strong>, which hands the
-            folder to the training card below.
+            <strong>4. Let it run.</strong> With{" "}
+            <em>PULL, BUILD, QUEUE, TRAIN</em> at the top on a schedule (or
+            when files arrive), each pull rebuilds the lists and the yaml from
+            the ticked sources, queues a run and starts it -- nothing to press.
           </p>
           <p className="mt-2">
             <em>Save settings</em> near the bottom saves every card&apos;s
@@ -990,12 +970,16 @@ export function Track2RetentionPanel({
           )}
 
           {/* ------------------------------------------- data.yaml ----- */}
+          {/* A PREVIEW, like "What will be built" on Assemble a dataset
+              (2026-10-26). Build it, Save to S3 and Use for training are
+              gone: the run builds this file itself -- the retention lists
+              first when the policy is on, then the yaml pointing at them. */}
           <div className="rounded-md border border-hairline p-3">
             <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs font-medium text-ink">
                 data.yaml for training{" "}
                 <span className="font-normal text-ink-muted">
-                  (points at the weeks where they are)
+                  (preview -- points at the weeks where they are)
                 </span>
               </p>
               <button type="button" onClick={() => setYamlOpen((v) => !v)}
@@ -1007,152 +991,50 @@ export function Track2RetentionPanel({
             {yamlOpen && (
               <>
                 <p className="mb-2 text-xs text-ink-muted">
-                  Builds a <span className="tabular">data.yaml</span> naming every
-                  week folder under{" "}
-                  <span className="tabular">{root || "the root"}</span> --{" "}
-                  <span className="tabular">images/train</span> for train,{" "}
-                  <span className="tabular">images/val</span> for val. Nothing is
-                  copied and no folder is created: an Ultralytics{" "}
-                  <span className="tabular">train:</span> takes a list of image
-                  directories, so the weeks are named in place. Class names are
-                  read from the source dataset&apos;s own{" "}
-                  <span className="tabular">data.yaml</span>, because that is where
-                  the indices in your label files came from.
+                  <span className="font-medium text-ink-secondary">
+                    Preview only -- nothing is written.
+                  </span>{" "}
+                  The run builds this data.yaml itself when you press{" "}
+                  <em>Add to Queue</em> and each time the schedule fires.{" "}
+                  {enabled ? (
+                    <>
+                      The retention policy is on, so it is applied first:{" "}
+                      <span className="tabular">_retained/train.txt</span> and{" "}
+                      <span className="tabular">val.txt</span> are written holding
+                      exactly the images the decay kept, and the data.yaml points
+                      at those lists.
+                    </>
+                  ) : (
+                    <>
+                      The retention policy is off, so the data.yaml names every
+                      week folder whole.
+                    </>
+                  )}{" "}
+                  Nothing is copied: Ultralytics finds each label by swapping{" "}
+                  <span className="tabular">/images/</span> for{" "}
+                  <span className="tabular">/labels/</span>. Updates as the
+                  policy above changes.
                 </p>
 
-                <label className="mb-2 flex items-start gap-2 text-xs text-ink-secondary">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 shrink-0"
-                    checked={applyRetention}
-                    onChange={(e) => setApplyRetention(e.target.checked)}
-                  />
-                  <span>
-                    Apply the retention policy
-                    <span className="block text-ink-muted">
-                      Writes <span className="tabular">_retained/train.txt</span> and{" "}
-                      <span className="tabular">val.txt</span> holding exactly the
-                      images the decay chose, and points the yaml at them.
-                      Ultralytics reads a split entry that is a FILE as a list of
-                      image paths, one per line, and finds each label by swapping{" "}
-                      <span className="tabular">/images/</span> for{" "}
-                      <span className="tabular">/labels/</span> -- so a list may
-                      cross week folders freely. Off, the yaml names the week
-                      folders whole and the decay reaches nothing.
-                    </span>
-                  </span>
-                </label>
-
-                {/* The class list, editable before it is written.
-                    NAMES only, deliberately. A label line reads
-                    `2 0.51 0.22 ...` and means "class 2", so the INDEX is
-                    what every label file carries and the name is only
-                    what that number is called. Renaming index 2 renames
-                    every box numbered 2 -- which is the useful edit.
-                    Adding or removing entries changes what the numbers
-                    refer to, and is how a dataset silently starts
-                    training the wrong thing, so it is not offered here:
-                    training on a subset is what a detector plus the
-                    class filter does. */}
-                {Object.keys(classNames).length > 0 && (
-                  <div className="mb-2 rounded-md border border-black/10 p-2">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <p className="text-xs font-medium text-ink">
-                        Model Names written into the yaml
-                      </p>
-                      {classesEdited && (
-                        <button type="button"
-                          onClick={() => { setClassesEdited(false); setBuilt(null); }}
-                          className="text-xs font-medium text-ink-secondary underline">
-                          Reset to the dataset&apos;s own
-                        </button>
-                      )}
-                    </div>
-                    <div className="mt-1 flex flex-col gap-1">
-                      {Object.keys(classNames)
-                        .sort((a, b) => Number(a) - Number(b))
-                        .map((index) => (
-                          <label key={index} className="flex items-center gap-2 text-xs">
-                            <span className="tabular w-8 shrink-0 text-right text-ink-muted">
-                              {index}
-                            </span>
-                            <input
-                              className="tabular min-w-0 flex-1 rounded border border-black/15 bg-page px-2 py-1 text-xs"
-                              value={classNames[index]}
-                              onChange={(e) => {
-                                setClassNames((c) => ({ ...c, [index]: e.target.value }));
-                                setClassesEdited(true);
-                              }}
-                            />
-                          </label>
-                        ))}
-                    </div>
-                    <p className="mt-1 text-xs text-ink-muted">
-                      The number on the left is what the label files carry, and
-                      it cannot be changed here -- renaming index 2 renames every
-                      box already numbered 2. Press <strong>Build it</strong>{" "}
-                      to see the yaml these produce, then <strong>Save to S3</strong>.
-                    </p>
-                  </div>
+                {yamlBusy && (
+                  <p className="mb-1 text-xs text-ink-muted">checking the weeks...</p>
                 )}
-
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <button type="button" disabled={!!busy || !root}
-                    onClick={() => withBusy("Reading...", async () => {
-                      const got = await buildTrack2DatasetYaml({
-                        root,
-                        apply_retention: applyRetention,
-                        // Only once edited: otherwise a rebuild would
-                        // send back the names it just derived, and a
-                        // dataset whose own yaml had changed could never
-                        // correct the card.
-                        names: classesEdited ? classNames : undefined,
-                      });
-                      if (!classesEdited) setClassNames(got.classes.names ?? {});
-                      setBuilt(got);
-                      setNote(`${got.train_images.toLocaleString()} training and `
-                        + `${got.val_images.toLocaleString()} evaluation images `
-                        + `across ${got.train_weeks.length + got.val_weeks.length} week folders.`);
-                    })}
-                    className="rounded-md border border-black/15 px-3 py-1.5 text-xs font-medium text-ink-secondary disabled:opacity-40">
-                    Build it
-                  </button>
-                  <button type="button" disabled={!!busy || !built?.ready}
-                    onClick={() => withBusy("Writing...", async () => {
-                      const got = await saveTrack2DatasetYaml({
-                        root,
-                        apply_retention: applyRetention,
-                        names: classesEdited ? classNames : undefined,
-                      });
-                      setBuilt(got);
-                      setNote(`Written to ${got.written?.uri}`);
-                    })}
-                    className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40">
-                    Save to S3
-                  </button>
-                  {onUseForTraining && built?.ready && (
-                    <button type="button"
-                      onClick={() => {
-                        onUseForTraining(root);
-                        setNote(`Training will read ${root}/data.yaml. `
-                          + `Pick a Model Name below and submit.`);
-                      }}
-                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white">
-                      Use for training
-                    </button>
-                  )}
-                  {built && (
-                    <span className="tabular text-xs text-ink-muted">
-                      {built.write_to}
-                    </span>
-                  )}
-                </div>
+                {yamlError && <p className="mb-1 text-xs text-critical">{yamlError}</p>}
+                {!root && (
+                  <p className="text-xs text-ink-muted">
+                    No root yet -- set the folder the weeks sit under above.
+                  </p>
+                )}
 
                 {built && (
                   <>
+                    <pre className="tabular overflow-x-auto rounded-md border border-black/15 bg-page p-2 text-xs leading-5 text-ink-secondary">
+{yamlTree(built, root)}
+                    </pre>
+
                     {built.problems.map((problem) => (
                       <p key={problem.text}
-                         className={`mb-1 text-xs ${
+                         className={`mt-1 text-xs ${
                            problem.level === "blocking" ? "text-critical" : "text-ink-secondary"
                          }`}>
                         {problem.level === "blocking" ? "Blocking: " : "Note: "}
@@ -1160,83 +1042,68 @@ export function Track2RetentionPanel({
                       </p>
                     ))}
 
-                    {/* The file itself. The whole point of the card is
-                        that the paths can be read before anything trains
-                        on them. */}
-                    <pre className="tabular max-h-72 overflow-auto rounded-md border border-black/15 bg-page p-2 text-xs leading-5 text-ink-secondary">
-{built.yaml}
-                    </pre>
-
-                    <p className="tabular mt-1 text-xs text-ink-muted">
-                      A trainer reads this after downloading{" "}
-                      <span className="text-ink-secondary">{built.download_prefix}</span>
-                    </p>
-
-                    {built.retained && (
-                      <div className="mt-2 rounded-md border border-black/10 p-2">
-                        <p className="text-xs font-medium text-ink">
-                          The policy selected{" "}
-                          <span className="tabular">
-                            {built.retained.train.toLocaleString()}
-                          </span>{" "}
-                          of{" "}
-                          <span className="tabular">
-                            {built.retained.train_available.toLocaleString()}
-                          </span>{" "}
-                          training images
-                        </p>
-                        <p className="text-xs text-ink-muted">
-                          The val side is taken whole --{" "}
-                          <span className="tabular">
-                            {built.retained.val.toLocaleString()}
-                          </span>{" "}
-                          images. One that shrinks week by week makes every run's
-                          numbers incomparable with the last.
-                        </p>
-                        <div className="mt-1 flex flex-col gap-0.5">
-                          {built.retained.weeks
-                            .filter((w) => w.available > 0)
-                            .map((w) => (
-                              <p key={w.week} className="tabular text-xs text-ink-secondary">
-                                <span className="inline-block w-24">{w.week}</span>
-                                <span className="inline-block w-16">{w.age_weeks}w old</span>
-                                {w.keep.toLocaleString()} of {w.available.toLocaleString()}
-                                {w.keep < w.available && (
-                                  <span className="text-ink-muted">
-                                    {"  "}-- {(w.available - w.keep).toLocaleString()} left out
-                                  </span>
-                                )}
-                              </p>
-                            ))}
-                        </div>
-                        {built.retained.written && (
-                          <p className="tabular mt-1 text-xs text-ink-muted">
-                            {Object.values(built.retained.written)
-                              .map((f) => `${f.key} (${f.lines.toLocaleString()} lines)`)
-                              .join("   ")}
-                          </p>
-                        )}
+                    {/* One row per week, as Assemble lists one per source:
+                        a single total hides an empty week among full ones. */}
+                    {built.retained ? (
+                      <div className="mt-2 flex flex-col gap-0.5">
+                        {built.retained.weeks
+                          .filter((w) => w.available > 0)
+                          .map((w) => (
+                            <p key={w.week} className="tabular text-xs text-ink-secondary">
+                              <span className="inline-block w-24 font-medium text-ink">{w.week}</span>
+                              <span className="inline-block w-16">{w.age_weeks}w old</span>
+                              {w.keep.toLocaleString()} of {w.available.toLocaleString()} kept
+                              {w.keep < w.available && (
+                                <span className="text-ink-muted">
+                                  {"  "}-- {(w.available - w.keep).toLocaleString()} left out
+                                </span>
+                              )}
+                            </p>
+                          ))}
                       </div>
-                    )}
-
-                    {!built.retained
-                      && (built.train_weeks.length > 0 || built.val_weeks.length > 0) && (
+                    ) : (
                       <div className="mt-2 flex flex-col gap-0.5">
                         {[["train", built.train_weeks], ["val", built.val_weeks]]
                           .flatMap(([split, weeks]) =>
                             (weeks as Track2DatasetYaml["train_weeks"]).map((w) => (
                               <p key={`${split}-${w.week}`}
-                                 className="tabular text-xs text-ink-muted">
-                                <span className="inline-block w-10">{split as string}</span>
+                                 className={`tabular text-xs ${w.unlabelled ? "text-critical" : "text-ink-secondary"}`}>
+                                <span className="inline-block w-10 font-medium text-ink">{split as string}</span>
                                 <span className="inline-block w-24">{w.week}</span>
-                                {w.images.toLocaleString()} img, {w.labels.toLocaleString()} lbl
-                                {w.unlabelled && (
-                                  <span className="ml-2 text-critical">no labels</span>
-                                )}
+                                {w.images.toLocaleString()} images, {w.labels.toLocaleString()} labels
+                                {w.unlabelled && <span className="ml-2">no labels</span>}
                               </p>
                             )))}
                       </div>
                     )}
+
+                    <p className="tabular mt-2 text-xs text-ink">
+                      Total:{" "}
+                      <span className="font-medium">
+                        {(built.retained?.train ?? built.train_images).toLocaleString()}
+                      </span>{" "}
+                      training,{" "}
+                      <span className="font-medium">
+                        {(built.retained?.val ?? built.val_images).toLocaleString()}
+                      </span>{" "}
+                      evaluation images
+                      {built.retained && (
+                        <span className="text-ink-muted">
+                          {" "}(of {built.retained.train_available.toLocaleString()} training
+                          available -- the val side is taken whole, so every run is
+                          scored on the same images)
+                        </span>
+                      )}
+                    </p>
+
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs text-ink-secondary">
+                        The data.yaml text
+                      </summary>
+                      <pre className="tabular mt-1 max-h-72 overflow-auto rounded-md border border-black/15 bg-page p-2 text-xs leading-5 text-ink-secondary">
+{built.yaml}
+                      </pre>
+                    </details>
                   </>
                 )}
               </>
@@ -1318,228 +1185,11 @@ export function Track2RetentionPanel({
               </span>
             </label>
 
-            {/* ------------------------------------ automation ----- */}
-            {/* The same three steps the buttons do -- rebuild the
-                data.yaml, freeze it, submit a run -- run for you. Run
-                now uses the identical function the schedule does, so
-                "it works when I press it" actually says something about
-                whether the schedule works. */}
-            <div className="mt-3 rounded-md border border-black/10 bg-page p-2.5">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <p className="text-xs font-medium text-ink">
-                  Do it automatically{" "}
-                  <span className="font-normal text-ink-muted">
-                    (rebuild the lists &rarr; build a new data.yaml &rarr; freeze
-                    a snapshot &rarr; queue it &rarr; start it)
-                  </span>
-                </p>
-                <button type="button" disabled={!!busy}
-                  onClick={() => withBusy("Running...", async () => {
-                    const got = await runTrack2Retrain();
-                    setLastRun(got);
-                    const failed = got.steps.find((step) => !step.ok);
-                    setNote(got.ok
-                      ? `Rebuilt, frozen as ${got.snapshot_id}, and submitted.`
-                      : `Stopped at "${failed?.step}": ${failed?.detail}`);
-                  })}
-                  className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40">
-                  Run it now
-                </button>
-              </div>
-
-              {/* The "Continue from <group>" dropdown was here. Removed:
-                  step 1 already asks which version a run starts from and
-                  stores it, so this was two controls for one decision
-                  with nothing forcing them to agree -- and they did not.
-                  Step 1 said version 2 while the chain took the newest
-                  Approved one, and the queued entry carried step 1's
-                  note, "This trains from version 2", over a run that
-                  started from v7. `settings()` now reads step 1. */}
-
-              <label className="mt-2 flex items-start gap-2 text-xs text-ink-secondary">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 shrink-0"
-                  /* Bound to queue_after_pull.enabled, NOT
-                     retrain_schedule.enabled. This box used to write the
-                     latter, which NOTHING READS -- ticking it did nothing
-                     and unticking it stopped nothing, while the note
-                     underneath confidently said it would run after each
-                     pull. The gate that decides is queue_after_pull's own
-                     flag, so this now writes that one. */
-                  checked={Boolean(afterPull?.settings.enabled)}
-                  disabled={!!busy}
-                  onChange={(e) => withBusy("Saving...", async () => {
-                    setAfterPull(await saveTrack2QueueAfterPull({
-                      enabled: e.target.checked,
-                    }));
-                    setNote(e.target.checked
-                      ? "On -- after each completed pull it rebuilds the lists "
-                        + "and the data.yaml, freezes a snapshot, queues ONE "
-                        + "run and starts it. Unattended GPU time: a run holds "
-                        + "the single GPU until it finishes."
-                      : "Off -- nothing is queued unless you press Run it now.");
-                  })}
-                />
-                <span>
-                  Run after every scheduled pull
-                  <span className="block text-ink-muted">
-                    Chained to the pull rather than on a clock of its own, so
-                    it cannot start half way through a sweep and train on a
-                    week that is still filling. It rebuilds the lists and the
-                    data.yaml, freezes a snapshot, queues one run and starts
-                    it. Which pulls set it off is chosen below.
-                  </span>
-                </span>
-              </label>
-
-              {/* WHICH pulls chain, and the two guards that make the
-                  arrival trigger a sane choice rather than a way to
-                  spend a day of GPU on somebody uploading photos one at
-                  a time. Shown only when the chain is on: three controls
-                  qualifying a switch that is off are three controls
-                  nobody needs to read. */}
-              {afterPull?.settings.enabled && (
-                <div className="mt-2 rounded-md border border-hairline p-2">
-                  <p className="text-xs font-medium text-ink">Which pulls chain</p>
-                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
-                    {([
-                      ["schedule", "On a schedule"],
-                      ["arrival", "When files arrive"],
-                      ["manual", "Pull now (by hand)"],
-                    ] as const).map(([trigger, label]) => {
-                      const chosen = afterPull.settings.triggers ?? ["schedule"];
-                      return (
-                        <label key={trigger}
-                               className="flex items-center gap-1.5 text-xs text-ink-secondary">
-                          <input
-                            type="checkbox"
-                            checked={chosen.includes(trigger)}
-                            disabled={!!busy}
-                            onChange={(e) => withBusy("Saving...", async () => {
-                              const next = e.target.checked
-                                ? Array.from(new Set([...chosen, trigger]))
-                                : chosen.filter((t) => t !== trigger);
-                              if (next.length === 0) {
-                                setNote("Pick at least one, or switch the chain "
-                                        + "off above -- no triggers reads as on "
-                                        + "while doing nothing.");
-                                return;
-                              }
-                              setAfterPull(await saveTrack2QueueAfterPull({ triggers: next }));
-                              setNote(next.includes("arrival")
-                                ? "Arrival is on. Set a batch size below: an "
-                                  + "arrival pull fires per upload, so one photo "
-                                  + "would otherwise be one GPU run."
-                                : `Chains on: ${next.join(", ")}.`);
-                            })}
-                          />
-                          {label}
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-ink-muted">
-                        Files that count as a batch
-                      </span>
-                      <input
-                        type="number"
-                        min={1}
-                        defaultValue={afterPull.settings.min_files ?? 1}
-                        disabled={!!busy}
-                        className="tabular w-full rounded-md border border-black/15 bg-page px-2 py-1.5 text-xs"
-                        onBlur={(e) => withBusy("Saving...", async () => {
-                          const value = Math.max(1, Number(e.target.value) || 1);
-                          setAfterPull(await saveTrack2QueueAfterPull({ min_files: value }));
-                          setNote(`A pull now needs to move ${value} file${value === 1 ? "" : "s"} to chain.`);
-                        })}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-ink-muted">
-                        Wait between runs (minutes)
-                      </span>
-                      <input
-                        type="number"
-                        min={0}
-                        defaultValue={afterPull.settings.cooldown_minutes ?? 0}
-                        disabled={!!busy}
-                        className="tabular w-full rounded-md border border-black/15 bg-page px-2 py-1.5 text-xs"
-                        onBlur={(e) => withBusy("Saving...", async () => {
-                          const value = Math.max(0, Number(e.target.value) || 0);
-                          setAfterPull(await saveTrack2QueueAfterPull({ cooldown_minutes: value }));
-                          setNote(value
-                            ? `At most one chained run every ${value} minutes.`
-                            : "No wait between chained runs.");
-                        })}
-                      />
-                    </label>
-                  </div>
-
-                  <p className="mt-1.5 text-xs text-ink-muted">
-                    The two guards matter most for <em>when files arrive</em>,
-                    which fires once per upload burst. Three arrival pulls
-                    fired in ten minutes on 6 October, one of them moving a
-                    single file -- without a batch size each would have been
-                    a GPU run.
-                  </p>
-                </div>
-              )}
-
-              {/* Everything that would stop it, before it is due rather
-                  than after it failed to happen. A schedule whose
-                  failures are silent reads as "the model is being
-                  retrained" right up until somebody checks. */}
-              {retrain && retrain.problems.length > 0 && (
-                <div className="mt-2 flex flex-col gap-0.5">
-                  {retrain.problems.map((problem) => (
-                    <p key={problem.text}
-                       className={problem.level === "blocking"
-                         ? "text-xs text-critical" : "text-xs text-ink-muted"}>
-                      {problem.level === "blocking" ? "Blocked: " : "Note: "}
-                      {problem.text}
-                    </p>
-                  ))}
-                </div>
-              )}
-
-              {/* Gated on the SAME flag as the checkbox above. It used to
-                  read `retrain.settings.enabled` -- `retrain_schedule`'s
-                  own flag, which nothing writes any more since the box
-                  was repointed at `queue_after_pull`. So the one line
-                  that says what is about to be trained could never
-                  appear, exactly when somebody was checking. */}
-              {afterPull?.settings.enabled && retrain?.ready && (
-                <p className="tabular mt-2 text-xs text-ink-muted">
-                  Trains {retrain.settings.detector_slug || "(no Model Name)"} on{" "}
-                  {retrain.settings.architecture}, {retrain.settings.epochs} epochs.
-                </p>
-              )}
-
-              {/* The last pass, step by step. A chain that stopped half
-                  way should say where -- the steps before it worked, and
-                  that is exactly what makes a partial run confusing. */}
-              {lastRun && (
-                <div className="mt-2 border-t border-hairline pt-1.5">
-                  <p className="text-xs text-ink-muted">
-                    Last run ({lastRun.trigger},{" "}
-                    {formatDayTime(lastRun.at)})
-                  </p>
-                  {lastRun.steps.map((step) => (
-                    <p key={step.step}
-                       className={step.ok
-                         ? "tabular text-[11px] text-ink-secondary"
-                         : "tabular text-[11px] text-critical"}>
-                      <span className="inline-block w-20">{step.step}</span>
-                      {step.ok ? "ok" : "failed"} -- {step.detail}
-                    </p>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* "Do it automatically" was here -- removed 2026-10-26. The
+                PULL, BUILD, QUEUE, TRAIN strip at the top is the one
+                switch now: a scheduled (or arrival) pull rebuilds, queues
+                and starts a run from the ticked sources by itself. The
+                arrival guards moved onto the strip with it. */}
 
             {/* The frozen-snapshot list and the list of runs sent were
                 here. Removed 2026-10-20: snapshots are loaded and run from
@@ -1550,4 +1200,36 @@ export function Track2RetentionPanel({
       )}
     </Card>
   );
+}
+
+
+/** The preview as a tree, the shape "What will be built" draws on the
+ * Assemble card: the root, the yaml, and what each split names. */
+function yamlTree(built: Track2DatasetYaml, root: string): string {
+  const names = Object.values(built.classes.names ?? {}).join(", ") || "(none found)";
+  const lines = [`${root || "<root>"}/`, `├── data.yaml        names: ${names}`];
+  if (built.retained) {
+    const r = built.retained;
+    lines.push(
+      `├── _retained/train.txt  ${r.train.toLocaleString()} of `
+        + `${r.train_available.toLocaleString()} training images (the decay's pick)`,
+      `├── _retained/val.txt    ${r.val.toLocaleString()} evaluation images (all of them)`,
+    );
+  }
+  const weeks = Array.from(new Set([
+    ...built.train_weeks.map((w) => w.week),
+    ...built.val_weeks.map((w) => w.week),
+  ])).sort();
+  weeks.forEach((week, i) => {
+    const last = i === weeks.length - 1;
+    const train = built.train_weeks.find((w) => w.week === week);
+    const val = built.val_weeks.find((w) => w.week === week);
+    const parts = [
+      train ? `train ${train.images.toLocaleString()}` : "",
+      val ? `val ${val.images.toLocaleString()}` : "",
+    ].filter(Boolean).join(" · ");
+    lines.push(`${last ? "└──" : "├──"} ${week}/`.padEnd(24) + ` ${parts} images`);
+  });
+  if (!weeks.length) lines.push("└── (no week folders found)");
+  return lines.join("\n");
 }

@@ -48,7 +48,8 @@ def test_retentions_path_list_is_the_pulls_contribution_when_retention_is_on():
 
 def test_the_week_folders_whole_are_the_contribution_when_it_is_off():
     code = _chain()
-    assert 'for week in dy.scan_root(root, bucket=config.get("source_bucket") or ""): pull_entries.append({"images": week["images_path"], "labels": week["labels_path"]})' in code
+    # ...skipping weeks unticked on the Auto Training card.
+    assert 'for week in [w for w in dy.scan_root(root, bucket=config.get("source_bucket") or "") if w["week"] not in set(retention["excluded_weeks"])]: pull_entries.append({"images": week["images_path"], "labels": week["labels_path"]})' in code
 
 
 def test_the_golden_train_side_joins_training_here_too():

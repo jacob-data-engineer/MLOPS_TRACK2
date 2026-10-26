@@ -461,7 +461,39 @@ def get_auto_export(session=Depends(require_session)) -> dict:
         # A registry that cannot be read is not a watcher that is off.
         decision = {"act": False, "reason": f"Could not read the registry: {exc}",
                     "version": 0}
-    return {"settings": plan, "pending": decision}
+    # The running count of .pt files where it writes -- and in archive/.
+    # None when there is nowhere to count yet, or the folder cannot be read.
+    counts = None
+    if plan.get("bucket") and plan.get("group_name"):
+        try:
+            counts = mx.export_counts(plan["bucket"], plan.get("prefix") or "",
+                                      plan["group_name"])
+        except Exception as exc:                                   # noqa: BLE001
+            print(f"Could not count exports: {exc}")
+    # The version in the folder, scored by the measure the watcher ranks
+    # on -- and the group's best by that measure now, beside it. Cached for
+    # a minute: the card polls every 30s, and this is a describe and an S3
+    # read per version. The WATCHER never takes the cache (see
+    # group_versions); only this display does.
+    if counts is not None:
+        try:
+            criterion = str(plan.get("criterion") or "")
+            rows = mx.group_versions(plan["group_name"], max_age=60)
+            keep = ("version", "value", "validation_images", "thin_validation")
+            latest = counts.get("latest")
+            if latest:
+                row = next((r for r in rows
+                            if str(r.get("version")) == str(latest["version"])), None)
+                if row:
+                    picked = mx.describe_pick(row, criterion)
+                    latest.update({k: picked[k] for k in keep if k != "version"})
+            best, _why = mx.pick_best(rows, criterion)
+            counts["best"] = ({k: mx.describe_pick(best, criterion)[k] for k in keep}
+                              if best else None)
+            counts["criterion"] = criterion
+        except Exception as exc:                                   # noqa: BLE001
+            print(f"Could not score the exported version: {exc}")
+    return {"settings": plan, "pending": decision, "counts": counts}
 
 
 @router.post("/export/auto/arm")

@@ -203,4 +203,15 @@ def test_the_job_list_is_in_start_order():
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1] / "web" / "src"
            / "components" / "Track2TrainingCostToday.tsx").read_text(encoding="utf-8")
-    assert '.sort((a, b) => (a.started_at ?? "\uffff").localeCompare(b.started_at ?? "\uffff"))' in src
+    assert '.sort((a, b) => (a.started_at ?? "\uffff").localeCompare(b.started_at ?? "\uffff")' in src
+    # ...and either way round, chosen on the card (2026-10-26).
+    assert '* (newestFirst ? -1 : 1))' in src
+    assert 'useCardOpen("cost_today_newest_first", false)' in src
+
+
+def test_the_history_buttons_say_what_they_export():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1] / "web" / "src"
+           / "components" / "Track2TrainingAuditPanel.tsx").read_text(encoding="utf-8")
+    assert "Export training record as CSV" in src
+    assert '"Export .pt to S3"' in src

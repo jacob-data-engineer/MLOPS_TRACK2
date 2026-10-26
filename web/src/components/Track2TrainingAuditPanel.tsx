@@ -274,7 +274,7 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
           className="flex shrink-0 items-center gap-1.5 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04] disabled:opacity-40"
         >
           {exporting && <Loader2 size={12} className="animate-spin" />}
-          Export CSV
+          Export training record as CSV
         </button>
         {/* Only where a model actually came out of the run. */}
         {audit.model && (
@@ -296,7 +296,7 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
             title="Copy the .pt into a folder in the bucket"
             className="shrink-0 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04]"
           >
-            {exportOpen ? "Cancel export" : "Export to S3"}
+            {exportOpen ? "Cancel export" : "Export .pt to S3"}
           </button>
         )}
         <button

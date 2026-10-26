@@ -225,6 +225,78 @@ def _now() -> _dt.datetime:
 from .queue_after_pull import DEFAULTS as DEFAULTS_AFTER_PULL  # noqa: E402
 
 
+def excluded_weeks(config: dict) -> list:
+    """Week folders unticked on the Auto Training card. Every reader of the
+    week folders has to honour these -- see `retained_lists.select`."""
+    return sorted(str(w) for w in ((config.get("auto_training") or {}).get("excluded") or []))
+
+
+def pull_train_entries(config: dict, root: str, *, write: bool) -> dict:
+    """Pull Control's contribution to the TRAINING side, as the run names it.
+
+    One function for the chain and the Assemble card's preview, so the
+    preview shows the weeks exactly as the run will read them:
+
+      retention ON  -- one entry, the path list `<root>/train.txt` holding
+                       exactly the images the decay keeps. Ultralytics
+                       reads a .txt entry as a list of image paths.
+      retention OFF -- every week folder, whole.
+
+    `write` is the only difference. The chain writes the list (it trains
+    on it); the preview only SELECTS, and reports how many the list will
+    hold -- the file in S3 is whatever the last build left there.
+    """
+    from . import dataset_yaml as dy
+    from . import retained_lists as rl
+
+    retention = {**(config.get("retention") or {}),
+                 "week_prefix": str(config.get("week_prefix") or "week_"),
+                 "excluded_weeks": excluded_weeks(config)}
+    skip = set(retention["excluded_weeks"])
+    if retention.get("enabled"):
+        if write:
+            chosen = rl.write(root=root, config=retention)
+            # The FULL key. In a composed yaml the entries are full key
+            # paths, because the downloader keeps full paths once there is
+            # more than one prefix. The list's own lines are `./<path>`
+            # and resolve against the file's parent either way.
+            entry = chosen["train_entry"].strip("/")
+        else:
+            chosen = rl.select(root=root, config=retention)
+            entry = f"{rl.FOLDER}/{rl.TRAIN_NAME}" if rl.FOLDER else rl.TRAIN_NAME
+        images = f"{root}/{entry}" if entry else root
+        return {"entries": [{"images": images, "labels": ""}],
+                "used": f"{len(chosen['train'])} retained images",
+                "retained": {"entry": images, "images": len(chosen["train"]),
+                             "available": chosen.get("train_available"),
+                             # Which week folders the list draws from, and
+                             # how many of each the decay keeps -- the list
+                             # file alone hides them.
+                             "weeks": [{"folder": f"{root}/{w['week']}",
+                                        "keep": int(w.get("keep") or 0),
+                                        "available": int(w.get("available") or 0)}
+                                       for w in chosen.get("weeks") or []
+                                       if w.get("available") and not w.get("excluded")]}}
+    weeks = [w for w in dy.scan_root(root, bucket=config.get("source_bucket") or "")
+             if w["week"] not in skip]
+    return {"entries": [{"images": w["images_path"], "labels": w["labels_path"]}
+                        for w in weeks],
+            "used": f"{len(weeks)} week folder" + ("s" if len(weeks) != 1 else ""),
+            "retained": None}
+
+
+def automatic(config: dict) -> dict:
+    """The config an UNATTENDED run builds from (2026-10-26).
+
+    Always composed from the ticked sources -- the pull's week folders,
+    the golden set and the Assemble card's folders, each when its card is
+    ticked -- whatever step 6's Training data radio says. The radio's
+    frozen-snapshot options are for a run queued by hand; an automatic
+    run is there to train on what has arrived.
+    """
+    return {**config, "data_source": "assembled"}
+
+
 def data_source(config: dict) -> str:
     """Which of the three "Training data" options is ticked.
 
@@ -738,6 +810,8 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
     # Which folders are weeks. Pull Control's setting, carried in so the
     # retention lists skip `_retained/` and anything else under the root.
     retention["week_prefix"] = str(config.get("week_prefix") or "week_")
+    # ...and which weeks were unticked, which every list it writes skips.
+    retention["excluded_weeks"] = excluded_weeks(config)
 
     # 1. the file lists, then the yaml that points at them. Lists first,
     #    so there is never a moment where the yaml names a file that does
@@ -865,25 +939,9 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
         # rather than as a folder that would train every week whole.
         if picks["pull"] and root:
             try:
-                if retention.get("enabled"):
-                    written = rl.write(root=root, config=retention)
-                    # The FULL key. In a composed yaml the entries are
-                    # full key paths, because the downloader keeps full
-                    # paths once there is more than one prefix. The
-                    # list's own lines are `./<path>` and resolve
-                    # against the file's parent either way.
-                    entry = written["train_entry"].strip("/")
-                    train_entries.append(
-                        {"images": f"{root}/{entry}" if entry else root,
-                         "labels": ""})
-                    used.append(f"{len(written['train'])} retained images")
-                else:
-                    weeks = dy.scan_root(root, bucket=config.get("source_bucket") or "")
-                    for week in weeks:
-                        train_entries.append({"images": week["images_path"],
-                                              "labels": week["labels_path"]})
-                    used.append(f"{len(weeks)} week folder"
-                                + ("s" if len(weeks) != 1 else ""))
+                pulled = pull_train_entries(config, root, write=True)
+                train_entries += pulled["entries"]
+                used.append(pulled["used"])
             except Exception as exc:                           # noqa: BLE001
                 # FATAL. Training on two of the three sources when three
                 # were asked for is a quietly smaller dataset, and the
@@ -1034,7 +1092,8 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
                     pull_entries.append({"images": f"{root}/{entries[0].strip('/')}",
                                          "labels": ""})
                 else:
-                    for week in dy.scan_root(root, bucket=config.get("source_bucket") or ""):
+                    for week in [w for w in dy.scan_root(root, bucket=config.get("source_bucket") or "")
+                                 if w["week"] not in set(retention["excluded_weeks"])]:
                         pull_entries.append({"images": week["images_path"],
                                              "labels": week["labels_path"]})
                 if golden_train:
@@ -1117,7 +1176,8 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
                 built = dy.build(root=root, retained_train=entries[0],
                                  retained_val=entries[1],
                                  class_sources=class_sources,
-                                 source_bucket=config.get("source_bucket") or "")
+                                 source_bucket=config.get("source_bucket") or "",
+                                 excluded_weeks=retention["excluded_weeks"])
                 if not built["ready"]:
                     blocking = "; ".join(p["text"] for p in built["problems"]
                                          if p["level"] == "blocking")
@@ -1802,7 +1862,7 @@ def check_training_schedule(config: dict | None = None) -> dict:
     if not pc.claim_once("training_schedule", slot):
         return {"started": False, "reason": "Another instance has this slot."}
     try:
-        out = run_chain(config=config, trigger="schedule", submit="queue")
+        out = run_chain(config=automatic(config), trigger="schedule", submit="queue")
     except Exception as exc:                                   # noqa: BLE001
         return {"started": False, "slot": slot, "reason": str(exc)}
     return {"started": bool(out.get("ok")), "slot": slot,

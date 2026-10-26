@@ -29,22 +29,11 @@ def _flat() -> str:
 
 # --- 1. the button works -----------------------------------------------------------
 
-def test_write_it_is_not_gated_on_having_previewed():
-    """The preview is for reading the file first. It was a toll gate."""
-    # From the LAST "Preview the yaml" -- the button itself. The earlier
-    # one is in the comment on handleWrite explaining why this changed,
-    # and slicing from it stops before the button rather than at it.
-    code = _flat()
-    # One button now: it previews and writes in the same press.
-    row = code[code.index("onClick={() => void handleWrite()}") - 200:code.index("Generate yaml training file")]
-    assert "!preview" not in row, "the button still waits for a preview"
-
-
 def test_write_it_is_gated_on_the_same_things_the_preview_is():
     """Complete inputs and a Model Name -- the two questions the card
     actually asks."""
     code = _flat()
-    assert code.count("disabled={busy || !complete || !detectorSlug}") == 1
+    assert "if (!chosen || !complete) {" in code
 
 
 def test_the_card_says_why_the_button_is_off():
@@ -57,49 +46,6 @@ def test_the_card_says_why_the_button_is_off():
     # Name card -- so the missing answer points there rather than at a
     # control on this card that no longer exists.
     assert "Pick a Model Name above" in code
-
-
-def test_the_write_checks_before_it_writes():
-    """So an existing data.yaml becomes a dialog naming it, rather than
-    a refusal arriving after the press from a server the button cannot
-    quote."""
-    code = _code()
-    body = code.split("async function handleWrite(")[1][:1600]
-    assert "previewTrack2DatasetYaml(" in body
-    assert "setConfirming(check)" in body
-
-
-def test_the_dialog_is_the_shared_one_not_window_confirm():
-    code = _code()
-    assert "<ConfirmDialog" in code
-    assert "window.confirm" not in code
-
-
-def test_the_dialog_says_what_is_not_touched():
-    """What survives is the sentence that lets somebody press it."""
-    code = _flat()
-    assert "No images or labels are touched" in code
-    assert "no dataset or trained weights are affected" in code
-
-
-def test_the_dialog_names_the_file():
-    code = _code()
-    assert "{confirming?.key}" in code
-
-
-def test_the_dialog_quotes_what_the_server_said_about_the_existing_file():
-    code = _code()
-    assert "confirming?.existing?.bytes" in code
-
-
-def test_confirming_writes_with_force():
-    code = _code()
-    assert "onConfirm={() => void handleWrite(true)}" in code
-
-
-def test_cancel_just_closes_it():
-    code = _code()
-    assert "onCancel={() => setConfirming(null)}" in code
 
 
 def test_the_inline_overwrite_checkbox_is_gone():
@@ -147,7 +93,10 @@ def test_one_button_previews_and_writes():
     """Asked for on 2026-10-20: the separate Preview button removed; the
     one button builds, shows, and writes."""
     code = _code()
-    assert "Generate yaml training file" in code
+    # 2026-10-26: no button at all -- the preview keeps itself current
+    # and the run writes the yaml. Sent with overwrite, as the chain is.
+    assert "Generate yaml training file" not in code
+    assert "previewTrack2DatasetYaml(f, classesOf(), true, dropUndeclared," in code
     assert "onClick={handlePreview}" not in code
     assert "async function handlePreview" not in code
 

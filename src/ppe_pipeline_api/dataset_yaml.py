@@ -25,6 +25,8 @@ import concurrent.futures
 import hashlib
 import json
 
+import re
+
 import yaml
 
 from . import pull_control as pc
@@ -163,7 +165,8 @@ def build(*, training_root: str = "", eval_root: str = "", root: str = "",
           bucket: str = "", source_bucket: str = "", images_subpath: str = "images",
           labels_subpath: str = "labels", class_sources=(),
           names: dict | None = None,
-          retained_train: str = "", retained_val: str = "") -> dict:
+          retained_train: str = "", retained_val: str = "",
+          excluded_weeks=()) -> dict:
     """The yaml, the paths in it, and everything wrong with it.
 
     Writes nothing. The card shows the result and only then offers to
@@ -200,6 +203,14 @@ def build(*, training_root: str = "", eval_root: str = "", root: str = "",
         val_weeks = scan_root(eval_root, bucket=bucket,
                               images_subpath=images_subpath,
                               labels_subpath=labels_subpath) if eval_root else []
+
+    # Weeks unticked on the Auto Training card are not part of the dataset
+    # -- read here so this build, the retention lists and the composed
+    # chain all agree (an unticked week_2 trained anyway until 2026-10-26).
+    skip = set(excluded_weeks or ())
+    if skip:
+        train_weeks = [w for w in train_weeks if w["week"] not in skip]
+        val_weeks = [w for w in val_weeks if w["week"] not in skip]
 
     found = {"names": dict(names or {}), "source": "given", "looked_in": []}
     if not found["names"]:
@@ -408,8 +419,13 @@ class _NoAliasDumper(yaml.SafeDumper):
 
 
 def _dump(document) -> str:
-    return yaml.dump(document, Dumper=_NoAliasDumper, sort_keys=False,
+    text = yaml.dump(document, Dumper=_NoAliasDumper, sort_keys=False,
                      default_flow_style=False)
+    # `nc` is Ultralytics' own key and has to stay `nc`; the comment says
+    # what it is for anyone reading the file (asked for, 2026-10-26). A
+    # YAML comment is ignored on load, so nothing that parses it changes.
+    return re.sub(r"^nc: ([0-9]+)$", lambda m: f"nc: {m.group(1)}  # number of classes", text,
+                  count=1, flags=re.MULTILINE)
 
 
 def _is_path_list(entry: str) -> bool:
