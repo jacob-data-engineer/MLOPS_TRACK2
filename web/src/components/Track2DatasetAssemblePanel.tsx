@@ -982,6 +982,18 @@ export function Track2DatasetAssemblePanel({
         >
           {busy ? "Generating..." : "Generate yaml training file"}
         </button>
+        {/* What the button is FOR, beside it (2026-10-26): Add to Queue
+            and the schedule now generate the yaml themselves, so this is a
+            check, not a step. Accurate about the write -- it does put the
+            file in S3 -- because "preview" alone would promise nothing
+            changes. */}
+        <span className="max-w-md text-xs text-ink-muted">
+          <span className="font-medium text-ink-secondary">For checking only.</span>{" "}
+          Builds the data.yaml now so you can read it and see any class
+          problems. You don&apos;t need to press it: the yaml a run uses is
+          generated again from these settings when you press{" "}
+          <em>Add to Queue</em> in step 6, and when the schedule runs.
+        </span>
         {/* The scheduling tick that used to live here has moved to
             "Enabled for scheduling" beside the Training data radios in
             step 6.

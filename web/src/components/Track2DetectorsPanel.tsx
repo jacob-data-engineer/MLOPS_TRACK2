@@ -68,7 +68,9 @@ export function Track2DetectorsPanel({
   onTraining?: (shape: {
     epochs: number; imgSize: number; batch: number;
     seed: number; patience: number; notes: string;
-    hyperparams: Record<string, string>;
+    /** What the run is sent, typed -- numbers, booleans, freeze as a
+     * count or list. Not the text in the inputs. */
+    hyperparams: ReturnType<typeof effectiveHyperparams>;
   }) => void;
   onChoose?: (
     choice: {

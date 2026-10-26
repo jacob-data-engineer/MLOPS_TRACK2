@@ -4,6 +4,7 @@ import { formatDayTime } from "../lib/format";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Track2DatasetVersionsPanel } from "../components/Track2DatasetVersionsPanel";
 import { ProgressBar } from "../components/ProgressBar";
 import { StatTile } from "../components/StatTile";
 import { Track2AutoTrainingPanel } from "../components/Track2AutoTrainingPanel";
@@ -169,6 +170,19 @@ function QueueEntryBlock({
           <span>Image size: {entry.img_size}</span>
           <span>Batch: {entry.batch}</span>
           <span>Seed: {entry.seed}</span>
+          {/* A versioned entry trains on lists frozen at queue time; its
+              own folder (`_datasets/<id>`) holds only those lists, so the
+              lines below name where the images COME FROM. */}
+          {entry.dataset_version_id && (
+            <span className="col-span-2 truncate sm:col-span-3" title={entry.dataset_version_id}>
+              Dataset version: <span className="font-medium">{entry.dataset_version_id}</span>
+              {entry.dataset_version_train_images !== undefined && (
+                <> &middot; {entry.dataset_version_train_images.toLocaleString()} train /{" "}
+                  {(entry.dataset_version_val_images ?? 0).toLocaleString()} val images,
+                  pinned by name when queued</>
+              )}
+            </span>
+          )}
           <span
             className="col-span-2 truncate sm:col-span-3"
             title={sourceLabel(entry.dataset_source_folders, entry.dataset_folder)}
@@ -193,7 +207,9 @@ function QueueEntryBlock({
               entry.eval_dataset_folder || entry.dataset_folder,
             )}
             {" "}
-            <span className="text-ink-muted">(the val split its data.yaml declares)</span>
+            {!entry.dataset_version_id && (
+              <span className="text-ink-muted">(the val split its data.yaml declares)</span>
+            )}
           </span>
           {/* Which frozen definition, if any. Without it a run on a
               deliberately chosen snapshot was indistinguishable
@@ -212,7 +228,9 @@ function QueueEntryBlock({
               {entry.snapshot_files
                 ? ` · ${entry.snapshot_files.toLocaleString()} images`
                 : ""}
-              {entry.snapshot_pinned
+              {entry.dataset_version_id
+                ? " (a record only -- this run trains on the dataset version above)"
+                : entry.snapshot_pinned
                 ? " pinned by name"
                 : " (recorded automatically: the exact files this run used. The yaml names folders, so a rerun would also pick up files added since)"}
             </span>
@@ -276,7 +294,8 @@ interface TrainingSelection {
   /** Early stopping: epochs without improvement before the run stops
    * itself. 0 leaves it to Ultralytics. */
   patience: number;
-  hyperparams: Record<string, string>;
+  /** Typed, as the run receives them -- see Track2TrainingParams. */
+  hyperparams: NonNullable<Track2TrainingParams["hyperparams"]>;
   datasetFolder: string;
   /** Empty means "evaluate on the training dataset", which is what the
    * pipeline does when no separate set is given. */
@@ -829,12 +848,19 @@ function TrainingForm({
     setBusy(true);
     setError(null);
     try {
-      if (composed) {
-        // `queue`, not `start`: the entry lands in the queue card below
-        // with every other run, and the queue releases it -- the same
-        // hand-over the schedule uses, so pressing this says something
-        // about whether the schedule works.
-        const got = await runTrack2Retrain("queue");
+      // THE ASSEMBLED DATASET IS GENERATED HERE, not taken from whenever
+      // "Generate yaml training file" was last pressed (2026-10-26). The
+      // chain rebuilds the data.yaml from the Assemble card's saved
+      // settings -- the same build the schedule runs -- freezes it, and
+      // queues it. That is also what carries the card's "filter
+      // undeclared classes" tick to the run; queueing a stale folder
+      // dropped it, and the trainer refused labels the yaml did not name.
+      //
+      // `queue` for a composed run (it also releases the queue, as it
+      // always has); `enqueue` otherwise, which leaves the queue as it was
+      // -- the meaning Add to Queue had before.
+      if (dataSource === "assembled") {
+        const got = await runTrack2Retrain(composed ? "queue" : "enqueue");
         const failed = got.steps.find((step) => !step.ok);
         if (!got.ok || failed) {
           // The step that stopped it, in its own words. "Add to queue
@@ -1396,6 +1422,14 @@ function TrainingForm({
           entry and releases the queue -- the same hand-over the
           schedule uses. Said here so the label change is not a
           surprise. */}
+      {dataSource === "assembled" && !composed && (
+        <p className="mt-3 text-xs text-ink-muted">
+          Add to Queue generates the data.yaml from <em>Assemble a dataset</em>{" "}
+          first -- from the folders, classes and filter saved there right now --
+          then freezes a snapshot and adds the run to the queue. You do not need
+          to press <em>Generate yaml training file</em> beforehand.
+        </p>
+      )}
       {composed && (
         <p className="mt-3 text-xs text-ink-muted">
           This run is composed from more than one source, so the button
@@ -1408,11 +1442,11 @@ function TrainingForm({
         <button
           type="button"
           onClick={handleAddToQueue}
-          disabled={busy || !datasetFolder || baseSelectionIncomplete || analysis.blocking}
+          disabled={busy || (!datasetFolder && dataSource !== "assembled") || baseSelectionIncomplete || analysis.blocking}
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
           {busy
-            ? (composed ? "Building and queueing..." : "Working...")
+            ? (dataSource === "assembled" ? "Generating the yaml and queueing..." : "Working...")
             : (composed ? "Build, Queue and Start" : "Add to Queue")}
         </button>
         <button
@@ -2366,6 +2400,10 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             )}
             <Track2TrainingHistory reloadKey={historyKey} />
           </Card>
+
+          {/* Every queued run trains on a frozen dataset version
+              (2026-10-26) -- listed here, readable, and queueable again. */}
+          <Track2DatasetVersionsPanel />
 
           {/* Destructive, and it can now reach outside this app -- so it
               names what goes, says what does not, and carries the

@@ -595,16 +595,99 @@ def _remap_block(remap: dict, home: str, local) -> dict:
     return out
 
 
+#: Beside a source's data.yaml, a verbatim copy of it made the first time
+#: Assemble REPLACES it (`write_in_place` with "replace it" ticked). The
+#: source's own yaml is the only record of what its label numbers mean;
+#: once a generated yaml stands in its place, that record would otherwise
+#: be gone, and every later build would read the label files with the
+#: wrong class names -- valid indices, so nothing would ever error.
+#: Code review 2026-10-26, F1.
+SOURCE_TAXONOMY_FILE = "data.source.yaml"
+
+
+def _read_text(bucket: str, key: str) -> str | None:
+    """An object's text, or None when it is not there."""
+    try:
+        return pc.s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8", "replace")
+    except Exception:                                              # noqa: BLE001
+        return None
+
+
+def _names_in(text: str | None) -> dict | None:
+    """`names:` of a yaml as {index: name}, or None when it has none."""
+    if not text:
+        return None
+    try:
+        raw = (yaml.safe_load(text) or {}).get("names") or {}
+    except Exception:                                              # noqa: BLE001
+        return None
+    if isinstance(raw, (list, tuple)):
+        raw = dict(enumerate(raw))
+    return {int(i): str(n) for i, n in raw.items()} or None
+
+
+def _list(names: dict) -> str:
+    return ", ".join(f"{i} {names[i]}" for i in sorted(names)) or "nothing"
+
+
+def _source_taxonomy(bucket: str, root: str, names: dict) -> tuple:
+    """What a source's label numbers MEAN: ({index: name or None}, problem).
+
+    In order of evidence:
+      1. its own data.yaml, when this module did not write it;
+      2. the copy kept beside it when this module replaced it
+         (SOURCE_TAXONOMY_FILE);
+      3. a generated yaml from before copies were kept: its own
+         `x_label_remap` says how source numbers were translated onto its
+         `names:`, which recovers the original -- a class that remap
+         dropped (-1) has no recoverable name and is None;
+      4. a generated yaml with no remap: the labels were taken to be in
+         its own `names:` order. That is fine while the requested order is
+         the same; if it changed, the meaning of the numbers is unknown,
+         and that is REFUSED rather than guessed.
+    ({}, "") when there is no data.yaml at all -- nothing to remap, as
+    before (week folders, a dataset that arrived without one).
+    """
+    text = _read_text(bucket, f"{root}/data.yaml")
+    if text is None:
+        return {}, ""
+    if IN_PLACE_MARKER not in text:
+        return _names_in(text) or {}, ""
+    kept = _names_in(_read_text(bucket, f"{root}/{SOURCE_TAXONOMY_FILE}"))
+    if kept:
+        return kept, ""
+    try:
+        doc = yaml.safe_load(text) or {}
+    except Exception:                                              # noqa: BLE001
+        doc = {}
+    ours = _names_in(_dump({"names": doc.get("names") or {}})) or {}
+    maps = {tuple(sorted((int(a), int(b)) for a, b in (m or {}).items()))
+            for m in (doc.get("x_label_remap") or {}).values()}
+    if len(maps) == 1:
+        (only,) = maps
+        return {src: (ours.get(dst) if dst >= 0 else None) for src, dst in only}, ""
+    if not maps and ours == names:
+        return {}, ""
+    return None, (
+        f"'{root}/data.yaml' was written by Assemble, and the source's own class list "
+        "was not kept, so this cannot tell what that dataset's label numbers mean "
+        + ("(it remapped its folders in more than one way). " if maps else
+           f"(it named {_list(ours)}, and the classes asked for now are {_list(names)}). ")
+        + f"Restore the dataset's original data.yaml at '{root}/data.yaml', or, if the "
+        "label files really are numbered in the order asked for now, delete that "
+        "generated data.yaml and build again.")
+
+
 def _source_remaps(dirs: list, names: dict, home: str, drop: bool) -> tuple:
     """Per-source class-ID maps, for sources that arrived with their own
     numbering.
 
-    A dataset whose own `data.yaml` (one this module did NOT write) names
-    its classes in another order is REMAPPED by name onto the declared
-    list, in the run's downloaded copy only -- S3 is never touched. A
-    class it has that the declared list lacks is dropped when the filter
-    is ticked, and refused otherwise, naming the class and the two fixes.
-    Returns ({qualified folder: {src: dst}}, [problems])."""
+    A dataset whose labels are numbered in another order (see
+    `_source_taxonomy` for where that is read from) is REMAPPED by name
+    onto the declared list, in the run's downloaded copy only -- S3 is
+    never touched. A class it has that the declared list lacks is dropped
+    when the filter is ticked, and refused otherwise, naming the class and
+    the two fixes. Returns ({qualified folder: {src: dst}}, [problems])."""
     remaps, problems, seen = {}, [], {}
     by_name = {v: k for k, v in names.items()}
     for d in dirs:
@@ -616,28 +699,21 @@ def _source_remaps(dirs: list, names: dict, home: str, drop: bool) -> tuple:
         if not root:
             continue
         if (b, root) not in seen:
-            theirs = None
-            try:
-                text = pc.s3.get_object(Bucket=b, Key=f"{root}/data.yaml")["Body"].read().decode("utf-8", "replace")
-                if IN_PLACE_MARKER not in text:
-                    raw = (yaml.safe_load(text) or {}).get("names") or {}
-                    if isinstance(raw, (list, tuple)):
-                        raw = dict(enumerate(raw))
-                    theirs = {int(i): str(n) for i, n in raw.items()}
-            except Exception:                                      # noqa: BLE001
-                theirs = None
-            seen[(b, root)] = theirs
-        theirs = seen[(b, root)]
-        if not theirs:
+            seen[(b, root)] = _source_taxonomy(b, root, names)
+            if seen[(b, root)][1]:
+                problems.append(seen[(b, root)][1])
+        theirs, trouble = seen[(b, root)]
+        if trouble or not theirs:
             continue
         mapping, missing = {}, []
         for i, n in theirs.items():
-            if n in by_name:
+            if n is not None and n in by_name:
                 mapping[i] = by_name[n]
             elif drop:
                 mapping[i] = -1
             else:
-                missing.append(f"{i} '{n}'")
+                missing.append(f"{i} '{n}'" if n is not None
+                               else f"{i} (dropped by an earlier build; its name was not kept)")
         if missing:
             problems.append(
                 f"'{root}/data.yaml' numbers its classes differently and has "
@@ -894,13 +970,13 @@ def _many_roots_document(*, train_dirs: list, val_dirs: list, bases: list,
     vq = [_bk(d, home) for d in val_dirs]
     multi = len({b for b, _ in tq + vq}) > 1
 
-    def local(b, k):
-        return f"{b}/{k}" if multi else k
-
     groups: dict = {}
     for b, k in tq + vq:
         groups.setdefault(b, []).append(k)
     prefixes = [f"s3://{b}/{base}/" for b in groups for base in _bases_for(groups[b])]
+    # Entries in the layout the trainer will ACTUALLY produce for these
+    # downloads -- see `local_layout`.
+    local = local_layout(prefixes)
 
     digest = hashlib.sha1(
         "\n".join(sorted(map(str, train_dirs)) + ["--"] + sorted(map(str, val_dirs))).encode("utf-8")
@@ -922,7 +998,8 @@ def _many_roots_document(*, train_dirs: list, val_dirs: list, bases: list,
     text = "\n".join([
         IN_PLACE_MARKER,
         "# several prefixes -- nothing copied, these folders are named where they are",
-        *(["# several buckets -- every entry is <bucket>/<key>"] if multi else []),
+        *(["# several buckets -- every entry is <bucket>/<key>"] if multi else
+          ["# one prefix -- entries are relative to it"] if len(prefixes) == 1 else []),
         f"# built     {stamp}",
         "# download  " + ", ".join(prefixes),
         "",
@@ -1015,6 +1092,47 @@ def _many_roots_document(*, train_dirs: list, val_dirs: list, bases: list,
         "many_roots": True,
         "multi_bucket": multi,
     }
+
+
+def local_layout(prefixes: list):
+    """`(bucket, key) -> path` on the trainer's disk, for these downloads.
+
+    THE rule `train.py download_dataset_with_progress` lays files out by,
+    stated once so the yaml, the remap block and the snapshot agree with it:
+
+      * ONE prefix  -- stripped: `<base>/images/train/x.jpg` lands at
+                       `images/train/x.jpg`;
+      * several prefixes in ONE bucket -- full keys;
+      * several BUCKETS -- `<bucket>/<key>`, for every file, home included.
+
+    Decided by the download list, never by whether a folder happens to be
+    in another bucket: one foreign prefix is still one prefix, and the
+    trainer strips it (code review 2026-10-26, F5).
+    """
+    parsed = []
+    for u in prefixes:
+        u = str(u)
+        if u.startswith("s3://"):
+            b, _, k = u[5:].partition("/")
+        else:
+            b, k = "", u
+        parsed.append((b, k.strip("/")))
+    many = len(parsed) > 1
+    multi = len({b for b, _ in parsed}) > 1
+
+    def local(b: str, k: str) -> str:
+        k = k.strip("/")
+        if multi:
+            return f"{b}/{k}"
+        if many:
+            return k
+        base = parsed[0][1] if parsed else ""
+        if not base:
+            return k
+        if k == base:
+            return "."
+        return k[len(base) + 1:] if k.startswith(base + "/") else k
+    return local
 
 
 def _bases_for(dirs: list) -> list:
@@ -1248,40 +1366,33 @@ def build_in_place(*, splits: dict, classes: dict, bucket: str = "",
         many["image_counts"] = _image_counts(train_dirs, val_dirs, bucket)
         return many
 
-    train_base = _base_or_refuse(train_dirs, "training")
-    val_base = _base_or_refuse(val_dirs, "validation") if val_dirs else ""
-
-    # One prefix covers both when one side sits INSIDE the other's tree,
-    # which is the ordinary single-root case: train under `jp/a`, val
-    # under `jp/val`, both reachable from `jp`. Comparing the two bases
-    # for equality instead of containment split exactly that case into
-    # two downloads it never needed.
-    def _covers(outer: str, dirs: list) -> bool:
-        return all(d == outer or d.startswith(outer + "/") for d in dirs)
-
-    if not val_dirs:
-        shared = train_base
-    elif _covers(train_base, val_dirs):
-        shared = train_base
-    elif _covers(val_base, train_dirs):
-        shared = val_base
-    else:
-        shared = ""
-
-    if shared and val_dirs:
-        main = _document(shared, train=train_dirs, val=val_dirs,
+    # ONE download covers both sides here -- `split_apart` above sent every
+    # case needing two to the several-prefix builder. So the yaml is
+    # rendered against THAT prefix, both splits relative to it.
+    #
+    # It used to compare each side's own base for containment, which
+    # missed SIBLINGS of one ancestor: train under `jp/a`, val under
+    # `jp/b`, neither covering the other although `jp` covers both. That
+    # fell through to a training yaml with no val, which `_document` then
+    # filled with the TRAINING folders -- the trainer refused the overlap,
+    # after the download (code review 2026-10-26, F4). Rendering against
+    # the shared prefix keeps the real validation folders, and the remap.
+    if val_dirs:
+        combined = _bases_for(train_dirs + val_dirs)
+        if len(combined) != 1:
+            # Unreachable while `split_apart` routes these above. Refused
+            # rather than falling back to validating on training images.
+            raise ValueError(
+                "Training and validation need more than one download, and this "
+                "path takes one. Nothing was built.")
+        main = _document(combined[0], train=train_dirs, val=val_dirs,
                          names=names, bucket=bucket,
                          role="training and validation", remap=remap)
-        eval_side = None
-    elif shared:
-        main = _document(shared, train=train_dirs, val=[], names=names,
-                         bucket=bucket, role="training", remap=remap)
-        eval_side = None
     else:
-        main = _document(train_base, train=train_dirs, val=[], names=names,
-                         bucket=bucket, role="training")
-        eval_side = _document(val_base, train=val_dirs, val=val_dirs,
-                              names=names, bucket=bucket, role="validation")
+        main = _document(_base_or_refuse(train_dirs, "training"), train=train_dirs,
+                         val=[], names=names, bucket=bucket, role="training",
+                         remap=remap)
+    eval_side = None
 
     sides = [s for s in (main, eval_side) if s]
     needs = [s for s in sides if s["existing"] and not s["existing"].get("ours")]
@@ -1298,12 +1409,8 @@ def build_in_place(*, splits: dict, classes: dict, bucket: str = "",
         "existing": main["existing"],
         # The second download, when validation lives under another prefix.
         # None when one prefix covers both.
-        "eval": ({**eval_side,
-                  "download": _download_cost(val_base, val_dirs, bucket)}
-                 if eval_side else None),
-        "download": _download_cost(main["folder"],
-                                   train_dirs + (val_dirs if not eval_side else []),
-                                   bucket),
+        "eval": None,
+        "download": _download_cost(main["folder"], train_dirs + val_dirs, bucket),
         "needs_overwrite": bool(needs and not overwrite),
         # Sources whose label files use a class the yaml does not name,
         # and whether the run has been told to drop those boxes itself.
@@ -1345,6 +1452,23 @@ def write_in_place(*, splits: dict, classes: dict, bucket: str = "",
             "the images it trains on. Pick evaluation folders on the "
             "Assemble card, or tick Use Pick Golden Set / Edge Cases."
         )
+
+    # KEEP THE SOURCE'S OWN YAML before it is replaced: it is the only
+    # record of what that dataset's label numbers mean (F1). Copied
+    # verbatim, once -- an existing copy is never overwritten, because the
+    # yaml standing there now may already be a generated one. All copies
+    # first, so a failure here leaves every original in place.
+    for side in (out, out.get("eval")):
+        if not side:
+            continue
+        b = side.get("bucket") or out["bucket"]
+        existing = side.get("existing") or {}
+        if existing and not existing.get("ours") and side["key"].endswith("/data.yaml"):
+            keep = side["key"][:-len("data.yaml")] + SOURCE_TAXONOMY_FILE
+            if _read_text(b, keep) is None:
+                original = pc.s3.get_object(Bucket=b, Key=side["key"])["Body"].read()
+                pc.s3.put_object(Bucket=b, Key=keep, Body=original,
+                                 ContentType="application/x-yaml")
 
     written = []
     for side in (out, out.get("eval")):

@@ -59,7 +59,9 @@ weights stay reachable only via its own model.tar.gz
 import argparse
 import base64
 import json
+import math
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -850,6 +852,138 @@ RESERVED_HYPERPARAMS = {
     "single_cls", "patience",
 }
 
+#: How each value the card offers is typed. A MIRROR of
+#: `ppe_pipeline_api.hyperparams.SCHEMA` (kinds only) -- this image cannot
+#: import the app, and tests/test_hyperparam_types.py checks the two agree.
+#:
+#: Defensive: the app types values before submitting, but a queue entry
+#: or settings file written before it did holds strings ("0.01", "false",
+#: "10"), and Ultralytics either refuses those (`check_cfg` raises on a
+#: string lr0) or silently ignores them (a string `freeze` freezes
+#: nothing). Keys not listed here are typed from Ultralytics' own default.
+_HYPERPARAM_KINDS = {
+    "optimizer": "choice", "lr0": "float", "lrf": "float", "momentum": "float",
+    "weight_decay": "float", "warmup_epochs": "float", "warmup_momentum": "float",
+    "warmup_bias_lr": "float", "cos_lr": "bool",
+    "freeze": "freeze", "dropout": "float", "multi_scale": "float",
+    "rect": "bool", "amp": "amp", "fraction": "float",
+    "box": "float", "cls": "float", "dfl": "float", "nbs": "int",
+    "hsv_h": "float", "hsv_s": "float", "hsv_v": "float", "degrees": "float",
+    "translate": "float", "scale": "float", "shear": "float",
+    "perspective": "float", "flipud": "float", "fliplr": "float",
+    "mosaic": "float", "close_mosaic": "int", "mixup": "float",
+    "cutmix": "float", "copy_paste": "float", "erasing": "float",
+    "bgr": "float", "auto_augment": "choice",
+}
+_HYPERPARAM_CHOICES = {
+    "optimizer": ("auto", "SGD", "Adam", "Adamax", "AdamW", "NAdam", "RAdam",
+                  "RMSprop", "MuSGD"),
+    "auto_augment": ("randaugment", "autoaugment", "augmix"),
+}
+_NUMBER_TEXT = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
+
+
+def _typed_hyperparam(key, value, kind):
+    """One value as the type Ultralytics needs. None means "not set".
+    Booleans by exact token, never bool("false")."""
+    def bad(why):
+        return SystemExit(f"TRAIN_HYPERPARAMS: {key}={value!r} is invalid: {why}.")
+
+    def number(v):
+        if isinstance(v, bool):
+            raise bad("expected a number, got true/false")
+        if isinstance(v, (int, float)):
+            n = float(v)
+        elif isinstance(v, str) and _NUMBER_TEXT.match(v.strip()):
+            n = float(v.strip())
+        else:
+            raise bad("expected a number")
+        if not math.isfinite(n):
+            raise bad("must be a finite number")
+        return n
+
+    def whole(v):
+        n = number(v)
+        if not n.is_integer():
+            raise bad("must be a whole number")
+        return int(n)
+
+    def boolean(v):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, int) and v in (0, 1):
+            return bool(v)
+        if isinstance(v, str) and v.strip().lower() in ("true", "1", "yes"):
+            return True
+        if isinstance(v, str) and v.strip().lower() in ("false", "0", "no"):
+            return False
+        raise bad("expected true or false")
+
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if kind == "float":
+        return number(value)
+    if kind == "int":
+        return whole(value)
+    if kind == "bool":
+        return boolean(value)
+    if kind == "amp":
+        if isinstance(value, str) and value.strip().lower() in ("fp16", "bf16", "fp32"):
+            return value.strip().lower()
+        return boolean(value)
+    if kind == "choice":
+        choices = _HYPERPARAM_CHOICES[key]
+        canonical = {c.lower(): c for c in choices}.get(str(value).strip().lower())
+        if not isinstance(value, str) or canonical is None:
+            raise bad(f"must be one of {', '.join(choices)}")
+        return canonical
+    if kind == "freeze":
+        if isinstance(value, str):
+            text = value.strip()
+            if text.lower() == "none":
+                return None
+            if "," in text or text.startswith("["):
+                value = [p for p in text.strip("[]").split(",") if p.strip()]
+            else:
+                value = text
+        if isinstance(value, (list, tuple)):
+            layers = [whole(p) for p in value]
+            if not layers or any(n < 0 for n in layers):
+                raise bad("layer indices must be a non-empty list of 0 or more")
+            return layers
+        count = whole(value)
+        if count < 0:
+            raise bad("must be 0 or more layers")
+        return count
+    return value
+
+
+def _typed_hyperparams(given, defaults):
+    """Every value typed: by the mirror above where the card offers it,
+    otherwise by the type of Ultralytics' own default when a string came
+    in. Then Ultralytics' own `check_cfg`, so a range it refuses fails
+    here, before the dataset is trained on, with the key named."""
+    typed = {}
+    for key, value in given.items():
+        kind = _HYPERPARAM_KINDS.get(key)
+        if kind is None and isinstance(value, str):
+            default = defaults.get(key)
+            kind = ("bool" if isinstance(default, bool)
+                    else "int" if isinstance(default, int)
+                    else "float" if isinstance(default, float) else None)
+        out = _typed_hyperparam(key, value, kind) if kind else value
+        if out is not None:
+            typed[key] = out
+    try:
+        from ultralytics.cfg import check_cfg
+
+        check_cfg(dict(typed), hard=True)
+    except ImportError:
+        pass
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(f"TRAIN_HYPERPARAMS: {exc}")
+    return typed
+
 
 def _validated_hyperparams(raw):
     """Parse the blob, keep what Ultralytics knows, refuse what it does not.
@@ -905,7 +1039,9 @@ def _validated_hyperparams(raw):
             "not here. Setting it would make the audit row and the run disagree."
         )
 
-    kept = {k: v for k, v in given.items()}
+    # TYPED, not passed through: strings from an older app reach here,
+    # and Ultralytics refuses `lr0="0.01"` and ignores `freeze="10"`.
+    kept = _typed_hyperparams(given, DEFAULT_CFG_DICT)
     if kept:
         print("HYPERPARAMS: " + ", ".join(f"{k}={v}" for k, v in sorted(kept.items())),
               flush=True)
@@ -1014,8 +1150,14 @@ def main():
         if args.classes:
             extra["classes"] = args.classes
             print(f"CLASSES: {args.classes}")
+        # ALWAYS STATED, off included (2026-10-26). Ultralytics re-applies
+        # `single_cls` from the STARTING checkpoint's saved args
+        # (Model._reset_ckpt_args keeps imgsz, data, task, single_cls), so
+        # leaving it out when off meant one single-class ancestor -- v14 of
+        # yolo11s-helmet-detector -- made every continuation single-class:
+        # the class came out named "item" and the evaluator refused it.
+        extra["single_cls"] = bool(args.single_cls)
         if args.single_cls:
-            extra["single_cls"] = True
             # Said plainly because Ultralytics renames the class to "item"
             # and the run's own logs will show that rather than the name
             # anybody chose.

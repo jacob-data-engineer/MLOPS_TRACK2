@@ -35,7 +35,10 @@ def test_the_times_are_singapore_and_come_back_as_utc():
     """The field says SGT because that is the clock the EC2 schedule this
     system already runs on uses. AWS wants UTC."""
     start = _dt.datetime(2026, 9, 29, 1, 0, tzinfo=_dt.timezone.utc)  # 09:00 SGT
-    runs = rs.next_runs({"at": "02:00", "every_days": 7}, start=start, count=3)
+    # Anchored, as every saved schedule now is: without one the grid
+    # counts from a fixed epoch, not from `start` (F2).
+    runs = rs.next_runs({"at": "02:00", "every_days": 7, "anchor": "2026-09-30"},
+                        start=start, count=3)
 
     # 02:00 SGT is 18:00 UTC the day before.
     assert [m.hour for m in runs] == [18, 18, 18]

@@ -183,6 +183,9 @@ def test_the_queue_card_is_told_a_composed_runs_real_folders():
     images", and the golden set and the dataset looked missing."""
     code = " ".join(inspect.getsource(rs._run_chain_body).split())
     assert 'composed_train, composed_val = list(out["train"]), list(out["val"])' in code
-    assert 'entry["dataset_source_folders"] = composed_train' in code
+    # Since 2026-10-26 the folders come from the run's dataset version,
+    # which resolved every image -- still the real folders, never the
+    # yaml's home (now `_datasets/<id>`).
+    assert 'entry.update({k: v for k, v in fields.items() if k.startswith(("dataset_source",' in code
     q = " ".join(inspect.getsource(t2.queue_add).split())
     assert 'if train_folder and not entry.get("dataset_source_folders"):' in q

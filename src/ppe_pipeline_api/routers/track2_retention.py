@@ -234,6 +234,11 @@ def save_retrain(payload: RetrainScheduleRequest,
             detail="A retrain takes hours of GPU, so anything under a day "
                    "would overlap itself.",
         )
+    # The grid every slot is counted from. Reset only when the schedule
+    # is switched on or its interval/time changes -- to the first
+    # occurrence still ahead -- and kept on any other save, so editing
+    # the epochs does not move the next run (see `rs.with_anchor`).
+    merged = rs.with_anchor(current, merged)
     try:
         pc.write_config({"retrain_schedule": merged})
     except Exception as exc:                                   # noqa: BLE001
@@ -249,6 +254,10 @@ def save_retrain(payload: RetrainScheduleRequest,
     # 09:00 today and starts a GPU run on the spot -- the operator
     # pressed Save, not Run. The same guard `queue_after_pull` has when
     # it is switched on, for the same reason.
+    #
+    # The fresh anchor already puts the first slot ahead of now; this
+    # still matters on an operator-chosen `from_date` grid, which wins
+    # over the anchor and may have a slot minutes behind.
     if patch.get("enabled") and not current.get("enabled"):
         slot = rs.due_training_run(config)
         if slot:
@@ -361,7 +370,8 @@ class RetrainRunRequest(BaseModel):
     """How the chain hands over at the end.
 
     `start` submits the run directly; `queue` adds it to the queue and
-    releases the queue, which is what the schedule does. The training
+    releases the queue, which is what the schedule does; `enqueue` adds it
+    and leaves the queue alone -- the training card's Add to Queue. The training
     card uses `queue` so a composed run lands in the same list as every
     other run on that card, rather than appearing only as a job.
     """
@@ -383,9 +393,9 @@ def run_retrain(body: RetrainRunRequest | None = None,
     lives under another root -- only the chain builds that yaml.
     """
     submit = (body.submit if body else "start") or "start"
-    if submit not in ("start", "queue"):
+    if submit not in ("start", "queue", "enqueue"):
         raise HTTPException(status_code=400,
-                            detail=f"submit must be 'start' or 'queue', not {submit!r}.")
+                            detail=f"submit must be 'start', 'queue' or 'enqueue', not {submit!r}.")
     try:
         return rs.run_chain(trigger="manual", submit=submit)
     except Exception as exc:                                   # noqa: BLE001
@@ -758,15 +768,16 @@ def matrix(payload: MatrixRequest, session=Depends(require_session)) -> dict:
     sizes: dict = {}
     if root:
         try:
-            # `read_weeks` already returns the stems, so the SIZES cost
-            # nothing extra -- and they are what lets the grid apply the
-            # minimum-image floor as well as the percentage one. Without
-            # them a policy whose image minimum is the binding half is
-            # understated.
-            for found in rt.read_weeks(
+            # The SIZES are what lets the grid apply the minimum-image
+            # floor as well as the percentage one. Counted from the same
+            # inventory the trainer's list is (`read_inventory`), TRAIN
+            # side only: sizing from the whole `images/` subtree put the
+            # val images into every cell and let a validation-only week
+            # age the weeks before it, neither of which the run does.
+            for found in rt.read_inventory(
                     root, week_prefix=_with_prefix({})["week_prefix"]):
                 names.append(found["name"])
-                sizes[found["name"]] = len(found.get("stems") or [])
+                sizes[found["name"]] = len(found.get("train") or {})
         except Exception:                                      # noqa: BLE001
             names, sizes = [], {}
     if not names:
@@ -1193,3 +1204,56 @@ def get_scheduled(days: int = 42, files: str = "",
         except Exception:                                         # noqa: BLE001
             wanted = []
     return scheduled_for_files(wanted, days=days)
+
+
+# --- dataset versions (dataset_versions.py) ------------------------------------
+
+@router.get("/versions")
+def list_versions(limit: int = 30, session=Depends(require_session)) -> dict:
+    """Every frozen dataset a run was queued or started on, newest first."""
+    from .. import dataset_versions as dsv
+    try:
+        return {"versions": dsv.listing(limit)}
+    except Exception as exc:                                       # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Could not list versions: {exc}")
+
+
+@router.get("/versions/{version_id}")
+def read_version(version_id: str, session=Depends(require_session)) -> dict:
+    """One version, with both of its yamls, for reading on screen."""
+    from .. import dataset_versions as dsv
+    try:
+        return {**dsv.get(version_id), **dsv.yaml_text(version_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/versions/{version_id}/queue")
+def queue_version(version_id: str, session=Depends(require_session)) -> dict:
+    """Queue a run on this exact version again, with the settings it was
+    first queued with. The images are the version's lists, so a retry is
+    a retry on identical data."""
+    import uuid
+
+    from .. import dataset_versions as dsv
+    try:
+        v = dsv.get(version_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    template = v.get("entry_template") or {}
+    if not template:
+        raise HTTPException(
+            status_code=400,
+            detail="This version was started directly, not queued, so the settings "
+                   "it ran with were not kept. Queue a new run from step 6 instead.")
+    entry = {**template, **dsv.run_fields(v),
+             "id": uuid.uuid4().hex[:12],
+             "added_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+             "queued_by": "queue again",
+             "notes": (f"{template.get('notes') or ''} -- again on {version_id}").strip(" -")[:2048]}
+    try:
+        t2.queue_add(entry)
+    except Exception as exc:                                       # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Could not queue it: {exc}")
+    dsv.mark(version_id, state="queued", entry_id=entry["id"])
+    return {"queued": entry["id"], "version_id": version_id}

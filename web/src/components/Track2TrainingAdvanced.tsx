@@ -1,3 +1,4 @@
+import type { Track2HyperparamValue, Track2Hyperparams } from "../lib/api";
 import { useCardOpen } from "../lib/cardState";
 
 /**
@@ -20,7 +21,9 @@ import { useCardOpen } from "../lib/cardState";
  * hour on quiet defaults.
  */
 
-type Kind = "number" | "text" | "bool" | "choice";
+/** `freeze` is its own kind: a count of leading layers OR a list of
+ * layer indices, which no plain number field can carry. */
+type Kind = "number" | "text" | "bool" | "choice" | "freeze";
 
 interface Param {
   key: string;
@@ -55,8 +58,8 @@ const GROUPS: { title: string; why: string; params: Param[] }[] = [
     title: "Fine-tuning",
     why: "For starting from a checkpoint that is already good. Freezing keeps what it learned; dropout and scale guard against a small dataset being memorised.",
     params: [
-      { key: "freeze", label: "Freeze layers", kind: "number", fallback: "none",
-        hint: "first N layers held fixed" },
+      { key: "freeze", label: "Freeze layers", kind: "freeze", fallback: "none",
+        hint: "first N layers, or a list like 0,1,2" },
       { key: "dropout", label: "Dropout", kind: "number", fallback: "0.0" },
       { key: "multi_scale", label: "Multi-scale", kind: "number", fallback: "0.0" },
       { key: "rect", label: "Rectangular batches", kind: "bool", fallback: "false" },
@@ -108,6 +111,41 @@ export const ULTRALYTICS_DEFAULTS: Record<string, string> = Object.fromEntries(
   GROUPS.flatMap((group) => group.params.map((p) => [p.key, p.fallback])),
 );
 
+/** Every field's kind, by key, so a value can be sent as its real type. */
+const KINDS: Record<string, Kind> = Object.fromEntries(
+  GROUPS.flatMap((group) => group.params.map((p) => [p.key, p.kind])),
+);
+
+/**
+ * A field's text as the type Ultralytics needs. The inputs hold strings;
+ * the run must not receive them -- Ultralytics refuses `lr0: "0.01"` and
+ * silently ignores `freeze: "10"`. Anything that does not parse is sent
+ * as typed, so the API refuses it naming the field rather than this
+ * guessing what was meant.
+ */
+function typedValue(kind: Kind | undefined, raw: string): Track2HyperparamValue {
+  if (kind === "bool") {
+    if (raw.toLowerCase() === "true") return true;
+    if (raw.toLowerCase() === "false") return false;
+    return raw;
+  }
+  if (kind === "number") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : raw;
+  }
+  if (kind === "freeze") {
+    if (raw.includes(",")) {
+      const layers = raw.split(",").map((part) => part.trim())
+        .filter((part) => part !== "").map(Number);
+      return layers.length > 0 && layers.every((n) => Number.isInteger(n))
+        ? layers : raw;
+    }
+    const n = Number(raw);
+    return Number.isInteger(n) ? n : raw;
+  }
+  return raw;
+}
+
 /**
  * What a run is actually sent.
  *
@@ -124,18 +162,22 @@ export const ULTRALYTICS_DEFAULTS: Record<string, string> = Object.fromEntries(
  *
  * `none` is skipped rather than sent: it is how this table writes "not
  * set" for `freeze`, and sending the string would be a value.
+ *
+ * TYPED: numbers as numbers, true/false as booleans, `freeze` as a count
+ * or a list. The overrides are held (and saved) as the text typed; this
+ * is where they become what the run receives.
  */
 export function effectiveHyperparams(
   value: Record<string, string>,
   enabled: boolean,
-): Record<string, string> {
+): Track2Hyperparams {
   if (!enabled) return {};
-  const out: Record<string, string> = {};
+  const out: Track2Hyperparams = {};
   for (const [key, fallback] of Object.entries(ULTRALYTICS_DEFAULTS)) {
-    const chosen = (value[key] ?? "").trim();
+    const chosen = String(value[key] ?? "").trim();
     const resolved = chosen || fallback;
-    if (!resolved || resolved === "none") continue;
-    out[key] = resolved;
+    if (!resolved || resolved.toLowerCase() === "none") continue;
+    out[key] = typedValue(KINDS[key], resolved);
   }
   return out;
 }
@@ -269,7 +311,7 @@ export function Track2TrainingAdvanced({
                     ) : (
                       <input
                         type="text"
-                        inputMode="decimal"
+                        inputMode={p.kind === "freeze" ? "text" : "decimal"}
                         className="tabular w-full rounded-md border border-black/15 bg-page px-2 py-1.5 text-xs"
                         value={value[p.key] ?? ""}
                         placeholder={p.fallback}

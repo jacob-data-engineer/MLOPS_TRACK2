@@ -258,6 +258,18 @@ def detection(model_path, data_yaml, name, expected_names=None,
                 f"{name} checkpoint has {len(names)} classes {names}, but the run "
                 f"was single-class. The checkpoint does not match how it was trained."
             )
+    elif (expected_names is not None and len(expected_names) == 1
+          and names == {0: "item"}):
+        # A ONE-class dataset and a checkpoint that calls its one class
+        # "item": Ultralytics' name for a single_cls run. It reaches here
+        # with SINGLE_CLS off because Ultralytics re-applies `single_cls`
+        # from the STARTING checkpoint's own saved args (Model.
+        # _reset_ckpt_args keeps imgsz, data, task, single_cls) -- so one
+        # single-class ancestor made every continuation single-class
+        # (2026-10-26). One output, one class: the same model. Scored and
+        # reported under the dataset's name for it. The trainer now passes
+        # single_cls explicitly; this keeps those checkpoints evaluable.
+        names = dict(expected_names)
     elif expected_names is not None and names != expected_names:
         # Not a taxonomy policy -- a consistency check. A checkpoint whose
         # class order differs from the data it is scored against produces

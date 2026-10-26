@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from pydantic import BaseModel
 
 from .. import dataset_yaml as dy
+from .. import hyperparams as hp
 from .. import track2_shared as t2
 from ..auth import require_session
 
@@ -279,11 +280,27 @@ class TrainingParams(BaseModel):
     #: before the field existed. The trainer validates every key against
     #: the Ultralytics it actually has installed and REFUSES one it does
     #: not know, rather than dropping it in silence.
+    #:
+    #: Typed and checked against hyperparams.py by every route below
+    #: before anything is submitted -- a 400 naming the key, as a plain
+    #: string the card can show (a Pydantic validator would answer 422
+    #: with a list, which the card renders as "[object Object]").
     hyperparams: dict = {}
+
+
+def _typed_hyperparams(payload: "TrainingParams") -> None:
+    """Replace the request's hyperparameters with their typed form, or
+    refuse with a 400 naming the key and value. Legacy strings ("0.01",
+    "false", "10") become the numbers and booleans Ultralytics requires."""
+    try:
+        payload.hyperparams = hp.normalize_hyperparams(payload.hyperparams)
+    except hp.HyperparamError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/train/dataset")
 def start_training(payload: TrainingParams, session=Depends(require_session)) -> dict:
+    _typed_hyperparams(payload)
     already_running = t2.training_already_running_reason(t2.get_training_progress())
     if already_running:
         raise HTTPException(status_code=409, detail=already_running)
@@ -309,6 +326,7 @@ def start_custom_training(payload: TrainingParams, session=Depends(require_sessi
     custom pipeline and registry group -- see
     model_training/custom_training/README.md for why it is separate rather
     than a mode of the production one."""
+    _typed_hyperparams(payload)
     # The same one-GPU guard /train/dataset has. Without it a custom run
     # could be launched on top of an executing one and die with
     # SAGEMAKER_RESOURCE_LIMIT, which is the whole reason the guard exists.
@@ -1052,6 +1070,9 @@ def _freeze_for_entry(entry: dict) -> None:
 
 @router.post("/queue/add")
 def add_to_queue(payload: TrainingParams, session=Depends(require_session)) -> dict:
+    # Before anything else: an entry can sit for hours, and a value that
+    # cannot be sent should be refused now, not when its turn comes.
+    _typed_hyperparams(payload)
     try:
         epochs, img_size, batch, seed = t2.validate_training_params(
             payload.epochs, payload.dataset_folder, payload.img_size, payload.batch, payload.seed,
@@ -1098,6 +1119,10 @@ def add_to_queue(payload: TrainingParams, session=Depends(require_session)) -> d
             "architecture": payload.architecture,
             "detector_slug": payload.detector_slug,
             "patience": payload.patience,
+            # Already typed by TrainingParams. Without it the entry ran on
+            # Ultralytics' defaults while the card showed the operator's
+            # numbers -- the queue replays `entry["hyperparams"]`.
+            "hyperparams": payload.hyperparams,
             "notes": payload.notes[:2048],
             "added_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -1114,6 +1139,22 @@ def add_to_queue(payload: TrainingParams, session=Depends(require_session)) -> d
         # images was this trained on" has an answer for every run, not
         # only the ones the chain queued.
         _freeze_for_entry(entry)
+        # A DATASET VERSION, resolved now -- the folder's data.yaml can be
+        # rebuilt before this entry's turn comes, and the run must train on
+        # what was queued. Refused here, at the button, if it cannot be
+        # made: the alternative is the overwritable slot. The open
+        # pipeline only; the production pipeline takes no yaml URI.
+        if entry.get("custom_classes"):
+            from .. import dataset_versions as dsv
+            from .. import pull_control as pc
+
+            version = dsv.for_run(home=pc.destination_bucket(), root=entry["dataset_folder"],
+                                  eval_root=entry.get("eval_dataset_folder", ""),
+                                  trigger="manual queue")
+            entry.update(dsv.run_fields(version))
+            dsv.mark(version["version_id"], state="queued", entry_id=entry["id"],
+                     entry_template={k: v for k, v in entry.items()
+                                     if k not in ("id", "added_at")})
         t2.queue_add(entry)
     except Exception as exc:
         # Logged as well as returned: uvicorn records the 400 but not the

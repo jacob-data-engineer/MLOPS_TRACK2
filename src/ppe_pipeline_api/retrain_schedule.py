@@ -69,6 +69,15 @@ DEFAULTS = {
     "every_days": 7,
     #: "HH:MM" Singapore time, on an independent clock.
     "at": "02:00",
+    #: "YYYY-MM-DD" (Singapore): the day the independent clock's grid
+    #: counts from -- every slot is anchor + k * every_days at `at`.
+    #: WRITTEN BY THE SERVER (`with_anchor`), never by the card: set when
+    #: the schedule is switched on or its interval/time changes, to the
+    #: first occurrence still ahead, so switching on never fires on the
+    #: spot. Without it the grid slid forward with the clock and a weekly
+    #: schedule became due every day. An operator-chosen `from_date` wins
+    #: over it; a config with neither counts from `LEGACY_EPOCH`.
+    "anchor": "",
     #: NOTE: `pull_first` and `skip_if_unchanged` used to sit here. Both
     #: were settable from the UI and read by nothing -- `run_chain` does
     #: not sweep, and nothing consulted the second at all. "Do not train
@@ -1277,6 +1286,38 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
                 "ok": False, "steps": steps,
                 "snapshot_id": snapshot["snapshot_id"]}
 
+    # 2d. THE DATASET VERSION. Everything the run reads, resolved to the
+    # exact images NOW and written once under `_datasets/<id>/` -- so a
+    # build that happens while this waits in the queue (another Add to
+    # Queue, the Generate button, the next schedule) cannot change what it
+    # trains on. That is how a golden-set-only run came to read a composed
+    # run's evaluation yaml. Fatal when it fails: the fallback is exactly
+    # the shared, overwritable slot this exists to avoid.
+    version_id = ""
+    try:
+        from . import dataset_versions as dsv
+
+        version = dsv.for_run(
+            home=pc.destination_bucket(config), root=root,
+            train_data_uris=train_data_uris, data_yaml_uri=data_yaml_uri,
+            eval_root=eval_root, trigger=trigger,
+            sources=[s["detail"] for s in steps if s.get("step") == "lists"][-1:],
+            drop_undeclared=bool(drop_undeclared))
+        version_id = version["version_id"]
+        fields = dsv.run_fields(version)
+        root = fields["dataset_folder"]
+        train_data_uris = fields["train_data_uris"]
+        data_yaml_uri = fields["data_yaml_uri"]
+        eval_root = fields["eval_dataset_folder"]
+        eval_extra_uris = fields["eval_extra_uris"]
+        record("version", True, version_id, version_id=version_id,
+               train=version["train_images"], val=version["val_images"])
+    except Exception as exc:                                   # noqa: BLE001
+        record("version", False, f"Could not freeze the dataset version: {exc}")
+        return {"trigger": trigger, "at": _now().isoformat(timespec="seconds"),
+                "ok": False, "steps": steps,
+                "snapshot_id": snapshot["snapshot_id"]}
+
     # 3. submit -- or queue, and let somebody else decide when
     try:
         from . import track2_shared as t2
@@ -1288,7 +1329,11 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
                  if snapshot["snapshot_id"] else f"{trigger} retrain (not frozen)"),
             ) if part
         )
-        if submit == "queue":
+        # "enqueue" is "queue" without releasing the queue: what the
+        # training card's Add to Queue does -- it now regenerates the yaml
+        # first (2026-10-26), but adding to the queue still leaves the
+        # queue as the operator left it.
+        if submit in ("queue", "enqueue"):
             generation, size = t2.split_architecture(str(plan["architecture"]))
             entry = {
                 "id": uuid.uuid4().hex[:12],
@@ -1332,12 +1377,20 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
                 # name, when the card says so. Nothing in S3 is changed.
                 "drop_undeclared_classes": drop_undeclared,
                 "eval_extra_uris": eval_extra_uris,
+                # The frozen dataset this entry trains on (2d above).
+                "dataset_version_id": version_id,
             }
-            if composed_train:
-                entry["dataset_source_folders"] = composed_train
-                entry["eval_source_folders"] = composed_val
+            # Where the images come from and how many -- from the version,
+            # which resolved them; its own folder holds only lists.
+            entry.update({k: v for k, v in fields.items() if k.startswith(("dataset_source",
+                          "eval_source", "dataset_version_"))})
             t2.queue_add(entry)
             record("queue", True, f"queued {entry['id']}", entry_id=entry["id"])
+            # Kept on the version, so "Queue again" can replay the same
+            # settings on the same images.
+            dsv.mark(version_id, state="queued", entry_id=entry["id"],
+                     entry_template={k: v for k, v in entry.items()
+                                     if k not in ("id", "added_at")})
 
             # ...and release it. "Do it automatically" promises "rebuild,
             # freeze, then train", and until now it stopped one step
@@ -1351,16 +1404,20 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
             # `training_already_running_reason` before popping anything,
             # so a schedule firing mid-run queues behind it rather than
             # racing it.
-            try:
-                started = t2.queue_start()
-                record("start", started,
-                       "queue started" if started
-                       else "nothing to start -- the entry is queued and will "
-                            "go when the GPU frees up")
-            except Exception as exc:                           # noqa: BLE001
-                # The entry is queued and survives this: a person can
-                # press Start Queue. Not worth failing the chain for.
-                record("start", False, str(exc))
+            if submit == "enqueue":
+                record("start", True, "queued, not started -- the queue runs it "
+                                      "when it is started and the GPU is free")
+            else:
+                try:
+                    started = t2.queue_start()
+                    record("start", started,
+                           "queue started" if started
+                           else "nothing to start -- the entry is queued and will "
+                                "go when the GPU frees up")
+                except Exception as exc:                       # noqa: BLE001
+                    # The entry is queued and survives this: a person can
+                    # press Start Queue. Not worth failing the chain for.
+                    record("start", False, str(exc))
 
             return {"trigger": trigger, "at": _now().isoformat(timespec="seconds"),
                     "ok": True, "steps": steps,
@@ -1392,6 +1449,7 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
         )
         record("train", True, out.get("run_id", ""), **{
             k: out[k] for k in ("run_id", "audit_id") if k in out})
+        dsv.mark(version_id, state="started", run_id=out.get("run_id", ""))
     except Exception as exc:                                   # noqa: BLE001
         record("train", False, str(exc))
         return {"trigger": trigger, "at": _now().isoformat(timespec="seconds"),
@@ -1555,17 +1613,101 @@ def golden_plan(config: dict) -> dict | None:
 CATCH_UP_MINUTES = 30
 
 
-def _passed_slots(plan: dict, moment: _dt.datetime) -> list:
-    """Every occurrence at or before `moment`, oldest first.
+#: Singapore, fixed +08:00 -- no DST here since 1982, so no zone to resolve.
+SGT = _dt.timezone(_dt.timedelta(hours=8))
 
-    `next_runs` looks forward, so this steps back one interval and
-    keeps what has already happened. Shared by the two readers below
+#: Where a schedule with neither `from_date` nor `anchor` counts from --
+#: one saved before anchors existed. A FIXED date, so the grid does not
+#: depend on when it is asked: such a schedule is stable at once, with no
+#: write, and every caller (app, Lambda, a restarted container) computes
+#: the same slot. Its next save pins the same grid as a real anchor.
+LEGACY_EPOCH = _dt.date(1970, 1, 1)
+
+
+def _grid_start(plan: dict) -> _dt.datetime | None:
+    """Slot zero of the grid, in SGT, or None when `at` is unusable.
+
+    `from_date` (the operator's own "from this date") wins, then the
+    stored `anchor`, then `LEGACY_EPOCH`. Never the current time: a grid
+    counted from "now" moves with the clock, which is what let a weekly
+    schedule fall due daily.
+    """
+    if not _valid_time(str(plan.get("at") or "")):
+        return None
+    hour, minute = (int(part) for part in str(plan["at"]).split(":"))
+    day = LEGACY_EPOCH
+    for key in ("from_date", "anchor"):
+        try:
+            day = _dt.date.fromisoformat(str(plan.get(key) or "").strip()[:10])
+            break
+        except ValueError:
+            continue
+    return _dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=SGT)
+
+
+def fresh_anchor(plan: dict, *, now: _dt.datetime | None = None) -> str:
+    """The anchor for a schedule being switched on or re-timed NOW.
+
+    The date of the first `at` strictly after `now` -- today if the time
+    has not come yet, else tomorrow -- so arming a schedule can never
+    make a slot that is already due.
+    """
+    if not _valid_time(str(plan.get("at") or "")):
+        return ""
+    hour, minute = (int(part) for part in str(plan["at"]).split(":"))
+    moment = (now or _now()).astimezone(SGT)
+    first = moment.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if first <= moment:
+        first += _dt.timedelta(days=1)
+    return first.date().isoformat()
+
+
+def with_anchor(before: dict, after: dict, *,
+                now: _dt.datetime | None = None) -> dict:
+    """`after`, with the anchor it should be saved with.
+
+    Re-anchored (to `fresh_anchor`) only on a DELIBERATE reset: the
+    schedule being switched on, or its interval or time changing. Any
+    other save keeps the grid -- and a schedule with no anchor yet pins
+    the one it was already showing (the `LEGACY_EPOCH` grid's next date),
+    so upgrading moves no run. A disabled schedule is left as it is.
+    """
+    out = dict(after)
+    if not out.get("enabled"):
+        return out
+
+    def every(plan):
+        try:
+            return max(1, int(plan.get("every_days") or 1))
+        except (TypeError, ValueError):
+            return 1
+
+    reset = (not before.get("enabled")
+             or every(before) != every(out)
+             or str(before.get("at") or "") != str(out.get("at") or ""))
+    if reset:
+        out["anchor"] = fresh_anchor(out, now=now)
+    elif not str(out.get("anchor") or "").strip():
+        upcoming = next_runs({**out, "from_date": ""}, start=now, count=1)
+        out["anchor"] = upcoming[0].astimezone(SGT).date().isoformat() if upcoming else ""
+    return out
+
+
+def _passed_slots(plan: dict, moment: _dt.datetime) -> list:
+    """The latest two occurrences at or before `moment`, oldest first.
+
+    Counted on the same fixed grid as `next_runs`, so the slot that
+    falls due is the one the card showed, and its string is the same
+    for every caller at the same moment. Shared by the two readers below
     so they cannot disagree about which slot is the latest one.
     """
-    every = max(1, int(plan.get("every_days") or 1))
-    look_back = moment - _dt.timedelta(days=every + 1)
-    return [when for when in next_runs(plan, start=look_back, count=4)
-            if when <= moment]
+    start = _grid_start(plan)
+    if start is None or start > moment:
+        return []
+    step = _dt.timedelta(days=max(1, int(plan.get("every_days") or 1)))
+    latest = (moment - start) // step
+    return [(start + step * k).astimezone(_dt.timezone.utc)
+            for k in range(max(0, latest - 1), latest + 1)]
 
 
 def overdue_training_slot(config: dict | None = None, *,
@@ -1675,33 +1817,22 @@ def next_runs(plan: dict, *, start: _dt.datetime | None = None,
     anybody can turn into a date in their head, and the first question
     asked of a schedule is always "so when does it actually run".
     """
-    if not _valid_time(str(plan.get("at") or "")):
-        return []
-    hour, minute = (int(part) for part in str(plan["at"]).split(":"))
-    every = max(1, int(plan.get("every_days") or 1))
     # Singapore time, which is what the field says and what the EC2
-    # schedule this system already runs on uses. Fixed +08:00 -- there
-    # has been no DST here since 1982, so there is no zone to resolve.
-    sgt = _dt.timezone(_dt.timedelta(hours=8))
-    moment = (start or _now()).astimezone(sgt)
-    # "Every N days from this date" (`from_date`, mirrored from the pull
-    # strip): the grid starts at that date and keeps its days whatever
-    # `start` is; otherwise the next occurrence of the time of day.
-    anchor = None
-    try:
-        day = _dt.date.fromisoformat(str(plan.get("from_date") or ""))
-        anchor = _dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=sgt)
-    except ValueError:
-        pass
-    if anchor is not None:
-        first = anchor
-        if first <= moment:
-            step = _dt.timedelta(days=every)
-            first += step * (((moment - first) // step) + 1)
-        return [(first + _dt.timedelta(days=every * n)).astimezone(_dt.timezone.utc)
-                for n in range(max(0, int(count)))]
-    first = moment.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    # schedule this system already runs on uses.
+    #
+    # ONE grid, fixed by `_grid_start` (from_date, else anchor, else the
+    # legacy epoch) and never by `start`: this used to count from
+    # whatever moment it was handed when no from_date was set, and
+    # `_passed_slots` handed it "now minus an interval", so the grid slid
+    # with the clock and a weekly schedule fell due every day (F2).
+    grid = _grid_start(plan)
+    if grid is None:
+        return []
+    every = max(1, int(plan.get("every_days") or 1))
+    step = _dt.timedelta(days=every)
+    moment = (start or _now()).astimezone(SGT)
+    first = grid
     if first <= moment:
-        first += _dt.timedelta(days=1)
-    return [(first + _dt.timedelta(days=every * n)).astimezone(_dt.timezone.utc)
+        first += step * (((moment - first) // step) + 1)
+    return [(first + step * n).astimezone(_dt.timezone.utc)
             for n in range(max(0, int(count)))]

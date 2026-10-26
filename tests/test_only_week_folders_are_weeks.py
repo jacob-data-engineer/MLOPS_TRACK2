@@ -28,12 +28,17 @@ def test_read_weeks_skips_the_rest(monkeypatch):
     import ppe_pipeline_api.track2_shared as t2
     monkeypatch.setattr(t2, "list_s3_folders", lambda root: list(FOLDERS))
     monkeypatch.setattr(t2, "_basenames", lambda prefix, ext: {})
+    monkeypatch.setattr(t2, "_list_keys", lambda prefix: [])
     names = [w["name"] for w in rt.read_weeks("retraining")]
     assert names == ["week_1", "week_2", "week_10"]
 
 
 def test_the_retention_lists_skip_it_too():
-    assert "rt.only_weeks(t2.list_s3_folders(root)" in inspect.getsource(rl.select)
+    # One inventory for the card, the grid and the lists, and it is the
+    # one that filters on the prefix.
+    assert "rt.read_inventory(" in inspect.getsource(rl.select)
+    assert "only_weeks(t2.list_s3_folders(root)" in inspect.getsource(rt.week_names)
+    assert "week_names(" in inspect.getsource(rt.read_inventory)
     assert 'retention["week_prefix"] = str(config.get("week_prefix") or "week_")' in \
         inspect.getsource(rs._run_chain_body)
 

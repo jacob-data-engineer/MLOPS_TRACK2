@@ -35,6 +35,8 @@ import botocore.config
 import botocore.exceptions
 from boto3.dynamodb.conditions import Attr, Key
 
+from .hyperparams import normalize_hyperparams
+
 REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
 
 def _yaml():
@@ -5157,8 +5159,11 @@ def encode_hyperparams(hyperparams: dict | None) -> str:
     leaves a field alone means "whatever Ultralytics does by default",
     and sending `lr0: ""` would be a different statement entirely.
     """
-    clean = {k: v for k, v in (hyperparams or {}).items()
-             if v is not None and v != ""}
+    # Typed and checked against the one schema (hyperparams.py) -- every
+    # submit path, manual, queued or scheduled, encodes through here, so a
+    # legacy all-string value ("0.01", "false", "10") becomes the number
+    # or boolean Ultralytics requires, and a bad one raises before a job.
+    clean = normalize_hyperparams(hyperparams)
     if not clean:
         return ""
     import base64
@@ -5174,6 +5179,11 @@ def start_training_run(generation, size, epochs, dataset_folder, base_model_fold
     validation failure or a CodeBuild error; returns the new build's id on
     success. Caller is responsible for the already-running (1 GPU slot)
     guard -- see training_already_running_reason."""
+    # FIRST, before any AWS call: a bad value is refused before a filtered
+    # copy, a CodeBuild start or a pipeline execution exists. Queue
+    # entries and the scheduled chain arrive here with whatever they
+    # stored -- legacy strings included -- and are typed the same way.
+    hyperparams = normalize_hyperparams(hyperparams)
     epochs_int, img_size_int, batch_int, seed_int = validate_training_params(epochs, dataset_folder, img_size, batch, seed, eval_dataset_folder)
     env_overrides = [
         {"name": "TRAIN_GENERATION", "value": generation, "type": "PLAINTEXT"},
@@ -5431,6 +5441,11 @@ def start_custom_training_run(
     a model whose classes are not person/helmet must not be able to reach
     the replay lineage, whose consumers read index 0 as person.
     """
+    # FIRST, before any AWS call: a bad value is refused before a filtered
+    # copy, a CodeBuild start or a pipeline execution exists. Queue
+    # entries and the scheduled chain arrive here with whatever they
+    # stored -- legacy strings included -- and are typed the same way.
+    hyperparams = normalize_hyperparams(hyperparams)
     # A dataset labelled with everything on site is the normal case --
     # nobody labels a separate corpus per model type -- so training a
     # single-purpose detector from it means isolating its classes
@@ -5733,9 +5748,22 @@ def queue_snapshot() -> dict:
     under the lock so a concurrent poll-loop mutation is never read half-
     applied."""
     with _queue_lock:
+        pending = [dict(e) for e in _training_queue]
+        running = dict(_queue_running) if _queue_running else None
+    # Entries on a dataset version queued before the version's folders
+    # were carried on the entry: filled from the version, so the card
+    # names where the images come from rather than `_datasets/<id>`.
+    for e in pending + ([running] if running else []):
+        if e.get("dataset_version_id") and not e.get("dataset_version_train_images"):
+            try:
+                from . import dataset_versions as _dsv
+                e.update(_dsv.card_fields(e["dataset_version_id"]))
+            except Exception as exc:                               # noqa: BLE001
+                print(f"Could not read dataset version {e.get('dataset_version_id')}: {exc}")
+    with _queue_lock:
         return {
-            "pending": [dict(e) for e in _training_queue],
-            "running": dict(_queue_running) if _queue_running else None,
+            "pending": pending,
+            "running": running,
             "started": _queue_started,
             "completed_count": _queue_completed_count,
             "last_error": _queue_last_error,
@@ -6072,6 +6100,10 @@ def try_advance_queue() -> None:
                 entry["build_id"] = ""
                 entry["execution_arn"] = result["execution_arn"]
                 entry["run_id"] = result["run_id"]
+                if entry.get("dataset_version_id"):
+                    from . import dataset_versions as _dsv
+                    _dsv.mark(entry["dataset_version_id"], state="started",
+                              run_id=result["run_id"])
             else:
                 entry["build_id"] = start_training_run(
                     entry["generation"], entry["size"], entry["epochs"],
@@ -6753,6 +6785,10 @@ def composed_audit_fields(*, train_data_uris: str, data_yaml_uri: str,
     repeats `val:` under `train:` because Ultralytics requires the key;
     judging "held out" from that file reported every composed run as
     evaluated on its training set."""
+    if "/_datasets/dv-" in data_yaml_uri:
+        return _version_audit_fields(data_yaml_uri, train_data_uris=train_data_uris,
+                                     eval_uri=eval_uri, eval_extra_uris=eval_extra_uris,
+                                     audit_id=audit_id)
     train, val = _composed_entries(data_yaml_uri)
     multi = len({u.removeprefix("s3://").split("/", 1)[0]
                  for u in train_data_uris.split(",") if u.strip()}) > 1
@@ -6764,6 +6800,32 @@ def composed_audit_fields(*, train_data_uris: str, data_yaml_uri: str,
                                               audit_id=audit_id, role="eval"),
         "eval_is_train_dataset": bool(set(t.strip("/") for t in train) & set(v.strip("/") for v in val)),
     }
+
+
+def _version_audit_fields(data_yaml_uri: str, *, train_data_uris: str, eval_uri: str,
+                          eval_extra_uris: str, audit_id: str = "") -> dict:
+    """Audit fields for a run on a dataset version: its manifest IS the
+    list of images, so nothing is re-listed and nothing can have moved."""
+    bucket, _, key = data_yaml_uri.removeprefix("s3://").partition("/")
+    folder = key.rsplit("/", 1)[0]
+    manifest = json.loads(s3.get_object(Bucket=bucket, Key=f"{folder}/manifest.json")["Body"].read())
+
+    def block(names: list, uri: str, role: str) -> dict:
+        shown = [n.split("/", 1)[1] if n.split("/", 1)[0] == BUCKET else n for n in names]
+        rows = write_file_rows(audit_id, role, shown, "", {}) if (audit_id and role) else 0
+        return {"folder": f"{folder} (dataset version)", "s3_uri": uri,
+                "file_count": len(shown), "label_count": 0,
+                "file_names": shown[:AUDIT_MAX_FILE_NAMES],
+                "source_folders": list(manifest.get("sources") or [])[:8],
+                "truncated": len(shown) > AUDIT_MAX_FILE_NAMES, "file_rows": rows,
+                "names_from": "list", "yaml_key": f"{folder}/data.yaml", "composed": True,
+                "dataset_version_id": manifest.get("version_id", "")}
+    eval_shown = ",".join(u for u in [eval_uri] + eval_extra_uris.split(",") if u.strip())
+    train = list(manifest.get("train") or [])
+    val = list(manifest.get("val") or [])
+    return {"train_dataset": block(train, train_data_uris, "train"),
+            "eval_dataset": block(val, eval_shown, "eval"),
+            "eval_is_train_dataset": bool(set(train) & set(val))}
 
 
 def refresh_composed_audits(limit: int = 50) -> list:

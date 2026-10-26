@@ -47,6 +47,9 @@ def bucket(monkeypatch):
 
     from ppe_pipeline_api import track2_shared as t2
     monkeypatch.setattr(t2, "_basenames", basenames)
+    # The inventory (`retention.read_inventory`) lists keys, not stems.
+    monkeypatch.setattr(t2, "_list_keys",
+                        lambda prefix: sorted(k for k in keys if k.startswith(prefix)))
     monkeypatch.setattr(t2, "list_s3_folders", lambda root: list(WEEKS))
     return written
 

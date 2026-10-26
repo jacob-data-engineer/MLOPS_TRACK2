@@ -147,10 +147,19 @@ def test_a_source_numbering_classes_differently_is_refused(bucket):
 
 
 def test_a_yaml_this_module_wrote_is_not_taken_as_evidence(bucket):
+    """Superseded 2026-10-26 (code review F1). A generated yaml used to be
+    ignored outright, which silently assumed the labels were numbered in
+    whatever order was asked for next. With no remap in it and no kept
+    original, a CHANGED class list is now refused -- the numbers' meaning
+    is unknown -- and an unchanged one builds exactly as before."""
     bucket.files["Testing_Dataset/ds/data.yaml"] = dy.IN_PLACE_MARKER + "\nnames:\n  0: other\n"
+    with pytest.raises(ValueError, match="cannot tell what"):
+        dy.build_in_place(splits={"train": S("Testing_Dataset/ds/images/train"),
+                                  "val": S("golden_set/images/val")},
+                          classes={0: "helmet"}, bucket="b")
     dy.build_in_place(splits={"train": S("Testing_Dataset/ds/images/train"),
                               "val": S("golden_set/images/val")},
-                      classes={0: "helmet"}, bucket="b")
+                      classes={0: "other"}, bucket="b")
 
 
 # --- the trainer's preflight, on a real filesystem ------------------------------

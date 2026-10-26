@@ -4445,9 +4445,29 @@ def set_mode(*, mode: str, schedule_expression: str = "",
     # strip reads "Off" is the card saying one thing and the system
     # doing another.
     retrain["enabled"] = mode == "schedule"
+    # The training clock's grid. Inline import: retrain_schedule imports
+    # this module. Re-anchored only when the clock is armed here or its
+    # interval/time changed -- pressing Apply again with the same values
+    # must not slide the grid, which is what let a weekly schedule fall
+    # due every day.
+    from . import retrain_schedule as _rs
+    before = {**_rs.DEFAULTS, **(config.get("retrain_schedule") or {})}
+    retrain = _rs.with_anchor(before, retrain)
     patch["retrain_schedule"] = retrain
 
     write_config(patch)
+
+    # Arming is not running. The fresh anchor already puts the first slot
+    # ahead of now; an operator-chosen start date can still have one a
+    # few minutes behind, so claim it -- the same guard the retrain card's
+    # own Save has.
+    if retrain["enabled"] and not before.get("enabled"):
+        try:
+            slot = _rs.due_training_run({**merged, "retrain_schedule": retrain})
+            if slot:
+                claim_once("training_schedule", slot)
+        except Exception as exc:                               # noqa: BLE001
+            problems.append(f"Could not mark the slot that just passed as handled: {exc}")
     return {
         "mode": mode,
         "schedule_expression": expression,

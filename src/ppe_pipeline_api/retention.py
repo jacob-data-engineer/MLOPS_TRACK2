@@ -472,37 +472,105 @@ def only_weeks(names, week_prefix: str = "week_") -> list:
     return [n for n in names if not prefix or str(n).startswith(prefix)]
 
 
-def read_weeks(root: str, *, images_subpath: str = "images",
-               week_prefix: str = "week_") -> list:
-    """Each week under a root, with the stems it holds, oldest first.
+def week_order(name: str) -> tuple:
+    """`week_10` after `week_9`, not between `week_1` and `week_2` --
+    which decides which week counts as newest, and so the whole curve."""
+    digits = "".join(ch for ch in str(name) if ch.isdigit())
+    return (int(digits) if digits else 0, str(name))
 
-    Ordered by week NAME's numeric suffix where there is one, so `week_10`
-    sorts after `week_9` rather than between `week_1` and `week_2` --
-    which decides which week counts as newest, and so the whole curve.
+
+def week_names(root: str, week_prefix: str = "week_") -> list:
+    """The week folders under a root, oldest first. The one definition of
+    which folders are weeks and what order they age in."""
+    from . import track2_shared as t2
+
+    root = (root or "").strip().strip("/")
+    if not root:
+        raise ValueError("Pick the folder that holds the week folders.")
+    return sorted(only_weeks(t2.list_s3_folders(root), week_prefix), key=week_order)
+
+
+def read_inventory(root: str, *, images_subpath: str = "images",
+                   week_prefix: str = "week_") -> list:
+    """Every week's TRAIN and VAL images, oldest first:
+    `[{"name", "train": {id: key}, "val": {id: key}}]`.
+
+    THE inventory. The card's bars, the schedule grid and the list the
+    trainer reads (`retained_lists.select`) all count from this, because
+    they used not to: the card and grid sized each week from the whole
+    `images/` subtree, val included, while the trainer decayed
+    `images/train` alone -- so the card said "100 of 200" over a week the
+    run took 50 of 100 from, and a validation-only week aged every week
+    before it on the card while the trainer stepped over it as empty.
+
+    An `id` is the image's path under its split folder, extension off:
+    `cam_a/f0` for `images/train/cam_a/f0.jpg`. Not the bare stem, which
+    collapses `cam_a/f0.jpg` and `cam_b/f0.jpg` -- two images with two
+    labels -- into one and hides the other. For a flat folder the id IS
+    the stem, so the decay ranks (and keeps) exactly what it did before.
+    The extension is dropped because the label is: `x.jpg` and `x.png`
+    beside each other both read `x.txt`, so they are one labelled image
+    as far as Ultralytics is concerned; the later key wins, as before.
+
+    Images directly under `images/` (no split) are in neither side. The
+    trainer's lists never read them, so counting them would be the same
+    disagreement over again.
     """
     from . import track2_shared as t2
 
-    root = (root or "").strip("/")
-    if not root:
-        raise ValueError("Pick the folder that holds the week folders.")
-
+    root = (root or "").strip().strip("/")
+    sub = (images_subpath or "").strip("/")
     weeks = []
-    for name in only_weeks(t2.list_s3_folders(root), week_prefix):
-        prefix = f"{root}/{name}/{images_subpath.strip('/')}" if images_subpath else f"{root}/{name}"
-        stems = sorted(t2._basenames(prefix, t2.IMAGE_EXTENSIONS))
-        weeks.append({"name": name, "stems": stems})
-
-    def order(week):
-        digits = "".join(ch for ch in week["name"] if ch.isdigit())
-        return (int(digits) if digits else 0, week["name"])
-
-    weeks.sort(key=order)
+    for name in week_names(root, week_prefix):
+        base = f"{root}/{name}/{sub}" if sub else f"{root}/{name}"
+        sides: dict = {"train": {}, "val": {}}
+        # One listing per week, split by its first segment.
+        for key in sorted(t2._list_keys(base + "/")):
+            if not key.lower().endswith(tuple(t2.IMAGE_EXTENSIONS)):
+                continue
+            split, _, inside = key[len(base) + 1:].partition("/")
+            if split in sides and inside:
+                sides[split][inside.rsplit(".", 1)[0]] = key
+        weeks.append({"name": name, **sides})
     return weeks
+
+
+def plan_inventory(inventory: list, config: dict | None = None) -> dict:
+    """`plan` over the TRAIN side of an inventory, with each week's
+    validation count beside it.
+
+    Validation is reported, never decayed: an evaluation set that shrinks
+    week by week makes every run's numbers incomparable with the last.
+    """
+    planned = plan([{"name": w["name"], "stems": sorted(w["train"])}
+                    for w in inventory], config)
+    vals = {w["name"]: len(w["val"]) for w in inventory}
+    for row in planned["weeks"]:
+        row["val"] = vals.get(row["week"], 0)
+    planned["val_available"] = sum(vals.values())
+    return planned
+
+
+def read_weeks(root: str, *, images_subpath: str = "images",
+               week_prefix: str = "week_") -> list:
+    """Each week's TRAINING image ids, oldest first:
+    `[{"name", "stems": [...]}]`.
+
+    The train side of `read_inventory`, kept for callers that want the
+    old shape. It used to list the whole `images/` subtree, val included,
+    which is what made the card disagree with the trainer.
+    """
+    return [{"name": w["name"], "stems": sorted(w["train"])}
+            for w in read_inventory(root, images_subpath=images_subpath,
+                                    week_prefix=week_prefix)]
 
 
 def preview(*, root: str, config: dict | None = None, images_subpath: str = "images",
             labels_subpath: str = "labels") -> dict:
     """The plan for a real root, ready for the card.
+
+    Counted from `read_inventory`, the same as `retained_lists.select`,
+    so every number on the card is one the trainer's list will hold.
 
     `labels_subpath` is accepted and unused. It was read by the
     rare-class pass, which opened every label file in the corpus; that
@@ -510,12 +578,14 @@ def preview(*, root: str, config: dict | None = None, images_subpath: str = "ima
     callers pass it by name.
     """
     del labels_subpath
-    weeks = read_weeks(root, images_subpath=images_subpath,
-                       week_prefix=(config or {}).get("week_prefix") or "week_")
-    if not weeks:
+    inventory = read_inventory(
+        root, images_subpath=images_subpath,
+        week_prefix=(config or {}).get("week_prefix") or "week_")
+    if not inventory:
         return {"weeks": [], "available": 0, "keep": 0, "dropped": 0,
+                "val_available": 0,
                 "enabled": bool((config or {}).get("enabled")), "root": root}
-    out = plan(weeks, config)
+    out = plan_inventory(inventory, config)
     out["root"] = root
     # The stems are for the build, not the card -- a year of weeks is a
     # lot of filenames to send to a browser that only draws a bar chart.
@@ -573,13 +643,18 @@ def build(*, root: str, classes: dict, config: dict | None = None, destination: 
     """
     from . import track2_shared as t2
 
-    weeks = read_weeks(root, images_subpath=images_subpath,
-                       week_prefix=(config or {}).get("week_prefix") or "week_")
-    if not weeks:
+    week_prefix = (config or {}).get("week_prefix") or "week_"
+    inventory = read_inventory(root, images_subpath=images_subpath,
+                               week_prefix=week_prefix)
+    if not inventory:
         raise ValueError(f"No week folders under {root}.")
-    chosen = plan(weeks, config)
+    chosen = plan_inventory(inventory, config)
 
-    keep_by_week = {row["week"]: set(row["stems"]) for row in chosen["weeks"]}
+    # `assemble_dataset` narrows a source by bare STEM, so the kept ids
+    # are handed over as stems. For a flat split folder those are the
+    # same thing; nested duplicates are this older copy path's limit.
+    keep_by_week = {row["week"]: {s.rsplit("/", 1)[-1] for s in row["stems"]}
+                    for row in chosen["weeks"]}
     train_sources, keep_stems = [], {}
 
     # The golden set first, and whole. It is not collected on any week, so
@@ -617,9 +692,12 @@ def build(*, root: str, classes: dict, config: dict | None = None, destination: 
             if t2._basenames(images, t2.IMAGE_EXTENSIONS):
                 train_sources.append((images, labels))
 
-    for week in weeks:
-        images = f"{root}/{week['name']}/{images_subpath.strip('/')}"
-        labels = f"{root}/{week['name']}/{labels_subpath.strip('/')}"
+    # The TRAIN split of each week, which is what the plan was counted
+    # from. This used to copy the whole `images/` subtree, so a week's
+    # val images whose stems the plan kept landed in the train split.
+    for week in inventory:
+        images = f"{root}/{week['name']}/{images_subpath.strip('/')}/train"
+        labels = f"{root}/{week['name']}/{labels_subpath.strip('/')}/train"
         if not keep_by_week.get(week["name"]):
             continue
         train_sources.append((images, labels))
@@ -627,11 +705,11 @@ def build(*, root: str, classes: dict, config: dict | None = None, destination: 
 
     eval_sources = []
     if eval_root:
-        for week in read_weeks(eval_root, images_subpath=images_subpath,
-                               week_prefix=(config or {}).get("week_prefix") or "week_"):
+        # Names only: the evaluation side is taken whole, folder by folder.
+        for name in week_names(eval_root, week_prefix):
             eval_sources.append((
-                f"{eval_root.strip('/')}/{week['name']}/{images_subpath.strip('/')}",
-                f"{eval_root.strip('/')}/{week['name']}/{labels_subpath.strip('/')}",
+                f"{eval_root.strip('/')}/{name}/{images_subpath.strip('/')}",
+                f"{eval_root.strip('/')}/{name}/{labels_subpath.strip('/')}",
             ))
 
     built = t2.assemble_dataset(

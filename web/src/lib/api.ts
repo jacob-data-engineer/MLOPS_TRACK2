@@ -319,6 +319,10 @@ export interface Track2QueueEntry {
    * already the origin. */
   dataset_source_folders?: string[];
   eval_source_folders?: string[];
+  /** The frozen dataset this entry trains on (dataset_versions.py). */
+  dataset_version_id?: string;
+  dataset_version_train_images?: number;
+  dataset_version_val_images?: number;
   id: string;
   generation: string;
   size: string;
@@ -590,9 +594,19 @@ export interface Track2TrainingParams {
    * default", so a run that sets none of this trains exactly as it did
    * before the field existed. The trainer validates each key against the
    * Ultralytics it actually has and refuses one it does not know, rather
-   * than dropping it in silence. */
-  hyperparams?: Record<string, string>;
+   * than dropping it in silence.
+   *
+   * TYPED: numbers and booleans as JSON numbers and booleans, `freeze`
+   * as a count or a list of layer indices. Ultralytics refuses a string
+   * `lr0` and ignores a string `freeze`; the API checks every value
+   * against src/ppe_pipeline_api/hyperparams.py before a job starts. */
+  hyperparams?: Track2Hyperparams;
 }
+
+/** One extra Ultralytics training argument, as the run receives it. */
+export type Track2HyperparamValue = string | number | boolean | number[];
+/** The extra Ultralytics training arguments a run is sent. */
+export type Track2Hyperparams = Record<string, Track2HyperparamValue>;
 
 
 export interface Track2CheckpointInspection {
@@ -2486,6 +2500,10 @@ export interface Track2RetentionWeek {
   available: number;
   keep: number;
   dropped: number;
+  /** This week's validation images. Kept in full, never decayed, and not
+   * part of `available` -- which counts the train side only, the same
+   * images the trainer's retained list is drawn from. */
+  val?: number;
 }
 
 export interface Track2RetentionSettings {
@@ -2521,6 +2539,8 @@ export interface Track2RetentionPlan {
   available: number;
   keep: number;
   dropped: number;
+  /** Validation images across every week, kept in full. */
+  val_available?: number;
   enabled: boolean;
 }
 
@@ -2707,7 +2727,7 @@ export function saveTrack2Retrain(
 /** `start` submits directly; `queue` adds to the queue and releases it,
  * the way the schedule does. Defaults to `start` so the Retention card's
  * "Run it now" is unchanged. */
-export function runTrack2Retrain(submit: "start" | "queue" = "start"): Promise<Track2RetrainRun> {
+export function runTrack2Retrain(submit: "start" | "queue" | "enqueue" = "start"): Promise<Track2RetrainRun> {
   return apiPost("/track2/retention/retrain/run", { submit });
 }
 
@@ -2988,6 +3008,37 @@ export interface Track2Scheduled {
 export function getTrack2Scheduled(days = 42, files: string[] | "*" = []): Promise<Track2Scheduled> {
   const list = files === "*" ? "*" : files.join(",");
   return apiGet(`/track2/retention/scheduled?days=${days}&files=${encodeURIComponent(list)}`);
+}
+
+/** A frozen dataset a run was queued or started on (dataset_versions.py). */
+export interface Track2DatasetVersion {
+  version_id: string;
+  created_at: string;
+  trigger?: string;
+  sources?: string[];
+  classes?: string[];
+  train_images?: number;
+  val_images?: number;
+  drop_undeclared?: boolean;
+  state?: string;
+  entry_id?: string;
+  run_id?: string;
+  data_yaml_uri?: string;
+  entry_template?: Record<string, unknown>;
+}
+
+export function listTrack2DatasetVersions(limit = 30): Promise<{ versions: Track2DatasetVersion[] }> {
+  return apiGet(`/track2/retention/versions?limit=${limit}`);
+}
+
+export function getTrack2DatasetVersion(
+  id: string,
+): Promise<Track2DatasetVersion & { data_yaml: string; eval_yaml: string }> {
+  return apiGet(`/track2/retention/versions/${encodeURIComponent(id)}`);
+}
+
+export function queueTrack2DatasetVersion(id: string): Promise<{ queued: string; version_id: string }> {
+  return apiPost(`/track2/retention/versions/${encodeURIComponent(id)}/queue`);
 }
 
 export function listTrack2Folders(

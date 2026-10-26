@@ -129,7 +129,7 @@
       "Arguments": {
         "AlgorithmSpecification": {
           "TrainingInputMode": "File",
-          "TrainingImage": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train@sha256:52e15a847bf6a0a853d6cb11dcbfe31f7638e7faafdb4054dedcf077bbebb64e",
+          "TrainingImage": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train@sha256:f32b71bdad25db69d906c2cb5e843a78e982ab69eba57522fac682305eb11fe0",
           "MetricDefinitions": [
             {
               "Name": "train:epoch",

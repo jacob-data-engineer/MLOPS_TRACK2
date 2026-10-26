@@ -48,17 +48,6 @@ TRAIN_NAME = "train.txt"
 VAL_NAME = "val.txt"
 
 
-def _week_keys(root: str, week: str, *, bucket: str, images_subpath: str,
-               split: str) -> dict:
-    """{stem: key} for one week's images on one side."""
-    from . import track2_shared as t2
-
-    prefix = f"{root}/{week}/{images_subpath.strip('/')}"
-    if split:
-        prefix = f"{prefix}/{split}"
-    return t2._basenames(prefix, t2.IMAGE_EXTENSIONS)
-
-
 def select(*, root: str, config: dict | None = None, bucket: str = "",
            images_subpath: str = "images") -> dict:
     """Which images each side of a run should actually train on.
@@ -79,23 +68,19 @@ def select(*, root: str, config: dict | None = None, bucket: str = "",
     bucket = bucket or pc.destination_bucket()
     config = {**rt.DEFAULTS, **(config or {})}
 
-    from . import track2_shared as t2
-
-    # Weeks only -- not `_retained/`, which this very module writes
-    # into the root, nor any other folder somebody put there.
-    names = sorted(rt.only_weeks(t2.list_s3_folders(root),
-                                 config.get("week_prefix") or "week_"),
-                   key=lambda n: (rt_digits(n), n))
-    train_keys = {w: _week_keys(root, w, bucket=bucket,
-                                images_subpath=images_subpath, split="train")
-                  for w in names}
-    val_keys = {w: _week_keys(root, w, bucket=bucket,
-                              images_subpath=images_subpath, split="val")
-                for w in names}
+    # The SAME inventory the card's bars and the schedule grid count
+    # from: weeks only (not `_retained/`, which this very module writes
+    # into the root), in the same order, the train side and the val side
+    # read apart. A second reading here is how the card came to say
+    # "100 of 200" over a week this list took 50 of 100 from.
+    inventory = rt.read_inventory(root, images_subpath=images_subpath,
+                                  week_prefix=config.get("week_prefix") or "week_")
+    names = [w["name"] for w in inventory]
+    train_keys = {w["name"]: w["train"] for w in inventory}
+    val_keys = {w["name"]: w["val"] for w in inventory}
 
     # The train side, through the policy.
-    weeks = [{"name": w, "stems": sorted(train_keys[w])} for w in names]
-    planned = rt.plan(weeks, config)
+    planned = rt.plan_inventory(inventory, config)
     kept_by_week = {row["week"]: row for row in planned["weeks"]}
 
     train: list = []
@@ -131,12 +116,6 @@ def select(*, root: str, config: dict | None = None, bucket: str = "",
         "val_available": sum(r["val"] for r in rows),
         "enabled": bool(config.get("enabled")),
     }
-
-
-def rt_digits(name: str) -> int:
-    """week_10 after week_9, not between week_1 and week_2."""
-    digits = "".join(ch for ch in name if ch.isdigit())
-    return int(digits) if digits else 0
 
 
 def _relative(key: str, root: str) -> str:

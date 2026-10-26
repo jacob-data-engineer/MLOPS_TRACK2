@@ -44,7 +44,8 @@ def test_the_manual_route_takes_submit():
 
 def test_it_is_the_same_two_values_the_chain_takes():
     code = inspect.getsource(router.run_retrain)
-    assert 'if submit not in ("start", "queue"):' in code
+    # `enqueue` added 2026-10-26: Add to Queue for the assembled dataset.
+    assert 'if submit not in ("start", "queue", "enqueue"):' in code
     assert 'rs.run_chain(trigger="manual", submit=submit)' in code
 
 
@@ -65,7 +66,7 @@ def test_the_body_is_optional_so_run_it_now_is_unchanged():
 # --- the client ----------------------------------------------------------------
 
 def test_the_client_can_ask_for_either():
-    assert 'runTrack2Retrain(submit: "start" | "queue" = "start")' in API
+    assert 'runTrack2Retrain(submit: "start" | "queue" | "enqueue" = "start")' in API
     assert 'apiPost("/track2/retention/retrain/run", { submit })' in API
 
 
@@ -80,8 +81,10 @@ def test_a_composed_run_goes_through_the_chain_as_queue():
     """`queue`, not `start`: the entry lands in the queue card with every
     other run and the queue releases it -- the schedule's hand-over."""
     code = _flat(PAGE)
-    assert 'if (composed) {' in code
-    assert 'const got = await runTrack2Retrain("queue");' in code
+    # Every assembled run goes through the chain now (2026-10-26); a
+    # composed one still as `queue`, which also releases the queue.
+    assert 'if (dataSource === "assembled") {' in code
+    assert 'const got = await runTrack2Retrain(composed ? "queue" : "enqueue");' in code
 
 
 def test_an_uncomposed_run_still_queues_the_old_way():
@@ -93,7 +96,7 @@ def test_an_uncomposed_run_still_queues_the_old_way():
 
 def test_the_chain_path_comes_before_the_old_one():
     code = _flat(PAGE)
-    assert code.index('runTrack2Retrain("queue")') < code.index("await addTrack2Queue(params());")
+    assert code.index('runTrack2Retrain(composed ? "queue" : "enqueue")') < code.index("await addTrack2Queue(params());")
 
 
 def test_the_failing_step_is_shown_in_its_own_words():
@@ -106,7 +109,7 @@ def test_the_failing_step_is_shown_in_its_own_words():
 def test_the_button_says_what_it_will_do():
     code = _flat(PAGE)
     assert '(composed ? "Build, Queue and Start" : "Add to Queue")' in code
-    assert '(composed ? "Building and queueing..." : "Working...")' in code
+    assert '(dataSource === "assembled" ? "Generating the yaml and queueing..." : "Working...")' in code
 
 
 def test_the_change_of_behaviour_is_said_under_the_button():
@@ -133,7 +136,7 @@ def test_the_label_that_promised_composition_is_now_true():
     could be combined. Until this, nothing under it composed."""
     code = _flat(PAGE)
     assert "composed at run time" in code
-    assert 'runTrack2Retrain("queue")' in code
+    assert 'runTrack2Retrain(composed ? "queue" : "enqueue")' in code
 
 
 def test_the_client_import_is_present():

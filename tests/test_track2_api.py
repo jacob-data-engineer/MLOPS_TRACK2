@@ -327,6 +327,15 @@ def test_queued_custom_run_uses_the_custom_pipeline(client, monkeypatch):
                         {"run_id": "custom-1", "execution_arn": "arn:exec/custom-1", "audit_id": "a1"})
     monkeypatch.setattr(t2, "start_training_run",
                         lambda *a, **kw: calls["production"].append(a) or "build-1")
+    # A custom entry is frozen as a dataset version at add time (2026-10-26);
+    # that has its own tests -- here only the pipeline choice matters.
+    from ppe_pipeline_api import dataset_versions as dsv
+    monkeypatch.setattr(dsv, "for_run", lambda **kw: {
+        "version_id": "dv-test", "folder": "_datasets/dv-test",
+        "train_data_uris": "s3://b/data/x/,s3://b/_datasets/dv-test/train/",
+        "data_yaml_uri": "s3://b/_datasets/dv-test/data.yaml",
+        "eval_dataset_folder": "s3://b/_datasets/dv-test/eval", "eval_extra_uris": ""})
+    monkeypatch.setattr(dsv, "mark", lambda *a, **k: None)
 
     add = client.post("/track2/models/queue/add", json={
         "generation": "11", "size": "s", "dataset_folder": "data/x",

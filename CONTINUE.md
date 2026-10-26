@@ -5,6 +5,68 @@ outstanding. `README.md` describes the layout; this file is the handover.
 
 ---
 
+## "item" instead of "helmet": single_cls inherited from the base checkpoint (2026-10-26)
+
+Ultralytics re-applies `single_cls` from the STARTING checkpoint's saved
+args (`Model._reset_ckpt_args` keeps `imgsz`, `data`, `task`,
+`single_cls`). v14 of `yolo11s-helmet-detector` was trained single-class,
+so every continuation trained single-class with `SingleCls` off -- the
+class came out as `item` and `EvaluateYolo` refused it ("candidate
+checkpoint classes {0: 'item'} do not match the dataset's {0: 'helmet'}").
+Fixed twice: `train.py` now always passes `single_cls` (off included), and
+`evaluate_any.py` (uploaded to `s3://track2-s3/custom/code/`; the old copy
+is under `custom/code/backup/`) scores a one-class `item` checkpoint
+against a one-class dataset under the dataset's name.
+
+---
+
+## Dataset versions: every queued run trains on a frozen dataset (2026-10-26)
+
+**Live on dev (8090), not production. Uncommitted.** Option B of the
+queue-isolation design. Code: `src/ppe_pipeline_api/dataset_versions.py`;
+tests: `tests/test_dataset_versions.py`.
+
+Why: a golden-set-only run failed because `golden_set/data.yaml` -- its
+TRAINING yaml -- had been overwritten by a composed run's EVALUATION yaml
+while it waited in the queue. Shared, overwritable yaml slots
+(`<folder>/data.yaml`, `_generated/<hash>/data.yaml`, the eval yaml in a
+val folder) were read at START time, not queue time.
+
+What happens now, whenever the chain queues/starts a run and whenever
+step 6 queues an open-pipeline run: the yaml is resolved to the exact
+images and written ONCE under `_datasets/<dv-id>/` (`data.yaml`,
+`train/train.txt`, `train/val.txt`, `eval/data.yaml`, `eval/val.txt`,
+`manifest.json`), plus a row in the snapshot table
+(`record_type = dataset_version`; snapshot listings skip these). The run
+is pointed at it: `TrainingDatasetUri` = data prefixes + `_datasets/<id>/train/`,
+`DataYamlUri` = the version's yaml, `EvaluationDatasetUri` =
+`_datasets/<id>/eval/`, `EvalExtraUris` = the val folders. **No trainer,
+evaluator or pipeline change** -- lists are read by Ultralytics, the
+trainer's filter/preflight and the evaluator's filter as they already were.
+Folders are still downloaded whole; the lists decide what is READ.
+
+The "Dataset versions" card under the training queue lists them, shows
+both yamls, and **Queue again** replays the entry's settings on the same
+version.
+
+Open:
+- The queue-runner Lambda's role has no access to the snapshot table, so a
+  run started by the Lambda leaves its version's state at "queued" (logged,
+  non-fatal). App-started runs mark "started".
+- The app's role has no `UpdateItem` on that table; `mark()` does
+  get/merge/put instead. Keep it that way or add the grant.
+- Direct "Start Training" (not queued) is not versioned -- it reads the
+  yaml immediately.
+
+Same day, code-review fixes F1-F6 (remap kept via `data.source.yaml`,
+anchored training clock, typed hyperparameters in `hyperparams.py`,
+sibling-root and foreign-prefix layouts via `dataset_yaml.local_layout`,
+one retention inventory) and Add to Queue regenerating the yaml are also
+on dev. A new trainer image is optional (only for the trainer to re-type
+legacy string hyperparameters itself).
+
+---
+
 ## Enabling more GPU quota to shorten the training queue (2026-10-20)
 
 **Not started.** Runs queue one behind another because of two limits,
@@ -4284,10 +4346,12 @@ The whole chain, in order:
    check the local md5 equals the S3 ETag)
 3. `aws codebuild start-build --project-name track2-yolo-train-images`
 4. take the new digest from ECR and re-pin it in
-   `model_training/custom_training/pipeline_open.json`
+   `model_training/custom_training/pipeline.json` -- **that** file is the
+   one equal to the live definition (checked 2026-10-26);
+   `pipeline_open.json` is stale and pins an older digest
 5. `aws sagemaker update-pipeline --pipeline-name
    track2-yolo-open-training-pipeline --pipeline-definition
-   file://pipeline_open.json`
+   file://pipeline.json`
 
 Step 4 is its own trap: the pipeline pins the image BY DIGEST, so a new
 image reaches nothing until it is re-pinned. Everything looks deployed

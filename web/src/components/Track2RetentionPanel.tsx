@@ -900,9 +900,14 @@ export function Track2RetentionPanel({
           {plan && (
             <div className="rounded-md border border-black/15 bg-page p-3">
               <p className="mb-2 text-xs font-medium text-ink">
-                {plan.keep.toLocaleString()} of {plan.available.toLocaleString()} images,
+                {plan.keep.toLocaleString()} of {plan.available.toLocaleString()} training images,
                 {" "}{plan.dropped.toLocaleString()} left out
                 {!plan.enabled && " (decay is off -- everything counts)"}
+                {(plan.val_available ?? 0) > 0 && (
+                  <span className="font-normal text-ink-muted">
+                    {" "}· {(plan.val_available ?? 0).toLocaleString()} validation images kept in full
+                  </span>
+                )}
               </p>
               <div className="flex flex-col gap-1">
                 {/* Drawn first and always full. It is not a week -- it has
@@ -958,8 +963,16 @@ export function Track2RetentionPanel({
                         style={{ width: `${(w.keep / widest) * 100}%` }}
                       />
                     </span>
-                    <span className="tabular w-28 shrink-0 text-right text-ink-secondary">
+                    <span
+                      className="tabular w-28 shrink-0 text-right text-ink-secondary"
+                      title={(w.val ?? 0) > 0
+                        ? `Training images. Plus ${w.val} validation images, kept in full.`
+                        : "Training images."}
+                    >
                       {w.keep.toLocaleString()} / {w.available.toLocaleString()}
+                    </span>
+                    <span className="tabular w-16 shrink-0 text-right text-ink-muted">
+                      {(w.val ?? 0) > 0 ? `+${w.val} val` : ""}
                     </span>
                     <span
                       className="tabular w-16 shrink-0 text-right text-ink-muted"

@@ -65,6 +65,31 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
 
 
+def composed_local_paths(roots: list, home: str, files_by_root: dict) -> list:
+    """Every file of a composed run, named where the trainer puts it.
+
+    `roots` are the run's download prefixes (a bare key in `home`, or
+    `s3://bucket/key`); `files_by_root` gives each one's files relative to
+    it. Named by `dataset_yaml.local_layout` -- the trainer's own rule --
+    so the manifest, the yaml and the disk agree: one prefix stripped,
+    several in one bucket full keys, several buckets <bucket>/<key> for
+    every file. Code review 2026-10-26, F5: this recorded only FOREIGN
+    files with a bucket, and kept full keys for a single prefix.
+    """
+    def uri(root: str) -> tuple:
+        if root.startswith("s3://"):
+            b, _, k = root[5:].partition("/")
+            return b, k.strip("/")
+        return home, root.strip("/")
+
+    parsed = [uri(r) for r in roots]
+    local = dataset_yaml.local_layout([f"s3://{b}/{k}" for b, k in parsed])
+    out: list = []
+    for root, (b, k) in zip(roots, parsed):
+        out += [local(b, f"{k}/{rel}") for rel in files_by_root.get(root) or []]
+    return sorted(set(out))
+
+
 def collect_files(root: str, *, bucket: str = "", images_subpath: str = "images",
                   labels_subpath: str = "labels") -> dict:
     """Every image and label key under a root, relative to it.
@@ -340,24 +365,24 @@ def create(*, root: str, bucket: str = "", source_bucket: str = "",
     composed = [str(r).strip().strip("/") for r in (extra_roots or ()) if str(r).strip()]
     key_prefix = collected["root"] + "/"
     if composed:
-        merged: list = []
+        by_root: dict = {}
         weeks: list = []
         for extra in composed:
-            # `s3://bucket/key` for a root in another bucket; its files are
-            # recorded as <bucket>/<key>, which is how the run lays them out.
-            xb = target
+            # `s3://bucket/key` for a root in another bucket.
+            xb, key = target, extra
             if extra.startswith("s3://"):
-                xb, _, extra = extra[5:].partition("/")
-            side = collect_files(extra, bucket=xb,
+                xb, _, key = extra[5:].partition("/")
+            side = collect_files(key, bucket=xb,
                                  images_subpath=images_subpath,
                                  labels_subpath=labels_subpath)
-            qual = "" if xb == target else f"{xb}/"
-            merged += [f"{qual}{side['root']}/{rel}" for rel in side["files"]]
+            by_root[extra] = side["files"]
             # Named for the prefix they came from, so a week number
             # that appears under two roots stays two rows.
             weeks += [{**row, "week": f"{side['root']}/{row['week']}"}
                       for row in side["weeks"]]
-        collected = {**collected, "files": sorted(set(merged)), "weeks": weeks}
+        # Where the trainer lays each file out -- see composed_local_paths.
+        merged = composed_local_paths(composed, target, by_root)
+        collected = {**collected, "files": merged, "weeks": weeks}
         key_prefix = ""
 
     # The LIVE yaml where there is one, rebuilt only as a fallback. A
@@ -627,7 +652,9 @@ def listing(*, root: str = "", limit: int = 50) -> list:
         rows = _table().scan(Limit=MAX_ROWS).get("Items", [])
     except Exception:                                          # noqa: BLE001
         return []
-    rows = [_plain(r) for r in rows]
+    # Dataset versions share this table (dataset_versions.py) and are not
+    # snapshots anybody picked; they are listed on their own.
+    rows = [_plain(r) for r in rows if r.get("record_type") != "dataset_version"]
     if root:
         wanted = root.strip("/")
         rows = [r for r in rows if r.get("root") == wanted]

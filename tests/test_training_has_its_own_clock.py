@@ -115,7 +115,9 @@ def test_it_catches_up_once_rather_than_once_per_missed_day():
 def test_a_slot_older_than_one_interval_is_let_go():
     """The NEXT one is closer than the one that was missed, so firing it
     would spend GPU on a slot nobody is waiting for."""
-    weekly = {"retrain_schedule": {**DAILY, "every_days": 7},
+    # Anchored on a day the grid lands on the 16th. Unanchored, a weekly
+    # schedule used to be due on EVERY day at this time (F2).
+    weekly = {"retrain_schedule": {**DAILY, "every_days": 7, "anchor": "2026-10-09"},
               "dataset_assemble": {"only": True}}
     assert rs.due_training_run(weekly, now=_at(16, 9, 30)) is not None
 
