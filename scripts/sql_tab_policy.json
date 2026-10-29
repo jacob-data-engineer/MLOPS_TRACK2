@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeSqlQueryFunctions",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": [
+        "arn:aws:lambda:ap-southeast-1:125192671932:function:track2-pg-query-violation-review",
+        "arn:aws:lambda:ap-southeast-1:125192671932:function:track2-pg-query-jpui-preview"
+      ]
+    },
+    {
+      "Sid": "ReadSqlDatabaseStatus",
+      "Effect": "Allow",
+      "Action": "rds:DescribeDBInstances",
+      "Resource": "*"
+    },
+    {
+      "Sid": "StartStopSqlDatabases",
+      "Effect": "Allow",
+      "Action": ["rds:StartDBInstance", "rds:StopDBInstance"],
+      "Resource": [
+        "arn:aws:rds:ap-southeast-1:125192671932:db:violation-review-postgres",
+        "arn:aws:rds:ap-southeast-1:125192671932:db:jpui-preview-crop-authority"
+      ]
+    }
+  ]
+}

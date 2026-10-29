@@ -131,7 +131,10 @@ cat > "$TMP/app-policy.json" <<EOF
  {"Sid":"InvokeSqlQueryFunctions","Effect":"Allow","Action":"lambda:InvokeFunction",
   "Resource":["arn:aws:lambda:$REGION:$ACCOUNT:function:track2-pg-query-violation-review",
               "arn:aws:lambda:$REGION:$ACCOUNT:function:track2-pg-query-jpui-preview"]},
- {"Sid":"ReadSqlDatabaseStatus","Effect":"Allow","Action":"rds:DescribeDBInstances","Resource":"*"}]}
+ {"Sid":"ReadSqlDatabaseStatus","Effect":"Allow","Action":"rds:DescribeDBInstances","Resource":"*"},
+ {"Sid":"StartStopSqlDatabases","Effect":"Allow","Action":["rds:StartDBInstance","rds:StopDBInstance"],
+  "Resource":["arn:aws:rds:$REGION:$ACCOUNT:db:violation-review-postgres",
+              "arn:aws:rds:$REGION:$ACCOUNT:db:jpui-preview-crop-authority"]}]}
 EOF
 aws iam put-role-policy --role-name track2-yolo-review-host --policy-name track2-sql-tab \
   --policy-document "file://$(win "$TMP/app-policy.json")"

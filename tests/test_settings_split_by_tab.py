@@ -174,3 +174,10 @@ def test_each_page_has_its_own_toolbar():
     assert "loadTrack2SettingsFile(picked, true, scope)" in bar
     assert "newTrack2Settings(scope)" in bar
     assert 'const SUFFIX: Record<Track2SettingsScope, string> = { dp: "_DP", at: "_AT" };' in bar
+
+
+def test_each_tab_lists_only_its_own_files():
+    """Old whole-page files are offered on neither tab (2026-10-29)."""
+    bar = (WEB / "components" / "Track2PinnedBar.tsx").read_text(encoding="utf-8")
+    assert "const mine = out.files.filter((f) => f.scope === scope);" in bar
+    assert "old, both tabs" not in bar

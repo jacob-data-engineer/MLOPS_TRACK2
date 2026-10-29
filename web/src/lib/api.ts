@@ -2156,10 +2156,15 @@ export interface Track2PullConfig {
     bucket?: string;
     folder?: string;
     sql?: string;
+    /** The ready-made query last chosen: a class and which frames. */
+    preset_class?: string;
+    preset_scope?: string;
     /** Where "Pull these images" copies to, and the train share. */
     pull_bucket?: string;
     pull_folder?: string;
     train_percent?: number;
+    show_labels?: boolean;
+    with_labels?: boolean;
   };
   golden_set?: {
     bucket?: string;
@@ -3657,6 +3662,20 @@ export interface Track2SqlTable {
 }
 
 /** One image found in the result, narrowed by the chosen bucket and folder. */
+export interface Track2SqlBox {
+  cls: number;
+  name: string;
+  x1: number; y1: number; x2: number; y2: number;
+}
+
+export interface Track2SqlFrameLabels {
+  boxes: Track2SqlBox[];
+  complete: boolean;
+  reason: string;
+  width?: number;
+  height?: number;
+}
+
 export interface Track2SqlImage {
   uri: string;
   bucket: string;
@@ -3664,6 +3683,10 @@ export interface Track2SqlImage {
   /** The column it was found in, and the row. */
   column: string;
   row: number;
+  /** The frame's boxes, 0..1, when the query returned them (the
+   * human-verified frames do). `complete` is false when a helmet-wearer
+   * has no helmet box; a labelled pull leaves such frames out. */
+  labels?: Track2SqlFrameLabels;
 }
 
 export interface Track2SqlResult {
@@ -3676,6 +3699,16 @@ export interface Track2SqlResult {
 
 export function getTrack2SqlDatabases(): Promise<{ databases: Track2SqlDatabase[] }> {
   return apiGet("/track2/sql/databases");
+}
+
+/** Start or stop one of the databases. Starting takes several minutes;
+ * poll getTrack2SqlDatabases until it reads available. */
+export function setTrack2SqlDatabaseRunning(key: string, run: boolean): Promise<{
+  key: string; status: string; changed: boolean;
+}> {
+  return run
+    ? apiPost(`/track2/sql/databases/${encodeURIComponent(key)}/start`)
+    : apiPost(`/track2/sql/databases/${encodeURIComponent(key)}/stop`);
 }
 
 export function getTrack2SqlSchema(database: string): Promise<{ tables: Track2SqlTable[] }> {
@@ -3691,6 +3724,34 @@ export function runTrack2Sql(
   return apiPost("/track2/sql/query", { database, sql, bucket, folder });
 }
 
+/** A class the review database has judged frames for. Only the helmet
+ * class has a helmet-box step, so only it offers "ready" and "test". */
+export interface Track2SqlClass {
+  name: string;
+  frames: number;
+  has_boxes: boolean;
+}
+
+export type Track2SqlPresetScope = "resolved" | "ready" | "test";
+
+export function getTrack2SqlClasses(database: string): Promise<{ classes: Track2SqlClass[] }> {
+  return apiPost("/track2/sql/classes", { database });
+}
+
+/** Signed links to show images as thumbnails, one screenful at a time. */
+export function getTrack2SqlPreviews(uris: string[]): Promise<{
+  previews: { uri: string; url: string }[];
+}> {
+  return apiPost("/track2/sql/previews", { uris });
+}
+
+/** The human-verified query for one class, built server-side. */
+export function getTrack2SqlPreset(
+  hazard: string, scope: Track2SqlPresetScope,
+): Promise<{ sql: string }> {
+  return apiPost("/track2/sql/preset", { hazard, scope });
+}
+
 /** What a pull copied. Nothing is overwritten: names already at the
  * destination are `skipped`, so a pull can be repeated. */
 export interface Track2SqlPullResult {
@@ -3703,6 +3764,9 @@ export interface Track2SqlPullResult {
   train: number;
   val: number;
   bare_paths_left_out: number;
+  /** Frames left out of a labelled pull because a helmet box was missing. */
+  left_out_incomplete: number;
+  labels_from: "database" | "source" | "none";
   failed: number;
   errors: string[];
 }
@@ -3713,11 +3777,13 @@ export interface Track2SqlPullResult {
 export function pullTrack2Sql(params: {
   database: string; sql: string; bucket: string; folder: string;
   destBucket: string; destFolder: string; trainPercent: number;
+  withLabels: boolean;
 }): Promise<Track2SqlPullResult> {
   return apiPost("/track2/sql/pull", {
     database: params.database, sql: params.sql,
     bucket: params.bucket, folder: params.folder,
     dest_bucket: params.destBucket, dest_folder: params.destFolder,
     train_percent: params.trainPercent,
+    with_labels: params.withLabels,
   });
 }

@@ -110,9 +110,10 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
       ]);
       setMinFiles(Number(after?.settings.min_files ?? 1) || 1);
       setCooldown(Number(after?.settings.cooldown_minutes ?? 0) || 0);
-      // This tab's files, and the ones from before the split -- those
-      // hold both pages, and loading one here takes only this tab's half.
-      const mine = out.files.filter((f) => f.scope === scope || !f.scope);
+      // This tab's files ONLY. Files from before the split hold both pages
+      // and are not offered on either (2026-10-29): a tab's list is that
+      // tab's settings and nothing else.
+      const mine = out.files.filter((f) => f.scope === scope);
       setFiles(mine);
       const live = String(status?.config[`settings_file_${scope}`] ?? "");
       setCurrent(live);
@@ -280,7 +281,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
             >
               {files.map((f) => (
                 <option key={f.name} value={f.name}>
-                  {f.scope ? f.name : `${f.name} (old, both tabs)`}
+                  {f.name}
                 </option>
               ))}
             </select>
@@ -300,9 +301,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                 const untouched = kept.length
                   ? ` ${kept.length} already here, left as ${kept.length === 1 ? "it is" : "they are"}.`
                   : "";
-                const half = files.find((f) => f.name === picked)?.scope
-                  ? "" : ` (only its ${TAB[scope]} settings)`;
-                setNote(`Loaded ${out.name}${half}.${registry}${untouched} Refreshing...`);
+                setNote(`Loaded ${out.name}.${registry}${untouched} Refreshing...`);
                 window.setTimeout(() => window.location.reload(), 1100);
               })}
               className="rounded-md border border-black/15 px-2.5 py-1 font-medium text-ink-secondary disabled:opacity-40"

@@ -148,6 +148,8 @@ def test_the_routes_exist():
     from ppe_pipeline_api.main import app
     paths = app.openapi()["paths"]
     for path in ("/track2/sql/databases", "/track2/sql/schema", "/track2/sql/query",
+                 "/track2/sql/classes", "/track2/sql/preset", "/track2/sql/previews",
+                 "/track2/sql/databases/{key}/start", "/track2/sql/databases/{key}/stop",
                  "/track2/sql/pull"):
         assert path in paths
 
@@ -249,3 +251,201 @@ def test_the_label_is_looked_for_where_ultralytics_would():
 def test_a_pull_needs_a_folder_and_never_writes_into_code_or_weights(folder):
     with pytest.raises(ValueError):
         sx.pull("violation-review", "q", dest_bucket="track2-s3", dest_folder=folder)
+
+
+# --- human-verified frames, by class --------------------------------------------
+
+def test_the_classes_come_from_the_database(monkeypatch):
+    fake = _Lambda({"ok": True, "columns": ["class", "frames"],
+                    "rows": [["no_helmet", 5633], ["worker_on_edge", 1708]], "truncated": False})
+    monkeypatch.setattr(sx, "_client", lambda kind: fake)
+    got = sx.classes("violation-review")
+    assert got == [{"name": "no_helmet", "frames": 5633, "has_boxes": True},
+                   {"name": "worker_on_edge", "frames": 1708, "has_boxes": False}]
+
+
+def test_the_preset_keeps_only_human_answers():
+    sql = sx.preset_sql("no_helmet", "resolved")
+    assert "data->>'hazard_type' = 'no_helmet'" in sql
+    assert "<> 'similarity_prefill'" in sql and "<> 'true'" in sql
+    assert "j.answered = j.kept_people" in sql
+    # a frame "no violation" cannot cover a person somebody called a violation
+    assert "fv.verdict = 'no_violation' AND j.violations = 0" in sql
+    assert "AS image" in sql
+
+
+def test_ready_and_test_narrow_the_helmet_class_only():
+    assert "WHERE helmet_box <> 'missing'" in sx.preset_sql("no_helmet", "ready")
+    assert "WHERE helmet_box = 'human (test-grade)'" in sx.preset_sql("no_helmet", "test")
+    with pytest.raises(ValueError):
+        sx.preset_sql("worker_on_edge", "ready")
+
+
+@pytest.mark.parametrize("hazard", ["", "x'; drop table cases; --", "No Helmet"])
+def test_a_class_name_is_never_written_into_sql_unchecked(hazard):
+    with pytest.raises(ValueError):
+        sx.preset_sql(hazard, "resolved")
+
+
+def test_an_image_column_counts_without_an_extension():
+    key = "eval/suspended_cargo/evidence/abc123/source"
+    found = sx.images_from(["image", "note"], [[f"s3://b/{key}", f"s3://b/{key}"]])
+    assert [i["column"] for i in found] == ["image"]
+
+
+def test_an_extensionless_image_is_named_after_its_folder(monkeypatch):
+    key = "eval/suspended_cargo/evidence/abc123/source"
+    s3 = _pull_setup(monkeypatch, [[f"s3://src/{key}"]], {("src", key): b"\xff\xd8"})
+    sx.pull("violation-review", "q", dest_bucket="d", dest_folder="p")
+    assert ("d", "p/images/train/abc123.jpg") in s3.objects
+
+
+# --- point and select, with a preview ------------------------------------------
+
+def test_previews_sign_s3_images_only_and_serve_extensionless_as_jpeg(monkeypatch):
+    signed = []
+
+    class Signer:
+        def generate_presigned_url(self, op, Params, ExpiresIn):
+            signed.append((op, Params, ExpiresIn))
+            return "https://signed/" + Params["Key"]
+
+    monkeypatch.setattr(sx.storage, "s3", Signer())
+    got = sx.previews(["s3://b/a.jpg", "frames/b.jpg", "s3://b/ev/1/source"])
+    assert [g["uri"] for g in got] == ["s3://b/a.jpg", "s3://b/ev/1/source"]
+    assert all(op == "get_object" and secs <= 900 for op, _, secs in signed)
+    assert "ResponseContentType" not in signed[0][1]
+    assert signed[1][1]["ResponseContentType"] == "image/jpeg"
+
+
+def test_previews_are_capped_at_a_screenful(monkeypatch):
+    class Signer:
+        def generate_presigned_url(self, op, Params, ExpiresIn):
+            return "u"
+    monkeypatch.setattr(sx.storage, "s3", Signer())
+    assert len(sx.previews([f"s3://b/{n}.jpg" for n in range(500)])) == sx.PREVIEW_LIMIT
+
+
+def test_the_page_runs_on_select_and_shows_thumbnails():
+    page = (ROOT / "web" / "src" / "routes" / "Track2SqlPage.tsx").read_text(encoding="utf-8")
+    # no button between choosing a class and seeing it
+    assert "void showClass(pickedClass.name, scope);" in page
+    assert "getTrack2SqlPreviews(page)" in page
+    assert '<img src={p.url}' in page
+    # the editor is still there, folded away
+    assert "Advanced: write your own SQL" in page
+
+
+# --- labels from the reviewed boxes ---------------------------------------------
+
+_ROW = {
+    "width": 1000, "height": 500,
+    "people": [
+        {"person_box": {"x1": 100, "y1": 100, "x2": 200, "y2": 400}, "wearing": True,
+         "auto": {"x1": 120, "y1": 100, "x2": 180, "y2": 140}},
+        {"person_box": {"x1": 500, "y1": 50, "x2": 600, "y2": 450}, "wearing": False, "auto": None},
+    ],
+    "drawn_box": None,
+}
+
+
+def test_every_person_gets_a_box_and_each_wearer_a_helmet():
+    labels = sx.frame_labels(_ROW)
+    assert labels["complete"] is True
+    assert sorted(b["name"] for b in labels["boxes"]) == ["helmet", "person", "person"]
+    helmet = next(b for b in labels["boxes"] if b["cls"] == sx.HELMET)
+    assert (helmet["x1"], helmet["y1"], helmet["x2"], helmet["y2"]) == (0.12, 0.2, 0.18, 0.28)
+
+
+def test_a_drawn_box_wins_for_the_one_wearer():
+    labels = sx.frame_labels({**_ROW, "drawn_box": [110, 90, 190, 150]})
+    helmet = next(b for b in labels["boxes"] if b["cls"] == sx.HELMET)
+    assert helmet["x1"] == 0.11 and helmet["y2"] == 0.3
+
+
+def test_a_wearer_without_a_helmet_box_makes_the_frame_incomplete():
+    row = {**_ROW, "people": [{**_ROW["people"][0], "auto": None}]}
+    labels = sx.frame_labels(row)
+    assert labels["complete"] is False and "missing" in labels["reason"]
+
+
+def test_the_yolo_line_is_centre_and_size():
+    text = sx.yolo_text({"boxes": [{"cls": 2, "x1": 0.1, "y1": 0.2, "x2": 0.3, "y2": 0.6}]})
+    assert text == "2 0.200000 0.400000 0.200000 0.400000\n"
+
+
+def test_the_class_numbers_match_the_curated_sets():
+    assert sx.LABEL_NAMES[0] == "helmet" and sx.LABEL_NAMES[2] == "person"
+    assert "0: helmet" in sx.data_yaml_text() and "2: person" in sx.data_yaml_text()
+
+
+def test_a_labelled_pull_writes_labels_and_yaml_and_leaves_out_incomplete(monkeypatch):
+    columns = ["image", "width", "height", "people", "drawn_box"]
+    good = ["s3://src/f/a.jpg", 1000, 500, _ROW["people"], None]
+    bad = ["s3://src/f/b.jpg", 1000, 500, [{**_ROW["people"][0], "auto": None}], None]
+    fake = _Lambda({"ok": True, "columns": columns, "rows": [good, bad], "truncated": False})
+    monkeypatch.setattr(sx, "_client", lambda kind: fake)
+    s3 = _S3({("src", "f/a.jpg"): b"A", ("src", "f/b.jpg"): b"B"})
+    monkeypatch.setattr(sx.storage, "s3", s3)
+    out = sx.pull("violation-review", "q", dest_bucket="d", dest_folder="p", with_labels=True)
+    assert out["copied"] == 1 and out["left_out_incomplete"] == 1
+    assert out["labels_from"] == "database" and out["with_label"] == 1
+    label = s3.objects[("d", "p/labels/train/a.txt")].decode()
+    assert label.count("\n") == 3 and label.startswith("2 ")
+    assert ("d", "p/data.yaml") in s3.objects
+    assert ("d", "p/images/train/b.jpg") not in s3.objects
+
+
+def test_without_labels_only_images_are_pulled(monkeypatch):
+    columns = ["image", "width", "height", "people", "drawn_box"]
+    bad = ["s3://src/f/b.jpg", 1000, 500, [{**_ROW["people"][0], "auto": None}], None]
+    fake = _Lambda({"ok": True, "columns": columns, "rows": [bad], "truncated": False})
+    monkeypatch.setattr(sx, "_client", lambda kind: fake)
+    s3 = _S3({("src", "f/b.jpg"): b"B"})
+    monkeypatch.setattr(sx.storage, "s3", s3)
+    out = sx.pull("violation-review", "q", dest_bucket="d", dest_folder="p", with_labels=False)
+    assert out["copied"] == 1 and out["labels_from"] == "none"
+    assert not any(k.startswith("p/labels/") for (_, k) in s3.objects)
+    assert ("d", "p/data.yaml") not in s3.objects
+
+
+# --- starting and stopping a database from the tab --------------------------------
+
+class _Rds:
+    def __init__(self, status):
+        self.status, self.calls = status, []
+
+    def describe_db_instances(self, DBInstanceIdentifier):
+        return {"DBInstances": [{"DBInstanceStatus": self.status}]}
+
+    def start_db_instance(self, DBInstanceIdentifier):
+        self.calls.append(("start", DBInstanceIdentifier))
+
+    def stop_db_instance(self, DBInstanceIdentifier):
+        self.calls.append(("stop", DBInstanceIdentifier))
+
+
+def test_a_stopped_database_is_started_by_its_own_instance_name(monkeypatch):
+    rds = _Rds("stopped")
+    monkeypatch.setattr(sx, "_client", lambda kind: rds)
+    out = sx.set_running("jpui-preview", True)
+    assert out == {"key": "jpui-preview", "status": "starting", "changed": True}
+    assert rds.calls == [("start", "jpui-preview-crop-authority")]
+
+
+def test_starting_one_already_running_changes_nothing(monkeypatch):
+    rds = _Rds("available")
+    monkeypatch.setattr(sx, "_client", lambda kind: rds)
+    assert sx.set_running("violation-review", True)["changed"] is False
+    assert rds.calls == []
+
+
+def test_only_databases_on_offer_can_be_started():
+    with pytest.raises(ValueError):
+        sx.set_running("some-other-instance", True)
+
+
+def test_the_start_button_sits_under_the_stopped_database():
+    page = (ROOT / "web" / "src" / "routes" / "Track2SqlPage.tsx").read_text(encoding="utf-8")
+    assert 'onClick={() => switchPower(true)}' in page
+    assert "runId.current += 1;      // abandon a search against the old one" in page
