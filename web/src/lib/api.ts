@@ -3750,6 +3750,24 @@ export function getTrack2SqlClasses(database: string): Promise<{ classes: Track2
   return apiPost("/track2/sql/classes", { database });
 }
 
+/** The central data catalog: reachable, and how much is in each table. */
+export interface Track2CatalogStatus {
+  configured: boolean;
+  reachable: boolean;
+  schema_version?: number | null;
+  tables: Record<string, number>;
+  error?: string;
+}
+
+export function getTrack2CatalogStatus(): Promise<Track2CatalogStatus> {
+  return apiGet("/track2/catalog/status");
+}
+
+/** Create any missing catalog table. Safe to repeat; drops nothing. */
+export function createTrack2CatalogSchema(): Promise<Track2CatalogStatus> {
+  return apiPost("/track2/catalog/schema");
+}
+
 /** Signed links to show images as thumbnails, one screenful at a time. */
 export function getTrack2SqlPreviews(uris: string[]): Promise<{
   previews: { uri: string; url: string }[];

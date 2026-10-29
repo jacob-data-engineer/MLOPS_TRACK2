@@ -49,6 +49,11 @@ BUCKET=$(cd "$INFRA_DIR" && terraform output -raw source_bucket)
 SOURCE_PREFIX=$(cd "$INFRA_DIR" && terraform output -raw source_prefix)
 APP_REPO=$(cd "$INFRA_DIR" && terraform output -raw ecr_repository_uri)
 BUILD_PROJECT=$(cd "$INFRA_DIR" && terraform output -raw codebuild_project)
+# The central data catalog (terraform/app/catalog.tf). Blank when the
+# stack does not have it yet: the app then reports the catalog as not set
+# up rather than failing to start.
+CATALOG_HOST=$(cd "$INFRA_DIR" && terraform output -raw catalog_endpoint 2>/dev/null || true)
+CATALOG_SECRET_ARN=$(cd "$INFRA_DIR" && terraform output -raw catalog_secret_arn 2>/dev/null || true)
 
 if [ -z "$INSTANCE_ID" ]; then
   echo "No instance tagged Name=track2-yolo-review-host found." >&2
@@ -255,6 +260,8 @@ docker run -d --name $CONTAINER --restart unless-stopped -p $PORT:8501 \\
   -e AWS_REGION='$REGION' \\
   -e REVIEW_QUEUE_TABLE='track2-yolo-review-queue' \\
   -e PIPELINE_BUCKET='$BUCKET' \\
+  -e CATALOG_HOST='$CATALOG_HOST' \\
+  -e CATALOG_SECRET_ARN='$CATALOG_SECRET_ARN' \\
   -e RETRAIN_RULE_NAME='track2-yolo-weekly-retrain-schedule' \\
   -e TRAINING_PIPELINE_NAME='track2-yolo-training-pipeline' \\
   -e MULTI_SIZE_ENDPOINT_NAME='track2-yolo-multi-size-endpoint' \\

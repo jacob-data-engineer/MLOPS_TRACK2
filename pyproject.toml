@@ -32,6 +32,7 @@ dependencies = [
     "torchvision>=0.26.0",
     "ultralytics>=8.3.0",
     "uvicorn>=0.51.0",
+    "pg8000>=1.31",
 ]
 
 [build-system]

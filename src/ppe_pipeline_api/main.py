@@ -39,6 +39,7 @@ from .routers import (
     track2_retention,
     track2_review,
     track2_schedule,
+    track2_catalog,
     track2_sql,
 )
 
@@ -140,6 +141,7 @@ app.include_router(track2_eval.router, prefix="/track2/eval", tags=["track2-eval
 app.include_router(track2_pull_control.router, prefix="/track2/pull-control", tags=["track2-pull-control"])
 app.include_router(track2_retention.router, prefix="/track2/retention", tags=["track2-retention"])
 app.include_router(track2_sql.router, prefix="/track2/sql", tags=["track2-sql"])
+app.include_router(track2_catalog.router, prefix="/track2/catalog", tags=["track2-catalog"])
 
 
 @app.get("/health")

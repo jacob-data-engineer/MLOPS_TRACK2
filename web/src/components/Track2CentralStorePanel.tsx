@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { getTrack2PullControl, saveTrack2PullConfig } from "../lib/api";
+import {
+  ApiError,
+  createTrack2CatalogSchema,
+  getTrack2CatalogStatus,
+  getTrack2PullControl,
+  saveTrack2PullConfig,
+  type Track2CatalogStatus,
+} from "../lib/api";
 import { Card } from "./Card";
 import { S3FolderField } from "./S3FolderField";
 import { WRITABLE } from "./Track2PullControlPanel";
@@ -22,6 +29,23 @@ export function Track2CentralStorePanel() {
   // save the empty defaults over it.
   const [settingsRead, setSettingsRead] = useState(false);
   const [saved, setSaved] = useState(false);
+  // The catalog: the database that records every file in the store.
+  const [catalog, setCatalog] = useState<Track2CatalogStatus | null>(null);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
+
+  useEffect(() => {
+    getTrack2CatalogStatus().then(setCatalog).catch(() => setCatalog(null));
+  }, []);
+
+  function createTables() {
+    setCatalogBusy(true);
+    setCatalogError("");
+    createTrack2CatalogSchema()
+      .then(setCatalog)
+      .catch((err) => setCatalogError(err instanceof ApiError ? err.detail : "Could not create them."))
+      .finally(() => setCatalogBusy(false));
+  }
 
   useEffect(() => {
     getTrack2PullControl()
@@ -90,6 +114,37 @@ export function Track2CentralStorePanel() {
           {saved && <span className="ml-2 text-ink-muted">saved</span>}
         </p>
       )}
+
+      {/* ---- the catalog ---- What the store holds is recorded here:
+           every file once, where it came from, its labels, and every
+           dataset version with its split and decay. */}
+      <div className="mt-4 border-t border-hairline pt-3 text-xs">
+        <p className="mb-1 font-medium text-ink">Catalog</p>
+        {!catalog ? (
+          <p className="text-ink-muted">Reading...</p>
+        ) : !catalog.configured ? (
+          <p className="text-ink-muted">Not set up on this container yet.</p>
+        ) : !catalog.reachable ? (
+          <p className="text-critical">Not reachable: {catalog.error}</p>
+        ) : !catalog.schema_version && Object.keys(catalog.tables).length === 0 ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-ink-secondary">The database is up; its tables are not created yet.</span>
+            <button type="button" onClick={createTables} disabled={catalogBusy}
+                    className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40">
+              {catalogBusy ? "Creating..." : "Create the tables"}
+            </button>
+          </div>
+        ) : (
+          <p className="tabular text-ink-secondary">
+            {Object.entries(catalog.tables).map(([table, rows]) => (
+              <span key={table} className="mr-3">
+                {table.replace(/_/g, " ")}: <span className="text-ink">{rows.toLocaleString()}</span>
+              </span>
+            ))}
+          </p>
+        )}
+        {catalogError && <p className="mt-1 text-critical">{catalogError}</p>}
+      </div>
     </Card>
   );
 }
