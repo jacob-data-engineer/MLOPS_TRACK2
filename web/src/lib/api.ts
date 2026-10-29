@@ -2211,6 +2211,10 @@ export interface Track2PullConfig {
   /** Which settings file these settings came from, or were last written
    * to. Shown on every card that offers Save. */
   settings_file?: string;
+  /** The same per tab: the `_DP` / `_AT` file each tab last loaded or
+   * saved (2026-10-29). */
+  settings_file_dp?: string;
+  settings_file_at?: string;
   default_dataset?: {
     folder?: string; snapshot_id?: string; files?: number;
     set_by?: string;
@@ -2700,8 +2704,13 @@ export function deleteTrack2Snapshot(id: string): Promise<{
 /** The unattended retrain. `follow_pull` chains it to the pull's own
  * schedule so it runs AFTER a scheduled sweep finishes, rather than on a
  * clock of its own that could start mid-pull. */
+/** What starts a training run, chosen on Multi-Auto Training's own
+ * toolbar: after each data pull, its own clock, or nothing. */
+export type Track2TrainingTrigger = "pull" | "clock" | "off";
+
 export interface Track2RetrainSchedule {
   enabled: boolean;
+  trigger?: Track2TrainingTrigger;
   follow_pull: boolean;
   pull_first: boolean;
   every_days: number;
@@ -2734,6 +2743,8 @@ export interface Track2RetrainStatus {
    * Pull Control off and a schedule hung off a disabled mechanism never
    * fires. Computed server-side so the rule is not restated here. */
   follows_pull?: boolean;
+  /** The trigger in force, defaults filled in server-side. */
+  trigger?: Track2TrainingTrigger;
 }
 
 /** One pass of the chain: rebuild, freeze, submit. Each step reports
@@ -2759,7 +2770,7 @@ export function getTrack2Retrain(): Promise<Track2RetrainStatus> {
 /** A PATCH -- only the fields sent are changed, so turning the schedule
  * on does not reset the cadence somebody set last week. */
 export function saveTrack2Retrain(
-  patch: Partial<Pick<Track2RetrainSchedule, "enabled" | "every_days" | "at" | "follow_pull">>,
+  patch: Partial<Pick<Track2RetrainSchedule, "enabled" | "every_days" | "at" | "follow_pull" | "trigger">>,
 ): Promise<Track2RetrainStatus> {
   return apiPost("/track2/retention/retrain", patch);
 }
@@ -3102,8 +3113,14 @@ export function purgeTrack2Week(name: string, confirmObjects: number): Promise<{
     { name, confirm_objects: confirmObjects });
 }
 
+/** Which tab a settings file belongs to (2026-10-29): Data Preparation
+ * saves `<name>_DP`, Multi-Auto Training `<name>_AT`, each holding only
+ * its own page. "" is a file from before the split, holding both. */
+export type Track2SettingsScope = "dp" | "at";
+
 export interface Track2SettingsFile {
   name: string;
+  scope?: Track2SettingsScope | "";
   bytes: number;
   modified: string;
 }
@@ -3114,11 +3131,11 @@ export interface Track2SettingsFile {
  * what is on screen would leave the old settings running underneath.
  * Saved files are untouched -- this starts a new one, it does not throw
  * the old ones away. */
-export function newTrack2Settings(): Promise<{
+export function newTrack2Settings(scope?: Track2SettingsScope): Promise<{
   config: Record<string, unknown>;
   problems: string[];
 }> {
-  return apiPost("/track2/pull-control/settings/new");
+  return apiPost("/track2/pull-control/settings/new", scope ? { scope } : undefined);
 }
 
 /** One stage of the unattended chain, as the status bar draws it.
@@ -3220,15 +3237,20 @@ export function getTrack2SettingsFiles(): Promise<{
  * refusal, which comes back as a 409. It is a warning worth reading, not
  * a rule the format depends on -- two configs filing into one set of week
  * folders is usually a mistake and occasionally the point. */
-export function saveTrack2SettingsFile(name: string, allowClash = false): Promise<{
+export function saveTrack2SettingsFile(
+  name: string, allowClash = false, scope?: Track2SettingsScope,
+): Promise<{
   name: string; path: string; bytes: number;
 }> {
-  return apiPost("/track2/pull-control/settings/save", { name, allow_clash: allowClash });
+  return apiPost("/track2/pull-control/settings/save",
+    { name, allow_clash: allowClash, scope: scope ?? "" });
 }
 
 /** `apply: false` reads the file WITHOUT making it live -- the card fills
  * its controls from it and nothing changes until Apply settings. */
-export function loadTrack2SettingsFile(name: string, apply = false): Promise<{
+export function loadTrack2SettingsFile(
+  name: string, apply = false, scope?: Track2SettingsScope,
+): Promise<{
   config: Track2PullConfig;
   name: string; saved_at: string; applied: boolean;
   /** What was actually restored: how many sources the picks rebuilt to,
@@ -3239,7 +3261,7 @@ export function loadTrack2SettingsFile(name: string, apply = false): Promise<{
    * machine already had and that was therefore left untouched. */
   registry?: { created: string[]; kept: string[]; problems: string[] };
 }> {
-  return apiPost("/track2/pull-control/settings/load", { name, apply });
+  return apiPost("/track2/pull-control/settings/load", { name, apply, scope: scope ?? "" });
 }
 
 /** How well a set of image folders lines up with a set of label folders.

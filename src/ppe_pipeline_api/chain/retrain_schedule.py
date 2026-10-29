@@ -1538,6 +1538,42 @@ def schedule_expression(plan: dict) -> str:
     return f"rate({every} day{'s' if every != 1 else ''})"
 
 
+#: What starts a training run, chosen on Multi-Auto Training's own toolbar
+#: (2026-10-29), now that each tab has a schedule of its own.
+TRIGGERS = ("pull", "clock", "off")
+
+
+def training_trigger(config: dict | None = None) -> str:
+    """"pull" -- train after each data pull (the chain, as before);
+    "clock" -- train on this schedule's own `every_days` at `at`;
+    "off" -- nothing trains by itself.
+
+    Stored as `retrain_schedule.trigger`. A config saved before it existed
+    has none, and reads as it always behaved: following the pull, whose
+    mode was the switch.
+    """
+    config = config if config is not None else pc.read_config()
+    stored = config.get("retrain_schedule") or {}
+    trigger = str(stored.get("trigger") or "").strip().lower()
+    if trigger in TRIGGERS:
+        return trigger
+    if stored.get("follow_pull", DEFAULTS["follow_pull"]):
+        return "pull"
+    return "clock" if stored.get("enabled") else "off"
+
+
+def trigger_fields(trigger: str) -> dict:
+    """The stored fields that make `trigger` true for every reader --
+    the after-pull chain, the clock and the preflight all read these."""
+    if trigger not in TRIGGERS:
+        raise ValueError(f"Unknown training trigger {trigger!r}.")
+    return {
+        "pull": {"trigger": "pull", "enabled": True, "follow_pull": True},
+        "clock": {"trigger": "clock", "enabled": True, "follow_pull": False},
+        "off": {"trigger": "off", "enabled": False},
+    }[trigger]
+
+
 def follows_pull(config: dict | None = None) -> bool:
     """Is the PULL the clock for the unattended retrain?
 
@@ -1558,7 +1594,7 @@ def follows_pull(config: dict | None = None) -> bool:
     config = config if config is not None else pc.read_config()
     if (config.get("dataset_assemble") or {}).get("only"):
         return False
-    return bool(settings(config).get("follow_pull"))
+    return training_trigger(config) == "pull"
 
 
 def t2_module():

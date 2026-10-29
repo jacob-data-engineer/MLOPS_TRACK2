@@ -9,7 +9,6 @@ import {
   HelpCircle,
   LogOut,
   Menu,
-  Rocket,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -55,13 +54,13 @@ const NAV_ITEMS: NavItem[] = [
   // difference -- so two entries were two doors into one room, and the
   // work happens on the multi side. Route kept; `/` now lands on the
   // entry that is offered rather than on one that is not.
+  // Explore a Postgres database for images (2026-10-28). First, above the
+  // data side, by request (2026-10-29). No status colour yet -- not decided.
+  { to: "/track2/sql", label: "Track2 SQL Database Query", icon: DatabaseZap },
   // The data side, ahead of training because it comes first: what a run
   // learns from is prepared here, then trained on next door (2026-10-28).
   { to: "/track2/data-preparation", label: "Track2 Data Preparation", icon: Database, status: "ready" },
   { to: "/track2/multi-auto-training", label: "Track2 Multi-Auto Training", icon: Layers, status: "ready" },
-  // Explore a Postgres database for images (2026-10-28). No status colour
-  // yet -- not decided.
-  { to: "/track2/sql", label: "Track2 SQL Database Query", icon: DatabaseZap },
   // What the clocks will start, and when -- read-only, every control
   // stays on Multi-Auto Training.
   { to: "/track2/scheduled", label: "Track2 Scheduled - prototype", icon: CalendarDays, status: "prototype" },
@@ -85,9 +84,8 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/track2/help", label: "Track2 Help", icon: HelpCircle },
   // Synthetic Image Generation dropped from the nav. Route kept, same as
   // the others.
-  // Last, and marked KIV (kept in view): deploying and trying a model is
-  // not part of the retraining workflow the entries above walk through.
-  { to: "/track2/deploy", label: "Track2 Deploy & Inference (KIV)", icon: Rocket, status: "kiv" },
+  // Deploy & Inference dropped from the nav (2026-10-29). Route kept, same
+  // as the others.
 ];
 
 function Wordmark() {

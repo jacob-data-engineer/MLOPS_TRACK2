@@ -18,7 +18,9 @@ def test_the_retention_section_is_gone():
 
 
 def test_the_strip_says_what_a_scheduled_pull_does():
-    assert "builds, queues and trains after each scheduled pull, from the ticked sources" in STRIP
+    # Since 2026-10-29 the TRAINING schedule says it, on Multi-Auto
+    # Training's strip, when training follows the pull.
+    assert "builds, queues and trains after each scheduled pull" in STRIP
 
 
 def test_arrival_is_never_offered_without_its_guards():

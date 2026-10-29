@@ -184,6 +184,10 @@ class RetrainScheduleRequest(BaseModel):
     current value, like every other patch on this app."""
     enabled: bool | None = None
     follow_pull: bool | None = None
+    #: "pull" | "clock" | "off" -- Multi-Auto Training's own schedule
+    #: (2026-10-29). Sets `enabled` and `follow_pull` to match, so every
+    #: reader agrees; see `rs.trigger_fields`.
+    trigger: str | None = None
     every_days: int | None = None
     at: str | None = None
     detector_slug: str | None = None
@@ -224,6 +228,7 @@ def get_retrain(session=Depends(require_session)) -> dict:
     # actually in charge. Computed here so the rule lives in one place
     # rather than being restated in TypeScript.
     out["follows_pull"] = rs.follows_pull(config)
+    out["trigger"] = rs.training_trigger(config)
     return out
 
 
@@ -231,6 +236,11 @@ def get_retrain(session=Depends(require_session)) -> dict:
 def save_retrain(payload: RetrainScheduleRequest,
                  session=Depends(require_session)) -> dict:
     patch = payload.model_dump(exclude_none=True)
+    if "trigger" in patch:
+        try:
+            patch.update(rs.trigger_fields(str(patch["trigger"]).strip().lower()))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     current = rs.settings()
     merged = {**current, **patch}
     if int(merged.get("every_days") or 0) < 1:
@@ -272,6 +282,7 @@ def save_retrain(payload: RetrainScheduleRequest,
     out["next_runs"] = [m.isoformat() for m in rs.next_runs(out["settings"])]
     out["expression"] = rs.schedule_expression(out["settings"])
     out["follows_pull"] = rs.follows_pull(config)
+    out["trigger"] = rs.training_trigger(config)
     return out
 
 

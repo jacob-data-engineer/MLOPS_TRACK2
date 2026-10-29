@@ -148,3 +148,15 @@ def test_the_routes_exist():
     paths = app.openapi()["paths"]
     for path in ("/track2/sql/databases", "/track2/sql/schema", "/track2/sql/query"):
         assert path in paths
+
+
+def test_a_refused_status_says_setup_has_not_run(monkeypatch):
+    """Before setup_sql_tab.sh the app may not describe the databases;
+    that showed as "unknown (ClientError)", which says nothing useful."""
+    class Denied:
+        def describe_db_instances(self, **kw):
+            raise Exception("An error occurred (AccessDenied) when calling DescribeDBInstances: "
+                            "User is not authorized to perform: rds:DescribeDBInstances")
+    monkeypatch.setattr(sx, "_client", lambda kind: Denied())
+    for db in sx.databases():
+        assert db["status"].startswith("not set up") and not db["available"]

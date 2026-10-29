@@ -48,7 +48,7 @@ export function Track2DataPrepPage() {
           set, the pulled week folders and the retention policy over them.
           Training happens on the Multi-Auto Training tab.
         </p>
-        <Track2PinnedBar />
+        <Track2PinnedBar scope="dp" />
       </div>
 
       <div className="flex flex-col gap-5">

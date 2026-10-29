@@ -1960,7 +1960,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
           Dataset/weights browsing, GPU status, training progress, and the
           training queue for the Track2 YOLO pipeline.
         </p>
-        <Track2PinnedBar />
+        <Track2PinnedBar scope="at" />
       </div>
 
       {/* The cost panel moved INSIDE the pinned bar, directly under the

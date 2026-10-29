@@ -67,7 +67,13 @@ def databases() -> list[dict]:
             status = _client("rds").describe_db_instances(
                 DBInstanceIdentifier=db["instance"])["DBInstances"][0]["DBInstanceStatus"]
         except Exception as exc:                                    # noqa: BLE001
-            status = f"unknown ({type(exc).__name__})"
+            # A refusal is not an unknown state: it means the SQL tab's
+            # one-time setup (scripts/setup_sql_tab.sh) has not granted
+            # this app `rds:DescribeDBInstances` yet. Say that.
+            if "AccessDenied" in str(exc) or "not authorized" in str(exc):
+                status = "not set up (scripts/setup_sql_tab.sh has not been run)"
+            else:
+                status = f"unknown ({type(exc).__name__})"
         out.append({"key": key, "label": db["label"], "status": status,
                     "available": status == "available"})
     return out

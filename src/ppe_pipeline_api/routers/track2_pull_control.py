@@ -56,6 +56,13 @@ class SettingsRequest(BaseModel):
     # unless the page sends it, so the check still has to be read and
     # overruled rather than clicked through by accident.
     allow_clash: bool = False
+    # "dp" or "at": which tab's settings, into `<name>_DP` / `<name>_AT`
+    # (2026-10-29). Blank is the old whole-page file.
+    scope: str = ""
+
+
+class NewSettingsRequest(BaseModel):
+    scope: str = ""
 
 
 class WeekNameRequest(BaseModel):
@@ -666,7 +673,8 @@ def list_settings(session=Depends(require_session)) -> dict:
 
 
 @router.post("/settings/new")
-def new_settings(session=Depends(require_session)) -> dict:
+def new_settings(payload: NewSettingsRequest | None = None,
+                 session=Depends(require_session)) -> dict:
     """Blank template: the live settings go back to the shipped defaults.
 
     Changes what the system is actually set to, not just what the page is
@@ -675,7 +683,7 @@ def new_settings(session=Depends(require_session)) -> dict:
     Saved files are untouched; this is where a new one is started from.
     """
     try:
-        return pc.reset_to_defaults()
+        return pc.reset_to_defaults(scope=payload.scope if payload else "")
     except Exception as exc:                                # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not reset: {exc}")
 
@@ -777,7 +785,8 @@ def save_settings(payload: SettingsRequest, session=Depends(require_session)) ->
             sections = {}
         return pc.save_settings_file(name=payload.name,
                                      allow_clash=payload.allow_clash,
-                                     sections=sections)
+                                     sections=sections,
+                                     scope=payload.scope)
     except ValueError as exc:
         # 409 for the folder collision specifically, so the page can offer
         # the override without having to recognise the prose. Everything
@@ -798,7 +807,8 @@ def save_settings(payload: SettingsRequest, session=Depends(require_session)) ->
 def load_settings(payload: SettingsRequest, session=Depends(require_session)) -> dict:
     """Reads a settings file back and makes it live."""
     try:
-        out = pc.load_settings_file(name=payload.name, apply=payload.apply)
+        out = pc.load_settings_file(name=payload.name, apply=payload.apply,
+                                    scope=payload.scope)
         if payload.apply:
             # After the settings, not before: a detector is only useful
             # once the configuration that names it is live, and a failure

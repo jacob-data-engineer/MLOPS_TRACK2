@@ -106,6 +106,8 @@ def settings(config: dict | None = None) -> dict:
     config = config if config is not None else pc.read_config()
     plan = {**DEFAULTS, **(config.get(KEY) or {})}
     mode = str(config.get("mode") or "off")
+    # Whether training FOLLOWS the pull is Multi-Auto Training's own
+    # schedule (2026-10-29), and `pending` refuses when it does not.
     plan["enabled"] = mode in ("schedule", "arrival")
     plan["triggers"] = [mode] if plan["enabled"] else ["schedule"]
     return plan
@@ -202,9 +204,19 @@ def pending(config: dict | None = None) -> dict:
     from . import retrain_schedule as rs
 
     if not rs.follows_pull(config):
-        return {"act": False, "run": None,
-                "reason": "Training data is built by hand, so the pull is not "
-                          "the trigger -- the retrain schedule's own clock is."}
+        # Multi-Auto Training's own schedule (2026-10-29) says what starts
+        # a run; only "after each data pull" lets the pull do it.
+        trigger = rs.training_trigger(config)
+        if (config.get("dataset_assemble") or {}).get("only"):
+            reason = ("Training data is built by hand, so the pull is not "
+                      "the trigger -- the retrain schedule's own clock is.")
+        elif trigger == "off":
+            reason = ("Multi-Auto Training's schedule is off, so a pull "
+                      "does not start a training run.")
+        else:
+            reason = ("Multi-Auto Training trains on its own schedule, so "
+                      "the pull is not the trigger.")
+        return {"act": False, "run": None, "reason": reason}
 
     runs = _finished_pulls(plan=plan)
     if not runs:

@@ -312,6 +312,11 @@ DEFAULTS = {
     # that saving over the wrong one is visible before it happens rather
     # than afterwards.
     "settings_file": "",
+    # The same, per tab (2026-10-29): Data Preparation saves `<name>_DP`
+    # and Multi-Auto Training `<name>_AT`, each holding only its own page,
+    # so each tab says which of ITS files is loaded. See SCOPES.
+    "settings_file_dp": "",
+    "settings_file_at": "",
     # The unattended retrain: pull, rebuild the data.yaml under the
     # current retention policy, freeze it, and submit a run. Off until
     # somebody sets it up, and every field it needs is here rather than
@@ -2945,6 +2950,95 @@ def list_folders(*, bucket: str, prefix: str = "") -> dict:
 #: the whole reason the mount exists.
 SETTINGS_DIR = os.environ.get("PULL_CONTROL_SETTINGS_DIR", "/settings")
 
+#: Which settings belong to which tab (2026-10-29). Each tab saves, loads
+#: and resets ONLY its own keys, into a file named `<name>_DP` or
+#: `<name>_AT`, so saving one page can no longer overwrite the other's
+#: choices with whatever happened to be live.
+#:
+#: The live configuration is still ONE record -- the chain reads both
+#: halves -- so this is a split of the FILES, not of the system.
+#:
+#: Data Preparation: the pull and its schedule, where weeks go, retention,
+#: the golden set, Assemble, the week selection, and the SQL tab (data
+#: side, and it has no toolbar of its own). Multi-Auto Training: the
+#: detector and run shape, which version and dataset it trains from, the
+#: Import card, and the TRAINING schedule with its after-pull guards.
+#: Anything in neither (run state such as `chain_state`) is saved by
+#: neither: it is a result, not a choice.
+SCOPES = {
+    "dp": (
+        "sources", "picked", "source_bucket", "destination_bucket", "root",
+        "training_root", "eval_root", "week_cutoff", "week_anchor",
+        "images_subpath", "labels_subpath", "week_prefix", "week_length_days",
+        "auto_create_weeks", "first_week_takes_all", "week_by",
+        "mode", "schedule_expression", "schedule_every_days", "schedule_from",
+        "schedule_start_date", "schedule_time",
+        "image_extensions", "label_extensions", "overwrite",
+        "retention", "golden_set", "dataset_assemble", "auto_training",
+        "sql_explorer",
+    ),
+    "at": (
+        "default_detector", "default_training", "default_source",
+        "default_version", "data_source", "default_dataset",
+        "last_pull_dataset", "import_checkpoint", "freeze_on_run",
+        "retrain_schedule", "queue_after_pull",
+    ),
+}
+#: The ending each tab's files carry. The name typed is the XXX.
+SUFFIXES = {"dp": "_DP", "at": "_AT"}
+#: The cards that live on Data Preparation, by the key `useCardOpen`
+#: remembers them under (a Card's lower-cased title, or its own key).
+#: `card_state` is ONE shared record, so each tab's file carries its own
+#: cards' entries and a load merges them in rather than replacing it.
+DP_CARDS = frozenset({
+    "assemble", "golden_set", "pull_control", "retention",
+    "assemble a dataset", "pick golden set / edge cases", "pull control",
+    "auto training", "pull queue",
+})
+
+
+def _check_scope(scope: str) -> str:
+    scope = (scope or "").strip().lower()
+    if scope and scope not in SCOPES:
+        raise ValueError(f"Unknown settings tab {scope!r}.")
+    return scope
+
+
+def scoped_name(name: str, scope: str) -> str:
+    """`name` with the tab's ending, added once. Typing `helmet` or
+    `helmet_DP` on Data Preparation both save `helmet_DP`."""
+    name = (name or "").strip()
+    if not scope:
+        return name
+    suffix = SUFFIXES[scope]
+    if name.upper().endswith(suffix):
+        name = name[:-len(suffix)]
+    if not name:
+        raise ValueError("Type a name for the settings file.")
+    return name + suffix
+
+
+def scope_of(name: str) -> str:
+    """Which tab a file belongs to, from its name: "dp", "at", or "" for
+    a file saved before the split, which holds both pages."""
+    upper = (name or "").upper()
+    for scope, suffix in SUFFIXES.items():
+        if upper.endswith(suffix):
+            return scope
+    return ""
+
+
+def scope_slice(config: dict, scope: str) -> dict:
+    """The part of `config` one tab owns, with its own cards' open state."""
+    if not scope:
+        return dict(config)
+    out = {k: config[k] for k in SCOPES[scope] if k in config}
+    cards = config.get("card_state")
+    if isinstance(cards, dict):
+        out["card_state"] = {k: v for k, v in cards.items()
+                             if (k in DP_CARDS) == (scope == "dp")}
+    return out
+
 
 def _settings_path(name: str) -> str:
     """A safe path inside the settings directory.
@@ -3051,8 +3145,13 @@ def read_settings_file(name: str) -> dict:
 
 def save_settings_file(*, name: str = "pull_control", config: dict | None = None,
                        allow_clash: bool = False,
-                       sections: dict | None = None) -> dict:
+                       sections: dict | None = None,
+                       scope: str = "") -> dict:
     """Writes the current settings to a file on the host.
+
+    `scope` ("dp" or "at") writes only that tab's settings, to
+    `<name>_DP` or `<name>_AT` -- see SCOPES. Blank keeps the old
+    whole-page file.
 
     Written to a temporary file and renamed, so a crash midway leaves the
     previous settings intact rather than half a file that will not parse.
@@ -3070,8 +3169,11 @@ def save_settings_file(*, name: str = "pull_control", config: dict | None = None
     folders merge two datasets into one with no record of the split, and
     the only fix afterwards is to re-pull both from scratch.
     """
+    scope = _check_scope(scope)
+    name = scoped_name(name, scope)
     path = _settings_path(name)
-    body = dict(config or read_config())
+    whole = dict(config or read_config())
+    body = scope_slice(whole, scope)
 
     # The refusal is a WARNING somebody can overrule, not a rule the file
     # format depends on: two configs filing into one set of week folders
@@ -3082,7 +3184,10 @@ def save_settings_file(*, name: str = "pull_control", config: dict | None = None
     # Only when THIS configuration pulls. With Pull Control off it writes
     # no week folders, so a clash over them is not a clash -- and the
     # warning was refusing saves of configurations that never pull.
-    clash = None if allow_clash or not pull_in_use(body) else settings_owner(
+    # A Multi-Auto Training file holds no folders at all, so it cannot
+    # clash over them -- and `pull_in_use` reads a missing Assemble
+    # section as "pulling".
+    clash = None if allow_clash or scope == "at" or not pull_in_use(body) else settings_owner(
         identity, ignore=name, sources=_picked_sources(body))
     if clash:
         roots = " + ".join(part for part in identity[:2] if part) or "(no root)"
@@ -3097,6 +3202,8 @@ def save_settings_file(*, name: str = "pull_control", config: dict | None = None
     temporary = path + ".tmp"
     with open(temporary, "w", encoding="utf-8") as handle:
         document = {"saved_at": _now().isoformat(), "config": body}
+        if scope:
+            document["scope"] = scope
         # Unknown top-level keys are ignored by `load_settings_file`,
         # which reads `config` only -- so a file written with sections
         # still loads on a build that predates them.
@@ -3109,13 +3216,14 @@ def save_settings_file(*, name: str = "pull_control", config: dict | None = None
     # root) does not leave the page claiming to be in a file it never
     # wrote.
     try:
-        write_config({"settings_file": name})
+        write_config({f"settings_file_{scope}" if scope else "settings_file": name})
     except Exception:                                          # noqa: BLE001
         pass
-    return {"name": name, "path": path, "bytes": os.path.getsize(path)}
+    return {"name": name, "path": path, "bytes": os.path.getsize(path),
+            "scope": scope}
 
 
-def reset_to_defaults() -> dict:
+def reset_to_defaults(scope: str = "") -> dict:
     """Puts the live settings back to the shipped defaults -- a blank
     template to start a new settings file from.
 
@@ -3134,7 +3242,33 @@ def reset_to_defaults() -> dict:
 
     Saved files on disk are NOT touched. This is "start a new one", not
     "throw the old ones away".
+
+    `scope` resets ONE tab's settings and leaves the other's live: "New"
+    on Data Preparation must not drop the detector Multi-Auto Training is
+    set to, nor the reverse.
     """
+    scope = _check_scope(scope)
+    if scope:
+        fresh = {k: DEFAULTS[k] for k in SCOPES[scope] if k in DEFAULTS}
+        # Not in DEFAULTS, so a merge would keep them; reset explicitly.
+        if scope == "dp":
+            fresh["week_anchor"] = ""
+        live_cards = read_config().get("card_state") or {}
+        fresh["card_state"] = {k: v for k, v in live_cards.items()
+                               if (k in DP_CARDS) != (scope == "dp")}
+        fresh[f"settings_file_{scope}"] = ""
+        merged = write_config(fresh)
+        if scope == "at":
+            return {"config": merged, "problems": []}
+        problems: list = []
+        try:
+            problems = set_mode(
+                mode=str(merged.get("mode") or "off"),
+                schedule_expression=str(merged.get("schedule_expression") or ""),
+            ).get("problems") or []
+        except Exception as exc:                            # noqa: BLE001
+            problems = [f"settings reset, but the trigger was not applied: {exc}"]
+        return {"config": merged, "problems": problems}
     body = dict(DEFAULTS)
     ddb.put_item(
         TableName=TABLE_NAME,
@@ -3174,7 +3308,8 @@ def read_settings_section(name: str, key: str) -> dict:
     return section if isinstance(section, dict) else {}
 
 
-def load_settings_file(*, name: str = "pull_control", apply: bool = True) -> dict:
+def load_settings_file(*, name: str = "pull_control", apply: bool = True,
+                       scope: str = "") -> dict:
     """Reads a settings file back and makes every part of it live.
 
     Three things have to happen, not one, or the card shows a setting the
@@ -3188,7 +3323,16 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True) -> dic
       3. the trigger, re-applied to the EventBridge rules -- otherwise a
          file saved with the trigger off loads as "off" in the card while
          the rule stays armed and keeps firing.
+
+    `scope` loads ONE tab's settings out of the file and leaves the rest
+    of the live configuration alone -- so an old whole-page file loaded
+    on Data Preparation brings back only the data side. A file belonging
+    to the other tab is refused rather than half-applied.
     """
+    scope = _check_scope(scope)
+    if scope and scope_of(name) and scope_of(name) != scope:
+        other = "Multi-Auto Training" if scope_of(name) == "at" else "Data Preparation"
+        raise ValueError(f"{name} holds {other} settings; load it on that tab.")
     path = _settings_path(name)
     if not os.path.exists(path):
         raise ValueError(f"No settings file called {name}.")
@@ -3197,14 +3341,33 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True) -> dic
     config = body.get("config") or {}
     if not isinstance(config, dict) or not config:
         raise ValueError(f"{name}.json holds no settings.")
+    config = scope_slice(config, scope)
 
     applied_trigger: dict = {}
     problems: list = []
     if apply:
-        # The file's own name wins over any `settings_file` inside it: a
-        # file copied or renamed on disk would otherwise load claiming to
-        # be the one it was copied from.
-        merged = write_config({**config, "settings_file": name})
+        live = read_config()
+        update = dict(config)
+        if scope:
+            # Merged, not replaced: the record also holds the other tab's
+            # cards, and `write_config` replaces a top-level key whole.
+            update["card_state"] = {**(live.get("card_state") or {}),
+                                    **(config.get("card_state") or {})}
+            update[f"settings_file_{scope}"] = name
+        else:
+            # The file's own name wins over any `settings_file` inside it: a
+            # file copied or renamed on disk would otherwise load claiming to
+            # be the one it was copied from.
+            update["settings_file"] = name
+        merged = write_config(update)
+
+        if scope == "at":
+            # Nothing to re-arm: the training clock is read on every tick,
+            # and the pull's rules belong to the other tab.
+            return {"name": name, "saved_at": body.get("saved_at", ""),
+                    "config": config, "applied": True, "scope": scope,
+                    "mode": str(merged.get("mode") or "off"),
+                    "sources": len(merged.get("sources") or []), "problems": []}
 
         if merged.get("picked"):
             merged = write_config({"sources": sources_from_picked(merged)})
@@ -3226,6 +3389,7 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True) -> dic
         "saved_at": body.get("saved_at", ""),
         "config": config,
         "applied": bool(apply),
+        "scope": scope,
         "mode": str(config.get("mode") or "off"),
         "sources": len((config.get("picked") and
                         sources_from_picked({**DEFAULTS, **config})) or
@@ -3244,7 +3408,8 @@ def list_settings_files() -> dict:
     for name in names:
         path = _settings_path(name)
         try:
-            files.append({"name": name, "bytes": os.path.getsize(path),
+            files.append({"name": name, "scope": scope_of(name),
+                          "bytes": os.path.getsize(path),
                           "modified": _dt.datetime.fromtimestamp(
                               os.path.getmtime(path), _dt.timezone.utc).isoformat()})
         except OSError:

@@ -40,13 +40,15 @@ def _flat(path: pathlib.Path) -> str:
 def test_the_strip_reads_the_training_clock():
     code = _flat(BAR)
     assert "getTrack2Retrain().catch(() => null)" in code
-    assert "retrain?.settings.enabled" in code
+    # Its own clock only (2026-10-29): following the pull, the pull's
+    # date is the answer.
+    assert 'retrain.trigger === "clock" ? retrain.next_runs?.[0] || "" : ""' in code
 
 
 def test_the_training_clock_wins_over_the_rule():
     """It is always computable; the rule's own next_run often is not."""
     code = _flat(BAR)
-    assert "setNextRun(trainingNext" in code
+    assert "setTrainNext(" in code
 
 
 def test_the_rate_expression_is_still_the_last_resort():
@@ -58,7 +60,7 @@ def test_the_rate_expression_is_still_the_last_resort():
 
 def test_an_unarmed_clock_contributes_no_date():
     code = _flat(BAR)
-    assert 'retrain?.settings.enabled ? retrain.next_runs?.[0] || "" : ""' in code
+    assert 'retrain.trigger === "clock" ? retrain.next_runs?.[0] || "" : ""' in code
 
 
 # --- when the jobs ran -----------------------------------------------------------------
@@ -197,8 +199,8 @@ def test_the_next_run_is_rendered_in_singapore_time():
 
 def test_the_helper_carries_its_own_zone_so_it_cannot_be_mislabelled():
     code = _flat(BAR)
-    assert "? savedWhen(nextRun)" in code
-    assert "`${savedWhen(nextRun)} SGT`" not in code
+    assert "? savedWhen(trainNext)" in code and "? savedWhen(pullNext)" in code
+    assert "SGT`" not in code
 
 
 def test_the_input_is_still_labelled_sgt():
