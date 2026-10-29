@@ -2156,6 +2156,10 @@ export interface Track2PullConfig {
     bucket?: string;
     folder?: string;
     sql?: string;
+    /** Where "Pull these images" copies to, and the train share. */
+    pull_bucket?: string;
+    pull_folder?: string;
+    train_percent?: number;
   };
   golden_set?: {
     bucket?: string;
@@ -3685,4 +3689,35 @@ export function runTrack2Sql(
   folder: string,
 ): Promise<Track2SqlResult> {
   return apiPost("/track2/sql/query", { database, sql, bucket, folder });
+}
+
+/** What a pull copied. Nothing is overwritten: names already at the
+ * destination are `skipped`, so a pull can be repeated. */
+export interface Track2SqlPullResult {
+  bucket: string;
+  folder: string;
+  found: number;
+  copied: number;
+  skipped: number;
+  with_label: number;
+  train: number;
+  val: number;
+  bare_paths_left_out: number;
+  failed: number;
+  errors: string[];
+}
+
+/** Runs the query again and copies every image it names into
+ * `<destFolder>/images/{train,val}`, with any label found beside each
+ * source image into `labels/{train,val}`. */
+export function pullTrack2Sql(params: {
+  database: string; sql: string; bucket: string; folder: string;
+  destBucket: string; destFolder: string; trainPercent: number;
+}): Promise<Track2SqlPullResult> {
+  return apiPost("/track2/sql/pull", {
+    database: params.database, sql: params.sql,
+    bucket: params.bucket, folder: params.folder,
+    dest_bucket: params.destBucket, dest_folder: params.destFolder,
+    train_percent: params.trainPercent,
+  });
 }

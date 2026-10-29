@@ -1,4 +1,4 @@
-import { AlertCircle, Copy, Database, Loader2, Play, Table2 } from "lucide-react";
+import { AlertCircle, Copy, Database, Download, Loader2, Play, Table2 } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Card } from "../components/Card";
 import { S3FolderField } from "../components/S3FolderField";
@@ -8,9 +8,11 @@ import {
   getTrack2PullControl,
   getTrack2SqlDatabases,
   getTrack2SqlSchema,
+  pullTrack2Sql,
   runTrack2Sql,
   saveTrack2PullConfig,
   type Track2SqlDatabase,
+  type Track2SqlPullResult,
   type Track2SqlResult,
   type Track2SqlTable,
 } from "../lib/api";
@@ -31,6 +33,10 @@ const ROWS_SHOWN = 500;
  *
  * The database, bucket, folder and query are saved like every other
  * card's settings, so a settings file brings them back.
+ *
+ * "Pull these images" (2026-10-29) copies what a query found into a
+ * folder shaped for training -- images/{train,val} and labels/{train,val}
+ * -- so a query can feed Assemble on Data Preparation directly.
  */
 export function Track2SqlPage() {
   const [dbs, setDbs] = useState<Track2SqlDatabase[]>([]);
@@ -46,6 +52,14 @@ export function Track2SqlPage() {
   const [schemaBusy, setSchemaBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  // Where a pull copies to. Saved with the rest, so the next pull of the
+  // same kind lands in the same place.
+  const [pullBucket, setPullBucket] = useState("track2-s3");
+  const [pullFolder, setPullFolder] = useState("");
+  const [trainPercent, setTrainPercent] = useState(80);
+  const [pulling, setPulling] = useState(false);
+  const [pulled, setPulled] = useState<Track2SqlPullResult | null>(null);
+  const [pullError, setPullError] = useState("");
   // The writer below must not run before the saved settings are read, or
   // it would save the empty defaults over them.
   const [settingsRead, setSettingsRead] = useState(false);
@@ -65,6 +79,9 @@ export function Track2SqlPage() {
         if (saved.bucket) setBucket(saved.bucket);
         if (saved.folder) setFolder(saved.folder);
         if (saved.sql) setSql(saved.sql);
+        if (saved.pull_bucket) setPullBucket(saved.pull_bucket);
+        if (saved.pull_folder) setPullFolder(saved.pull_folder);
+        if (typeof saved.train_percent === "number") setTrainPercent(saved.train_percent);
       })
       .catch(() => undefined)
       .finally(() => setSettingsRead(true));
@@ -78,11 +95,13 @@ export function Track2SqlPage() {
   useEffect(() => {
     if (!settingsRead) return;
     const timer = window.setTimeout(() => {
-      void saveTrack2PullConfig({ sql_explorer: { database, bucket, folder, sql } })
-        .catch(() => undefined);
+      void saveTrack2PullConfig({ sql_explorer: {
+        database, bucket, folder, sql,
+        pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
+      } }).catch(() => undefined);
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [settingsRead, database, bucket, folder, sql]);
+  }, [settingsRead, database, bucket, folder, sql, pullBucket, pullFolder, trainPercent]);
 
   // A different database has different tables.
   useEffect(() => {
@@ -138,6 +157,20 @@ export function Track2SqlPage() {
       box.focus();
       box.selectionStart = box.selectionEnd = start + text.length;
     });
+  }
+
+  /** Runs the query again server-side and copies what it names, so the
+   * folder records the exact query that chose its images. */
+  function pullImages() {
+    if (!database || !sql.trim() || pulling) return;
+    setPulling(true);
+    setPullError("");
+    setPulled(null);
+    pullTrack2Sql({ database, sql, bucket, folder,
+                    destBucket: pullBucket, destFolder: pullFolder, trainPercent })
+      .then(setPulled)
+      .catch((err) => setPullError(err instanceof ApiError ? err.detail : "The pull failed."))
+      .finally(() => setPulling(false));
   }
 
   function copyImages() {
@@ -342,6 +375,108 @@ export function Track2SqlPage() {
                     </li>
                   ))}
                 </ol>
+
+                {/* ---- pull them into a training folder ---- Here, under
+                     the list it acts on, so the answer appears where the
+                     button was pressed. */}
+                <div className="mt-4 rounded border border-hairline bg-page p-3">
+                  <p className="mb-2 text-sm font-medium text-ink">Pull these images into a training folder</p>
+                  <p className="mb-3 text-xs text-ink-secondary">
+                    Copies each image to <span className="tabular">images/train</span> or{" "}
+                    <span className="tabular">images/val</span>, and its label to{" "}
+                    <span className="tabular">labels/</span> when one sits beside it at the source.
+                    Copies only &mdash; nothing at the source is changed, and a name already in the
+                    folder is skipped, so you can pull again after the query finds more. Point
+                    Assemble on Data Preparation at the folder to train on it.
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-[14rem_1fr_9rem]">
+                    <label className="block text-xs text-ink-muted">
+                      Into bucket
+                      <select
+                        value={pullBucket}
+                        onChange={(e) => { setPullBucket(e.target.value); setPullFolder(""); }}
+                        className="mt-1 w-full rounded border border-black/15 bg-surface px-2 py-1.5 text-sm text-ink"
+                      >
+                        {[pullBucket, ...buckets.filter((b) => b !== pullBucket)].map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <S3FolderField
+                      label="Folder"
+                      hint="new or existing; images/ and labels/ go inside it"
+                      value={pullFolder}
+                      onChange={setPullFolder}
+                      bucket={pullBucket}
+                      allowCreate
+                    />
+                    <label className="block text-xs text-ink-muted">
+                      % to train
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={trainPercent}
+                        onChange={(e) => setTrainPercent(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                        className="tabular mt-1 w-full rounded border border-black/15 bg-surface px-2 py-1.5 text-sm text-ink"
+                      />
+                    </label>
+                  </div>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    The rest go to val. Each image&rsquo;s side is fixed by its address, so pulling
+                    again never moves one from val into train. Keep your test set out of this folder.
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={pullImages}
+                      disabled={pulling || !pullBucket || !pullFolder.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+                    >
+                      {pulling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                      {pulling ? "Pulling..." : `Pull ${result.images.length.toLocaleString()} image${result.images.length === 1 ? "" : "s"}`}
+                    </button>
+                    {!pullFolder.trim() && <span className="text-xs text-ink-muted">choose a folder first</span>}
+                  </div>
+                  {pullError && (
+                    <p className="mt-2 flex items-start gap-1.5 text-sm text-critical">
+                      <AlertCircle size={15} className="mt-0.5 shrink-0" />
+                      <span className="whitespace-pre-wrap">{pullError}</span>
+                    </p>
+                  )}
+                  {pulled && (
+                    <div className="tabular mt-2 text-xs text-ink-secondary">
+                      <p>
+                        Into <span className="font-medium text-ink">s3://{pulled.bucket}/{pulled.folder}/</span>:{" "}
+                        {pulled.copied.toLocaleString()} copied, {pulled.skipped.toLocaleString()} already there
+                        {" "}({pulled.train.toLocaleString()} train, {pulled.val.toLocaleString()} val).{" "}
+                        {pulled.with_label.toLocaleString()} came with a label.
+                      </p>
+                      {pulled.with_label < pulled.copied + pulled.skipped && (
+                        <p className="mt-1 text-critical">
+                          {(pulled.copied + pulled.skipped - pulled.with_label).toLocaleString()} image(s) have no
+                          label beside them at the source. Training reads an unlabelled image as
+                          &ldquo;nothing here&rdquo;, so label them before training on this folder.
+                        </p>
+                      )}
+                      {pulled.bare_paths_left_out > 0 && (
+                        <p className="mt-1">
+                          {pulled.bare_paths_left_out} path(s) named no bucket and were left out &mdash; choose
+                          their bucket under Where to look.
+                        </p>
+                      )}
+                      {pulled.failed > 0 && (
+                        <p className="mt-1 text-critical">
+                          {pulled.failed} failed: {pulled.errors.join("; ")}
+                        </p>
+                      )}
+                      <p className="mt-1 text-ink-muted">
+                        sources.json and query.json in the folder record where each file came from
+                        and the query that chose them.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </Card>

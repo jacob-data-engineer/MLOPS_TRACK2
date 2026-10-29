@@ -137,7 +137,8 @@ def test_the_tab_is_routed_offered_and_saves_its_settings():
     page = (web / "routes" / "Track2SqlPage.tsx").read_text(encoding="utf-8")
     assert 'path="/track2/sql" element={<Track2SqlPage />}' in app
     assert '"Track2 SQL Database Query"' in nav
-    assert "saveTrack2PullConfig({ sql_explorer: { database, bucket, folder, sql } })" in page
+    assert "void saveTrack2PullConfig({ sql_explorer: {" in page
+    assert "pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent," in page
     from ppe_pipeline_api import pull_control as pc
     from ppe_pipeline_api.routers.track2_pull_control import ConfigRequest
     assert "sql_explorer" in pc.DEFAULTS and "sql_explorer" in ConfigRequest.model_fields
@@ -146,7 +147,8 @@ def test_the_tab_is_routed_offered_and_saves_its_settings():
 def test_the_routes_exist():
     from ppe_pipeline_api.main import app
     paths = app.openapi()["paths"]
-    for path in ("/track2/sql/databases", "/track2/sql/schema", "/track2/sql/query"):
+    for path in ("/track2/sql/databases", "/track2/sql/schema", "/track2/sql/query",
+                 "/track2/sql/pull"):
         assert path in paths
 
 
@@ -160,3 +162,90 @@ def test_a_refused_status_says_setup_has_not_run(monkeypatch):
     monkeypatch.setattr(sx, "_client", lambda kind: Denied())
     for db in sx.databases():
         assert db["status"].startswith("not set up") and not db["available"]
+
+
+# --- pulling the images into a training folder ----------------------------------
+
+class _S3:
+    def __init__(self, objects):
+        self.objects = dict(objects)          # (bucket, key) -> bytes
+        self.copies = []
+
+    def head_object(self, Bucket, Key):
+        if (Bucket, Key) not in self.objects:
+            raise Exception("404")
+        return {}
+
+    def copy_object(self, Bucket, Key, CopySource):
+        self.objects[(Bucket, Key)] = self.objects[(CopySource["Bucket"], CopySource["Key"])]
+        self.copies.append(Key)
+
+    def get_object(self, Bucket, Key):
+        if (Bucket, Key) not in self.objects:
+            raise Exception("404")
+        return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
+
+    def put_object(self, Bucket, Key, Body, ContentType=""):
+        self.objects[(Bucket, Key)] = Body
+
+
+def _pull_setup(monkeypatch, rows, objects):
+    fake = _Lambda({"ok": True, "columns": ["image"], "rows": rows, "truncated": False})
+    monkeypatch.setattr(sx, "_client", lambda kind: fake)
+    s3 = _S3(objects)
+    monkeypatch.setattr(sx.storage, "s3", s3)
+    return s3
+
+
+def test_a_pull_copies_images_and_their_labels_into_the_training_layout(monkeypatch):
+    s3 = _pull_setup(monkeypatch, [["s3://src/set/images/train/a.jpg"], ["s3://src/frames/b.jpg"]], {
+        ("src", "set/images/train/a.jpg"): b"A", ("src", "set/labels/train/a.txt"): b"0 .5 .5 .1 .1",
+        ("src", "frames/b.jpg"): b"B",
+    })
+    out = sx.pull("violation-review", "select 1", dest_bucket="track2-s3",
+                  dest_folder="sql_pulls/helmet/", train_percent=100)
+    assert out["copied"] == 2 and out["with_label"] == 1 and out["train"] == 2
+    assert s3.objects[("track2-s3", "sql_pulls/helmet/images/train/a.jpg")] == b"A"
+    assert s3.objects[("track2-s3", "sql_pulls/helmet/labels/train/a.txt")] == b"0 .5 .5 .1 .1"
+    assert ("track2-s3", "sql_pulls/helmet/images/train/b.jpg") in s3.objects
+    sources = json.loads(s3.objects[("track2-s3", "sql_pulls/helmet/sources.json")])
+    assert sources["sql_pulls/helmet/images/train/a.jpg"] == "s3://src/set/images/train/a.jpg"
+    record = json.loads(s3.objects[("track2-s3", "sql_pulls/helmet/query.json")])
+    assert record["sql"] == "select 1" and record["database"] == "violation-review"
+
+
+def test_a_repeated_pull_skips_what_is_already_there(monkeypatch):
+    s3 = _pull_setup(monkeypatch, [["s3://src/f/a.jpg"]], {("src", "f/a.jpg"): b"A"})
+    sx.pull("violation-review", "q", dest_bucket="d", dest_folder="p")
+    again = sx.pull("violation-review", "q", dest_bucket="d", dest_folder="p")
+    assert again["copied"] == 0 and again["skipped"] == 1
+    assert s3.copies == ["p/images/train/a.jpg"]
+
+
+def test_two_sources_with_one_name_do_not_overwrite_each_other(monkeypatch):
+    s3 = _pull_setup(monkeypatch, [["s3://src/x/a.jpg"], ["s3://src/y/a.jpg"]],
+                     {("src", "x/a.jpg"): b"X", ("src", "y/a.jpg"): b"Y"})
+    out = sx.pull("violation-review", "q", dest_bucket="d", dest_folder="p")
+    assert out["copied"] == 2
+    copied = sorted(k for (b, k) in s3.objects if b == "d" and "/images/" in k)
+    assert len(copied) == 2 and copied[0] != copied[1]
+
+
+def test_the_split_is_fixed_per_image():
+    uris = [f"s3://b/i/{n}.jpg" for n in range(400)]
+    sides = [sx.split_for(u, 80) for u in uris]
+    assert sides == [sx.split_for(u, 80) for u in uris]
+    assert 0.7 < sides.count("train") / len(sides) < 0.9
+    assert sx.split_for(uris[0], 100) == "train" and sx.split_for(uris[0], 0) == "val"
+
+
+def test_the_label_is_looked_for_where_ultralytics_would():
+    assert sx.label_key_for("set/images/train/a.jpg") == "set/labels/train/a.txt"
+    assert sx.label_key_for("images/a.png") == "labels/a.txt"
+    assert sx.label_key_for("frames/a.jpg") == ""
+
+
+@pytest.mark.parametrize("folder", ["", "custom", "custom/code", "track2-yolo-weights/x"])
+def test_a_pull_needs_a_folder_and_never_writes_into_code_or_weights(folder):
+    with pytest.raises(ValueError):
+        sx.pull("violation-review", "q", dest_bucket="track2-s3", dest_folder=folder)
