@@ -15,9 +15,22 @@ remotes, or GitHub — not as a question, not as a closing note, not as a
 asked to.
 
 Facts for when you ARE asked (not prompts to raise it): the GitHub repo is
-the private `jacob-data-engineer/MLOPS_TRACK2`, branch `ml_ops_track2`;
-this folder works on the same branch, `ml_ops_track2`. Push only when asked, and never
-commit Terraform state -- `.gitignore` keeps `*.tfstate*` out on purpose.
+`jacob-data-engineer/MLOPS_TRACK2` (shown PUBLIC on 2026-10-29 -- check,
+do not assume private). Push only when asked, and never commit Terraform
+state -- `.gitignore` keeps `*.tfstate*` out on purpose.
+
+**One main branch, short-lived feature branches** (decided 2026-10-29):
+
+- `ml_ops_track2` is the main branch -- the user chose to keep that name
+  rather than `main`. It holds what has been tested; production (8501) is
+  promoted from it.
+- New work starts on its own branch off `ml_ops_track2`, named for the
+  work (`sql-tab-setup`, `retention-fix`). Create it quietly when the work
+  starts; it is not a question to ask. That branch is what goes to dev
+  (8090).
+- When it works, merge it into `ml_ops_track2` and delete the branch,
+  locally and on GitHub. Commits, pushes and merges still happen only when
+  the user asks.
 
 `README.md` describes the layout. `CONTINUE.md` is the running handover —
 current state, what changed, what is outstanding. **Read `CONTINUE.md`
