@@ -15,8 +15,8 @@ remotes, or GitHub — not as a question, not as a closing note, not as a
 asked to.
 
 Facts for when you ARE asked (not prompts to raise it): the GitHub repo is
-the private `jacob-data-engineer/MLOPS_TRACK2`, branch `mlops_track2`;
-this folder works on `mlops-track2-only`. Push only when asked, and never
+the private `jacob-data-engineer/MLOPS_TRACK2`, branch `ml_ops_track2`;
+this folder works on the same branch, `ml_ops_track2`. Push only when asked, and never
 commit Terraform state -- `.gitignore` keeps `*.tfstate*` out on purpose.
 
 `README.md` describes the layout. `CONTINUE.md` is the running handover —

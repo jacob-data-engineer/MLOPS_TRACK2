@@ -7,7 +7,9 @@ outstanding. `README.md` describes the layout; this file is the handover.
 
 ## The data/training split (2026-10-28)
 
-**Built in the worktree `C:\Projects\T2split`, branch `data-training-split`.
+**Built in a separate worktree, then merged into `ml_ops_track2` (then named
+`mlops-track2-only` / `mlops_track2`; `419246c`, 2026-10-29); the worktree is gone. Code is in this
+folder.
 Live only on the refactor slot, 8092. Production (8501) and dev (8090) are
 untouched, and so are both shared Lambdas.**
 
@@ -64,14 +66,14 @@ untouched, and so are both shared Lambdas.**
 - **deploy.sh never ships the shared Lambdas from a look-only container.**
   It used to update the pull router and queue runner on EVERY deploy, from
   whatever tree it ran in -- dev deploys included.
-- Deploy from the worktree, reading this repo's Terraform outputs:
-  `INFRA_DIR=/c/Projects/MLOPS_TRACK2/terraform/app PORT=8092 CONTAINER=track2-app-refactor APP_ROLE=refactor APP_BACKGROUND=off bash deploy.sh`
+- Deploy from this folder:
+  `PORT=8092 CONTAINER=track2-app-refactor APP_ROLE=refactor APP_BACKGROUND=off bash deploy.sh`
 - Port 8092 opened by hand (`sgr-0ee95b1dbcced7c2d`) and declared in
   `terraform/platform/ec2.tf`. Close it once the split is promoted.
 
 ### To promote
 
-1. Merge `data-training-split` into `mlops-track2-only`.
+1. ~~Merge into `ml_ops_track2`.~~ Done 2026-10-29 (`419246c`).
 2. Deploy dev normally (8090, background on). **This one updates both
    shared Lambdas** with the split code -- check the queue runner's next
    tick in CloudWatch (`/aws/lambda/track2-app-queue-runner`).

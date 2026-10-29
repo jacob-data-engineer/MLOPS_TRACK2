@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time setup for the Track2 SQL tab (2026-10-28). Run from Git Bash in
-# the T2split folder:   bash scripts/setup_sql_tab.sh
+# the MLOPS_TRACK2 folder:   bash scripts/setup_sql_tab.sh
 #
 # What it does, in order -- every step was approved in the chat:
 #   1. A random password per database for `track2_readonly`, kept as an
