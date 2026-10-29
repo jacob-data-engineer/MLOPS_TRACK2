@@ -4,7 +4,7 @@ Spec (2026-10-19): a base PT uploaded for a Model Name with no versions
 is registered as a SEED; and the golden set may join EITHER data path.
 
 1. The pull (week-folders) branch of the chain built its yaml with
-   `dy.build(root=...)`, which knows only the week folders. A golden set
+   `data.build_yaml(root=...)`, which knows only the week folders. A golden set
    ticked alongside Pull Control was built, recorded as built, and used
    by nothing -- the held-out number came from the week folders' own val
    side under a label promising a golden one.
@@ -38,7 +38,7 @@ def test_the_pull_branch_composes_when_golden_is_ticked():
     code = _chain()
     assert "if golden_val or golden_train:" in code
     # It takes the composed route, not the week-folders-only builder.
-    assert code.index("if golden_val or golden_train:") < code.index("built = dy.build(root=root")
+    assert code.index("if golden_val or golden_train:") < code.index("built = data.build_yaml(root=root")
 
 
 def test_retentions_path_list_is_the_pulls_contribution_when_retention_is_on():
@@ -49,18 +49,18 @@ def test_retentions_path_list_is_the_pulls_contribution_when_retention_is_on():
 def test_the_week_folders_whole_are_the_contribution_when_it_is_off():
     code = _chain()
     # ...skipping weeks unticked on the Auto Training card.
-    assert 'for week in [w for w in dy.scan_root(root, bucket=config.get("source_bucket") or "") if w["week"] not in set(retention["excluded_weeks"])]: pull_entries.append({"images": week["images_path"], "labels": week["labels_path"]})' in code
+    assert 'for week in [w for w in data.scan_weeks(root, bucket=config.get("source_bucket") or "") if w["week"] not in set(retention["excluded_weeks"])]: pull_entries.append({"images": week["images_path"], "labels": week["labels_path"]})' in code
 
 
 def test_the_golden_train_side_joins_training_here_too():
     code = _chain()
-    pull = code[code.index("if golden_val or golden_train:"):code.index("built = dy.build(root=root")]
+    pull = code[code.index("if golden_val or golden_train:"):code.index("built = data.build_yaml(root=root")]
     assert 'if golden_train: pull_entries.append({"images": golden_train, "labels": ""})' in pull
 
 
 def test_the_golden_val_side_is_the_evaluation_set_here_too():
     code = _chain()
-    pull = code[code.index("if golden_val or golden_train:"):code.index("built = dy.build(root=root")]
+    pull = code[code.index("if golden_val or golden_train:"):code.index("built = data.build_yaml(root=root")]
     # Added to the pull's own val, not substituted for it.
     assert 'if golden_val:' in pull
     assert '+ [{"images": golden_val, "labels": ""}]' in pull
@@ -70,9 +70,9 @@ def test_class_names_come_from_the_label_classes_or_the_pulled_sources_yaml():
     """Where this path always took them -- unless the Assemble card has
     been told what the label files mean."""
     code = _chain()
-    pull = code[code.index("if golden_val or golden_train:"):code.index("built = dy.build(root=root")]
+    pull = code[code.index("if golden_val or golden_train:"):code.index("built = data.build_yaml(root=root")]
     assert 'labelled_raw = (config.get("dataset_assemble") or {}).get("label_classes") or {}' in pull
-    assert 'names = (dy.find_classes(class_sources, bucket=config.get("source_bucket") or "") .get("names") or {})' in pull
+    assert 'names = (data.find_classes(class_sources, bucket=config.get("source_bucket") or "") .get("names") or {})' in pull
 
 
 def test_no_names_at_all_stops_the_chain_with_a_sentence():
@@ -84,13 +84,13 @@ def test_no_names_at_all_stops_the_chain_with_a_sentence():
 
 def test_it_reads_every_label_file_like_the_other_branch():
     code = _chain()
-    pull = code[code.index("if golden_val or golden_train:"):code.index("built = dy.build(root=root")]
+    pull = code[code.index("if golden_val or golden_train:"):code.index("built = data.build_yaml(root=root")]
     assert "label_scan=None, drop_undeclared=drop_undeclared)" in pull
 
 
 def test_a_composed_pull_run_carries_its_prefixes_and_yaml_too():
     code = _chain()
-    pull = code[code.index("if golden_val or golden_train:"):code.index("built = dy.build(root=root")]
+    pull = code[code.index("if golden_val or golden_train:"):code.index("built = data.build_yaml(root=root")]
     assert 'train_data_uris = out["download_prefix"]' in pull
     assert 'data_yaml_uri = out["uri"]' in pull
     assert 'expect="DataYamlUri"' in pull
@@ -99,8 +99,8 @@ def test_a_composed_pull_run_carries_its_prefixes_and_yaml_too():
 def test_the_old_week_folders_build_is_untouched_when_golden_is_off():
     """Every pull-driven configuration written before this."""
     code = _chain()
-    assert "built = dy.build(root=root, retained_train=entries[0]," in code
-    assert 'dy.save(key=built["write_to"], text=built["yaml"])' in code
+    assert "built = data.build_yaml(root=root, retained_train=entries[0]," in code
+    assert 'data.save_yaml(key=built["write_to"], text=built["yaml"])' in code
 
 
 def test_the_step_records_that_golden_was_in_it():

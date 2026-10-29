@@ -15,6 +15,7 @@ from ppe_pipeline_api import retained_lists as rl  # noqa: E402
 from ppe_pipeline_api import retention as rt  # noqa: E402
 from ppe_pipeline_api import retrain_schedule as rs  # noqa: E402
 from ppe_pipeline_api.routers import track2_retention as tr  # noqa: E402
+from _sides import patch_everywhere
 
 FOLDERS = ["_retained", "helmet_test", "week_1", "week_2", "week_10"]
 
@@ -26,9 +27,9 @@ def test_only_week_prefixed_names_survive():
 
 def test_read_weeks_skips_the_rest(monkeypatch):
     import ppe_pipeline_api.track2_shared as t2
-    monkeypatch.setattr(t2, "list_s3_folders", lambda root: list(FOLDERS))
-    monkeypatch.setattr(t2, "_basenames", lambda prefix, ext: {})
-    monkeypatch.setattr(t2, "_list_keys", lambda prefix: [])
+    patch_everywhere(monkeypatch, "list_s3_folders", lambda root: list(FOLDERS))
+    patch_everywhere(monkeypatch, "_basenames", lambda prefix, ext: {})
+    patch_everywhere(monkeypatch, "_list_keys", lambda prefix: [])
     names = [w["name"] for w in rt.read_weeks("retraining")]
     assert names == ["week_1", "week_2", "week_10"]
 
@@ -37,7 +38,7 @@ def test_the_retention_lists_skip_it_too():
     # One inventory for the card, the grid and the lists, and it is the
     # one that filters on the prefix.
     assert "rt.read_inventory(" in inspect.getsource(rl.select)
-    assert "only_weeks(t2.list_s3_folders(root)" in inspect.getsource(rt.week_names)
+    assert "only_weeks(storage.list_s3_folders(root)" in inspect.getsource(rt.week_names)
     assert "week_names(" in inspect.getsource(rt.read_inventory)
     assert 'retention["week_prefix"] = str(config.get("week_prefix") or "week_")' in \
         inspect.getsource(rs._run_chain_body)

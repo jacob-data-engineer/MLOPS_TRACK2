@@ -118,20 +118,20 @@ def test_retentions_selection_arrives_as_its_path_list():
     # Named by `pull_train_entries`, shared with the Assemble preview.
     assert "pull_train_entries(config, root, write=True)" in inspect.getsource(rs._run_chain_body)
     code = inspect.getsource(rs.pull_train_entries)
-    assert "chosen = rl.write(root=root, config=retention)" in code
+    assert "chosen = data.write_retained(root=root, config=retention)" in code
     assert 'entry = chosen["train_entry"].strip("/")' in code
 
 
 def test_with_retention_off_the_week_folders_go_in_whole():
     code = " ".join(inspect.getsource(rs.pull_train_entries).split())
-    assert "weeks = [w for w in dy.scan_root(root," in code
+    assert "weeks = [w for w in data.scan_weeks(root," in code
     assert '{"images": w["images_path"], "labels": w["labels_path"]}' in code
 
 
 def test_nothing_ticked_stops_the_chain_rather_than_training_on_nothing():
     code = " ".join(inspect.getsource(rs._run_chain_body).split())
     assert "Nothing is ticked to train on." in code
-    assert code.index("Nothing is ticked to train on.") < code.index("dy.write_in_place(")
+    assert code.index("Nothing is ticked to train on.") < code.index("data.write_yaml_in_place(")
 
 
 def test_a_pull_that_cannot_be_read_stops_the_chain():
@@ -321,7 +321,7 @@ def test_a_composed_build_checks_the_pipeline_before_freezing():
     code = " ".join(inspect.getsource(rs._run_chain_body).split())
     assert 'declared = t2_module().pipeline_parameter_names( expect="DataYamlUri")' in code
     assert 'if declared and "DataYamlUri" not in declared:' in code
-    assert code.index("DataYamlUri") < code.index("snapshot = ds.create(")
+    assert code.index("DataYamlUri") < code.index("snapshot = data.create_snapshot(")
 
 
 def test_an_unknown_answer_is_not_treated_as_missing():

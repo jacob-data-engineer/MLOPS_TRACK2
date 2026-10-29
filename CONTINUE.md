@@ -5,6 +5,81 @@ outstanding. `README.md` describes the layout; this file is the handover.
 
 ---
 
+## The data/training split (2026-10-28)
+
+**Built in the worktree `C:\Projects\T2split`, branch `data-training-split`.
+Live only on the refactor slot, 8092. Production (8501) and dev (8090) are
+untouched, and so are both shared Lambdas.**
+
+### Server: three folders, one rule each
+
+| Folder | Holds | Rule |
+|---|---|---|
+| `data/` | retention, retained lists, golden set, dataset yaml, dataset versions, snapshots, `assemble.py` (assembling, source map, class filter, `dataset_classes`), `selection.py` (`read_selection`) | imports neither `training` nor `chain` |
+| `training/` | `track2_shared.py` (registry, runs, queue, audit, eval, inference, deploy, cost), hyperparams, run_artifacts, metrics_export | reaches data only through `ppe_pipeline_api.data` |
+| `chain/` | `retrain_schedule.py`, `queue_after_pull.py`, `ticker.py` (the 25 s tick, out of track2_shared), `queue_runner.py` (the Lambda tick) | uses both front doors; nothing imports it |
+| top level | `pull_control.py` (settings store; the pull Lambda is built from this ONE file, so it stays put), `storage.py` (bucket, S3 client, list/exists helpers), notify, auth, main, routers | shared |
+
+- **Front doors** are `data/__init__.py` and `training/__init__.py`, each an
+  `__all__` list. Each entry is `_door.through(...)`: it looks the real
+  function up at call time, so there are no import cycles and a test
+  patching the real function still intercepts the front door.
+- **Old paths still work.** `retention.py`, `track2_shared.py`, ... at the
+  top level are forwarders that replace themselves in `sys.modules` with
+  the moved module (one object, not a copy), so every old import, test
+  patch and the queue Lambda's handler path
+  (`ppe_pipeline_api.queue_runner.lambda_handler`) keep working. Inside a
+  side, using a forwarder fails the boundary test.
+- `tests/test_side_boundaries.py` enforces all of it. It found 21
+  crossings when first written; it passes at zero.
+- `track2_shared` keeps the moved names (`assemble_dataset`,
+  `dataset_classes`, ...) as front-door aliases, so routers and tests that
+  say `t2.assemble_dataset` still work. A test that patches a moved helper
+  to change what ANOTHER moved helper calls uses `tests/_sides.py`
+  `patch_everywhere`; the conftest guard wraps the one shared S3 client
+  once for all three modules that bind it.
+
+### Screens: the Data Preparation tab
+
+- `/track2/data-preparation` (`routes/Track2DataPrepPage.tsx`), above
+  Multi-Auto Training in the sidebar: Assemble, Golden Set, Pull Control,
+  the weeks (Retention inside), the pull queue. Owns the
+  "use these folders only" switch.
+- Training keeps the data.yaml preview beside Add to Queue, drawn by the
+  Assemble card's own `previewOnly` mode from the SAVED settings. It never
+  writes; its label classes and filter are read-only there.
+- **Notice board** `web/src/lib/bus.ts`: typed messages, posted to the
+  window AND a BroadcastChannel, so the Data tab in one window updates
+  Training in another. Data cards post `data-sources-changed` after each
+  save; Training re-reads its three source ticks on it (this also fixed
+  the old staleness: the ticks were read only on load). `useGoldenSync`
+  rides on it.
+
+### The refactor slot, 8092
+
+- `track2-app-refactor`, role `refactor`, **`APP_BACKGROUND=off`**: no
+  startup recovery (it would fail production's in-flight inference/eval
+  rows) and no poll loop. It shows pages; the stable container, dev and
+  the queue Lambda do the work.
+- **deploy.sh never ships the shared Lambdas from a look-only container.**
+  It used to update the pull router and queue runner on EVERY deploy, from
+  whatever tree it ran in -- dev deploys included.
+- Deploy from the worktree, reading this repo's Terraform outputs:
+  `INFRA_DIR=/c/Projects/MLOPS_TRACK2/terraform/app PORT=8092 CONTAINER=track2-app-refactor APP_ROLE=refactor APP_BACKGROUND=off bash deploy.sh`
+- Port 8092 opened by hand (`sgr-0ee95b1dbcced7c2d`) and declared in
+  `terraform/platform/ec2.tf`. Close it once the split is promoted.
+
+### To promote
+
+1. Merge `data-training-split` into `mlops-track2-only`.
+2. Deploy dev normally (8090, background on). **This one updates both
+   shared Lambdas** with the split code -- check the queue runner's next
+   tick in CloudWatch (`/aws/lambda/track2-app-queue-runner`).
+3. Promote dev's tag to 8501 as usual.
+4. Remove the 8092 container, close the port, drop the ec2.tf block.
+
+---
+
 ## "item" instead of "helmet": single_cls inherited from the base checkpoint (2026-10-26)
 
 Ultralytics re-applies `single_cls` from the STARTING checkpoint's saved

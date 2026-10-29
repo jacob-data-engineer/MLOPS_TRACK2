@@ -171,7 +171,7 @@ def test_the_cards_own_problems_reach_preflight(detector, monkeypatch):
 
 def test_the_chain_calls_write_in_place_not_a_second_implementation():
     code = inspect.getsource(rs._run_chain_body)
-    assert "dy.write_in_place(" in code
+    assert "data.write_yaml_in_place(" in code
     assert "assemble_plan(config)" in code
 
 
@@ -183,7 +183,7 @@ def test_the_chain_moves_root_to_where_the_yaml_landed():
     # Everything between the write and the second-download note that
     # follows it. A fixed character count stood in for that once and
     # broke each time the call grew an argument or a comment.
-    after = code.split("dy.write_in_place(")[1].split("# The SECOND download")[0]
+    after = code.split("data.write_yaml_in_place(")[1].split("# The SECOND download")[0]
     assert 'root = out["folder"]' in after
 
 
@@ -191,8 +191,8 @@ def test_the_old_path_is_still_there():
     """This is a branch, not a replacement. Every config written before
     the tick existed goes down the root-and-week-folders side."""
     code = inspect.getsource(rs._run_chain_body)
-    assert "rl.write(root=root, config=retention)" in code
-    assert "dy.build(root=root" in code
+    assert "data.write_retained(root=root, config=retention)" in code
+    assert "data.build_yaml(root=root" in code
 
 
 # --- the card --------------------------------------------------------------------

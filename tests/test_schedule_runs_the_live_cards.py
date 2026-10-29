@@ -31,7 +31,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from ppe_pipeline_api import retrain_schedule as rs  # noqa: E402
 
 PAGE = (pathlib.Path(__file__).resolve().parents[1]
-        / "web" / "src" / "routes" / "Track2ModelsPage.tsx")
+        / "web" / "src" / "routes" / "Track2DataPrepPage.tsx")
 
 LIVE = {
     "retention": {"use_golden": True},
@@ -91,7 +91,7 @@ def test_the_split_settings_travel():
 
 def test_the_chain_builds_it_before_anything_names_it():
     code = inspect.getsource(rs._run_chain_body)
-    assert "gs.build(" in code
+    assert "data.build_golden(" in code
     assert code.index('record("golden"') < code.index("frozen = frozen_plan")
 
 
@@ -108,7 +108,7 @@ def test_a_failed_golden_build_stops_the_chain():
     # The golden stage is everything between the build and the frozen
     # check that follows it. A fixed character count stood in for that
     # once and broke the moment the stage grew a comment.
-    block = code.split("gs.build(")[1].split("frozen = frozen_plan(")[0]
+    block = code.split("data.build_golden(")[1].split("frozen = frozen_plan(")[0]
     assert 'record("golden", False' in block
     assert '"ok": False' in block
 
@@ -149,11 +149,11 @@ def test_the_greyed_cards_are_still_skipped_when_building_by_hand():
 
 def test_the_week_folder_path_still_exists_for_everyone_else():
     code = inspect.getsource(rs._run_chain_body)
-    assert "rl.write(root=root, config=retention)" in code
-    assert "dy.build(root=root" in code
+    assert "data.write_retained(root=root, config=retention)" in code
+    assert "data.build_yaml(root=root" in code
 
 
 def test_the_chain_still_ends_in_queue_and_start():
     code = inspect.getsource(rs._run_chain_body)
-    assert "t2.queue_add(entry)" in code
-    assert "t2.queue_start()" in code
+    assert "training.queue_add(entry)" in code
+    assert "training.queue_start()" in code

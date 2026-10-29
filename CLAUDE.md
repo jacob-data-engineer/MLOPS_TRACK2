@@ -156,6 +156,7 @@ leaves containers on other ports alone.** Two may run side by side:
 |---|---|---|---|
 | Stable | 8501 | `ppe-pipeline-track2-test` | `stable` |
 | Development | 8090 | `track2-app-dev` | `dev` |
+| Refactor (look-only) | 8092 | `track2-app-refactor` | `refactor`, `APP_BACKGROUND=off` |
 
 ```bash
 # stable
@@ -269,7 +270,7 @@ Node is not installed here, so there is no local alternative anyway.
 Use `.venv/Scripts/python.exe` explicitly -- a bare `python`/`python3` on
 PATH is the Windows Store alias and fails.
 
-**2338 pass, 0 fail, 0 skip, and no `--ignore` flags** (2026-10-26). The suite is
+**2388 pass, 0 fail, 0 skip, and no `--ignore` flags** (2026-10-28). The suite is
 green and all of it runs: a failure is a real failure, a skip would be a
 new fact, and there is no list of known-bad files to carry in your head.
 

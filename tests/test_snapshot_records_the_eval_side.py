@@ -60,9 +60,10 @@ def bucket(monkeypatch):
 
     monkeypatch.setattr(ds.pc, "s3", _S3())
 
-    from ppe_pipeline_api import run_artifacts
+    # What a dataset selects is the data side's since the split.
+    from ppe_pipeline_api.data import selection
     monkeypatch.setattr(
-        run_artifacts, "read_selection",
+        selection, "read_selection",
         lambda root, bucket="": {
             "yaml": TRAIN_YAML if root == "train-set" else EVAL_YAML,
             "lists": {}, "images": [],

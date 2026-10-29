@@ -50,4 +50,4 @@ def test_the_build_card_is_a_preview_with_no_button():
 def test_enqueue_does_not_start_the_queue():
     """The enqueue branch is decided BEFORE the queue is released."""
     src = inspect.getsource(rs._run_chain_body)
-    assert src.index('if submit == "enqueue":') < src.index("t2.queue_start()")
+    assert src.index('if submit == "enqueue":') < src.index("training.queue_start()")

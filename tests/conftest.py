@@ -90,3 +90,17 @@ def _no_live_aws_writes(monkeypatch):
     for _pc in _loaded("pull_control"):
         monkeypatch.setattr(_pc, "ddb", _NoLiveWrites(_pc.ddb, "pull_control.ddb"), raising=False)
         monkeypatch.setattr(_pc, "s3", _NoLiveWrites(_pc.s3, "pull_control.s3"), raising=False)
+    # The shared bucket client (2026-10-28). Since the data/training split
+    # one `storage.s3` is bound under three names -- storage, the data
+    # side's assemble module and the training side's track2_shared. ONE
+    # guard, given to all three, so a fake method set on `t2.s3` is seen by
+    # the data side too, and no copy of the client is left unguarded.
+    for prefix in ("ppe_pipeline_api", "src.ppe_pipeline_api"):
+        homes = []
+        for name in ("storage", "data.assemble", "training.track2_shared"):
+            homes.extend(m for m in _loaded(name) if m.__name__.startswith(prefix + "."))
+        if not homes:
+            continue
+        guard = _NoLiveWrites(homes[0].s3, "storage.s3")
+        for module in homes:
+            monkeypatch.setattr(module, "s3", guard)

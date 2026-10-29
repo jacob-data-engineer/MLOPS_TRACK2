@@ -92,6 +92,20 @@ resource "aws_security_group" "review_host" {
       cidr_blocks = ["0.0.0.0/0"]
     }
   }
+
+  ingress {
+    # The refactor slot (2026-10-28): a third app container,
+    # track2-app-refactor, serving the data/training split while it is
+    # built, with APP_BACKGROUND=off so it only shows pages. Opened by
+    # hand against the live group (this stack has drift -- see CLAUDE.md)
+    # and declared here so a future apply keeps it. Close it once the
+    # split is promoted.
+    description = "track2-app-refactor (data/training split, background off)"
+    from_port   = 8092
+    to_port     = 8092
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 data "aws_iam_policy_document" "ec2_trust" {

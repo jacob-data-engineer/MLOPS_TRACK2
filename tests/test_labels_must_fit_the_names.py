@@ -31,6 +31,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from ppe_pipeline_api import dataset_yaml as dy        # noqa: E402
 from ppe_pipeline_api import pull_control as pc        # noqa: E402
 from ppe_pipeline_api import retrain_schedule as rs    # noqa: E402
+from _sides import patch_everywhere
 
 WEB = pathlib.Path(__file__).resolve().parents[1] / "web" / "src"
 PANEL = (WEB / "components" / "Track2DatasetAssemblePanel.tsx").read_text(encoding="utf-8")
@@ -248,7 +249,7 @@ def test_the_filter_then_does_what_it_was_built_for(monkeypatch):
     This is the path that was unreachable while the yaml equalled the
     Model Name's list."""
     from ppe_pipeline_api import track2_shared as t2
-    monkeypatch.setattr(t2, "dataset_classes",
+    patch_everywhere(monkeypatch, "dataset_classes",
                         lambda folder: {0: "helmet", 1: "gloves", 2: "vest", 3: "boots"})
     got = t2.class_filter_for("_generated/x", {"classes": {0: "helmet"}})
     assert got == {"classes": [0], "single_cls": True}

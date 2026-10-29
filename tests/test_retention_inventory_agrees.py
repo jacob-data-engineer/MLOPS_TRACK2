@@ -19,6 +19,7 @@ from ppe_pipeline_api import retained_lists as rl
 from ppe_pipeline_api import retention as rt
 from ppe_pipeline_api import track2_shared as t2
 from ppe_pipeline_api.routers import track2_retention as tr
+from _sides import patch_everywhere
 
 ROOT = "retraining"
 
@@ -86,9 +87,9 @@ def bucket(monkeypatch):
         return {k.rsplit("/", 1)[-1].rsplit(".", 1)[0]: k
                 for k in list_keys(prefix) if k.lower().endswith(extensions)}
 
-    monkeypatch.setattr(t2, "_list_keys", list_keys)
-    monkeypatch.setattr(t2, "_basenames", basenames)
-    monkeypatch.setattr(t2, "list_s3_folders",
+    patch_everywhere(monkeypatch, "_list_keys", list_keys)
+    patch_everywhere(monkeypatch, "_basenames", basenames)
+    patch_everywhere(monkeypatch, "list_s3_folders",
                         lambda root: list(FOLDERS) if root.strip("/") == ROOT else [])
     monkeypatch.setattr(rl.pc, "destination_bucket", lambda: "track2-s3")
     monkeypatch.setattr(tr.pc, "read_config", lambda: {

@@ -92,7 +92,10 @@ def test_the_sentence_is_defined_once():
     """Two refusals, one explanation -- or they drift."""
     assert t2._YAML_IS_THE_ONLY_SOURCE_OF_NAMES
     import inspect
-    for fn in (t2.validate_dataset_folder, t2.derive_filtered_dataset):
+    # derive_filtered_dataset is the data side's since the split; t2's
+    # name for it is the front door, so read the real one.
+    from ppe_pipeline_api.data import assemble
+    for fn in (t2.validate_dataset_folder, assemble.derive_filtered_dataset):
         assert "_YAML_IS_THE_ONLY_SOURCE_OF_NAMES" in inspect.getsource(fn)
 
 

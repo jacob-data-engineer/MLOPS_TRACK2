@@ -1,3 +1,4 @@
+import { post } from "../lib/bus";
 import { formatDayTime } from "../lib/format";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -147,7 +148,10 @@ export function Track2AutoTrainingPanel() {
     const timer = window.setTimeout(() => {
       saveTrack2PullConfig({
         auto_training: { root, excluded, follow_pull: followPull },
-      }).catch(() => undefined);
+      })
+        // Which weeks are ticked is what a run trains on.
+        .then(() => post("data-sources-changed", { from: "weeks" }))
+        .catch(() => undefined);
     }, 700);
     return () => window.clearTimeout(timer);
   }, [loadedSelection, root, excluded, followPull]);

@@ -1,6 +1,8 @@
 import {
   BarChart3,
   CalendarDays,
+  Database,
+  DatabaseZap,
   Layers,
   Bell,
   Factory,
@@ -22,7 +24,17 @@ interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
+  /** How finished the tab is, shown as the entry's colour. None: neutral. */
+  status?: NavStatus;
 }
+
+type NavStatus = "ready" | "prototype" | "kiv";
+
+const STATUS_STYLE: Record<NavStatus, { className: string; title: string }> = {
+  ready: { className: "text-status-ready", title: "In use" },
+  prototype: { className: "text-status-prototype", title: "Prototype -- still changing" },
+  kiv: { className: "text-status-kiv", title: "Kept in view -- not being worked on" },
+};
 
 // The domains, in a fixed order -- this is confirmed IA, not something to
 // redesign. Audit sits directly after Evaluate escalations because it
@@ -43,10 +55,16 @@ const NAV_ITEMS: NavItem[] = [
   // difference -- so two entries were two doors into one room, and the
   // work happens on the multi side. Route kept; `/` now lands on the
   // entry that is offered rather than on one that is not.
-  { to: "/track2/multi-auto-training", label: "Track2 Multi-Auto Training", icon: Layers },
+  // The data side, ahead of training because it comes first: what a run
+  // learns from is prepared here, then trained on next door (2026-10-28).
+  { to: "/track2/data-preparation", label: "Track2 Data Preparation", icon: Database, status: "ready" },
+  { to: "/track2/multi-auto-training", label: "Track2 Multi-Auto Training", icon: Layers, status: "ready" },
+  // Explore a Postgres database for images (2026-10-28). No status colour
+  // yet -- not decided.
+  { to: "/track2/sql", label: "Track2 SQL Database Query", icon: DatabaseZap },
   // What the clocks will start, and when -- read-only, every control
   // stays on Multi-Auto Training.
-  { to: "/track2/scheduled", label: "Track2 Scheduled - prototype", icon: CalendarDays },
+  { to: "/track2/scheduled", label: "Track2 Scheduled - prototype", icon: CalendarDays, status: "prototype" },
   // Schedule, Export and Cost dropped from the nav. Schedule in
   // particular was a SECOND retrain schedule: it drove the full-frame
   // replay coordinator on production lineage while the pull toolbar
@@ -61,7 +79,7 @@ const NAV_ITEMS: NavItem[] = [
   // Lineage dropped from the nav, same as Schedule, Export and Cost
   // above: the route is kept, so a bookmark or a link in somebody's
   // notes still resolves rather than 404ing -- it just is not offered.
-  { to: "/track2/metrics", label: "Track2 Review & Metrics", icon: BarChart3 },
+  { to: "/track2/metrics", label: "Track2 Review & Metrics", icon: BarChart3, status: "prototype" },
   // Evaluation dropped from the nav. Route kept, same as the others.
   { to: "/track2/notifications", label: "Track2 Notifications", icon: Bell },
   { to: "/track2/help", label: "Track2 Help", icon: HelpCircle },
@@ -69,7 +87,7 @@ const NAV_ITEMS: NavItem[] = [
   // the others.
   // Last, and marked KIV (kept in view): deploying and trying a model is
   // not part of the retraining workflow the entries above walk through.
-  { to: "/track2/deploy", label: "Track2 Deploy & Inference (KIV)", icon: Rocket },
+  { to: "/track2/deploy", label: "Track2 Deploy & Inference (KIV)", icon: Rocket, status: "kiv" },
 ];
 
 function Wordmark() {
@@ -105,10 +123,11 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <nav className="flex flex-1 flex-col gap-0.5 p-3">
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+        {NAV_ITEMS.map(({ to, label, icon: Icon, status }) => (
           <NavLink
             key={to}
             to={to}
+            title={status ? STATUS_STYLE[status].title : undefined}
             // `end` so /escalations does not stay highlighted while its own
             // sub-entry is the active route -- react-router matches prefixes
             // by default, which would light up both.
@@ -116,9 +135,12 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
             onClick={handleNavClick}
             className={({ isActive }) =>
               `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
-                isActive
-                  ? "bg-accent-subtle font-medium text-ink"
-                  : "text-ink-secondary hover:bg-black/[0.04]"
+                isActive ? "bg-accent-subtle font-medium" : "hover:bg-black/[0.04]"
+              } ${
+                // The status colour REPLACES the neutral ink rather than
+                // sitting beside it: two text colours on one element are
+                // settled by the stylesheet's order, not this string's.
+                status ? STATUS_STYLE[status].className : isActive ? "text-ink" : "text-ink-secondary"
               }`
             }
           >

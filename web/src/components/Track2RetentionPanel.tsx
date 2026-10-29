@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { post } from "../lib/bus";
 import { useCardOpen } from "../lib/cardState";
 import {
   ApiError,
@@ -160,7 +161,9 @@ export function Track2RetentionPanel() {
   useEffect(() => {
     if (!loadedPolicy) return;
     const timer = window.setTimeout(() => {
-      saveTrack2Retention(JSON.parse(policyJson)).catch(() => undefined);
+      saveTrack2Retention(JSON.parse(policyJson))
+        .then(() => post("data-sources-changed", { from: "retention" }))
+        .catch(() => undefined);
     }, 800);
     return () => window.clearTimeout(timer);
   }, [loadedPolicy, policyJson]);

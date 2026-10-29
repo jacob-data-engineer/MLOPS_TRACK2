@@ -7,20 +7,20 @@
  * while the page is open, and a page showing one answer in two places is
  * exactly the trap the Golden Set card's own comment warned about.
  *
- * A browser event rather than a store: there is one field, it changes
- * rarely, and the alternative is a context provider threaded through two
- * cards that are otherwise independent.
+ * Carried by the notice board (lib/bus.ts) since the data/training split,
+ * so it also reaches the Training tab open in another window. A change to
+ * the golden set is also a change to what a run trains on, so it posts
+ * that too.
  */
-const EVENT = "track2:use-golden";
+import { listen, post } from "./bus";
 
 export function announceGolden(value: boolean): void {
-  window.dispatchEvent(new CustomEvent<boolean>(EVENT, { detail: value }));
+  post("golden-changed", value);
+  post("data-sources-changed", { from: "golden-set" });
 }
 
 /** Calls `onChange` when the OTHER card changes it. Returns the cleanup,
  * so it drops straight into a `useEffect`. */
 export function onGoldenChanged(handler: (value: boolean) => void): () => void {
-  const listen = (e: Event) => handler(Boolean((e as CustomEvent<boolean>).detail));
-  window.addEventListener(EVENT, listen);
-  return () => window.removeEventListener(EVENT, listen);
+  return listen("golden-changed", (value) => handler(Boolean(value)));
 }

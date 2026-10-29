@@ -57,6 +57,7 @@ def test_golden_train_joins_and_golden_val_replaces_like_the_chain():
 def test_the_weeks_are_added_when_pull_control_is_ticked():
     """2026-10-26: the preview shows Pull Control's weeks, as the run uses
     them. Named by the server, so the card never guesses the form."""
-    assert "Boolean(multiSource && onOnlyChange && !only)))" in PANEL
+    # The preview-only copy on the Training tab follows the SAVED tick.
+    assert "Boolean(multiSource && (onOnlyChange ? !only : previewOnly && !savedOnly))))" in PANEL
     s = PANEL[PANEL.index("async function foldersForBuild"):PANEL.index("const pickers")]
     assert "scan_root" not in s and "retraining" not in s

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from ppe_pipeline_api import track2_shared as t2
 from ppe_pipeline_api.main import app
+from _sides import patch_everywhere
 
 _PASSWORD = "test-suite-password"
 
@@ -270,7 +271,7 @@ def test_queue_add_remove_start_stop(client, monkeypatch):
     # usage -- none of that is what this test is about, so it is all
     # stubbed out rather than hitting real AWS.
     monkeypatch.setattr(t2, "all_model_registries", lambda: {})
-    monkeypatch.setattr(t2, "list_s3_folders", lambda prefix: [])
+    patch_everywhere(monkeypatch, "list_s3_folders", lambda prefix: [])
     monkeypatch.setattr(t2, "list_s3_folders_and_weight_files", lambda prefix: ([], []))
     # The dataset browser lists yaml files beside the folders now, so the
     # picker can offer the data.yaml itself rather than a folder tick box.
@@ -445,7 +446,7 @@ def test_scratch_run_resolves_the_seed_for_every_size(monkeypatch, arch):
 
     monkeypatch.setattr(t2, "sm", FakeSm())
     monkeypatch.setattr(t2, "validate_training_params", lambda *a, **k: (1, 640, 1, 42))
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda key: True)
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda key: True)
     monkeypatch.setattr(t2, "write_training_audit", lambda **kw: {"id": "audit1", **kw})
     monkeypatch.setattr(t2, "training_audit_table", lambda: FakeTable())
 
@@ -492,7 +493,7 @@ def test_each_size_registers_into_its_own_group(monkeypatch, arch, group):
 
     monkeypatch.setattr(t2, "sm", FakeSm())
     monkeypatch.setattr(t2, "validate_training_params", lambda *a, **k: (1, 640, 1, 42))
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda key: True)
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda key: True)
     monkeypatch.setattr(t2, "write_training_audit", lambda **kw: {"id": "a1", **kw})
     monkeypatch.setattr(t2, "training_audit_table", lambda: FakeTable())
 
@@ -523,7 +524,7 @@ def test_versioned_weights_are_written_once_and_reused(monkeypatch):
     exists = {"value": False}
     uploaded = []
 
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda key: exists["value"])
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda key: exists["value"])
 
     class FakeSm:
         def describe_model_package(self, ModelPackageName):
@@ -538,7 +539,7 @@ def test_versioned_weights_are_written_once_and_reused(monkeypatch):
             uploaded.append(key)
 
     monkeypatch.setattr(t2, "sm", FakeSm())
-    monkeypatch.setattr(t2, "s3", FakeS3())
+    patch_everywhere(monkeypatch, "s3", FakeS3())
 
     uri = t2.publish_versioned_weights(arn)
     assert uri == f"s3://{t2.BUCKET}/models/yolo11m-open-detector/v7/model.pt"
@@ -564,9 +565,9 @@ def test_a_matching_taxonomy_needs_no_filtered_copy(monkeypatch):
     """
     from ppe_pipeline_api import track2_shared as t2
 
-    monkeypatch.setattr(t2, "dataset_classes", lambda folder: {0: "helmet"})
+    patch_everywhere(monkeypatch, "dataset_classes", lambda folder: {0: "helmet"})
     called = []
-    monkeypatch.setattr(t2, "_list_keys", lambda prefix: called.append(prefix) or [])
+    patch_everywhere(monkeypatch, "_list_keys", lambda prefix: called.append(prefix) or [])
 
     out = t2.derive_filtered_dataset(
         "retraining", {"slug": "helmet", "classes": {0: "helmet"}})
@@ -580,10 +581,10 @@ def test_a_different_taxonomy_still_derives(monkeypatch):
     class learns from several kinds of box."""
     from ppe_pipeline_api import track2_shared as t2
 
-    monkeypatch.setattr(t2, "dataset_classes",
+    patch_everywhere(monkeypatch, "dataset_classes",
                         lambda folder: {0: "person", 1: "helmet"})
-    monkeypatch.setattr(t2, "_list_keys", lambda prefix: [])
-    monkeypatch.setattr(t2, "list_s3_folders", lambda prefix: [])
+    patch_everywhere(monkeypatch, "_list_keys", lambda prefix: [])
+    patch_everywhere(monkeypatch, "list_s3_folders", lambda prefix: [])
     monkeypatch.setattr(t2.s3, "get_object",
                         lambda **kw: (_ for _ in ()).throw(KeyError("no marker")))
 
@@ -606,7 +607,7 @@ def test_a_one_class_detector_is_isolated_without_copying_anything(monkeypatch):
     """
     from ppe_pipeline_api import track2_shared as t2
 
-    monkeypatch.setattr(t2, "dataset_classes", lambda folder: {
+    patch_everywhere(monkeypatch, "dataset_classes", lambda folder: {
         0: "helmet", 1: "gloves", 2: "person",
         3: "working_boots", 4: "man_cage", 5: "safe_area",
     })
@@ -622,7 +623,7 @@ def test_a_one_class_detector_is_isolated_without_copying_anything(monkeypatch):
 def test_an_exact_match_needs_no_filtering_at_all(monkeypatch):
     from ppe_pipeline_api import track2_shared as t2
 
-    monkeypatch.setattr(t2, "dataset_classes", lambda folder: {0: "helmet"})
+    patch_everywhere(monkeypatch, "dataset_classes", lambda folder: {0: "helmet"})
     assert t2.class_filter_for("f", {"slug": "helmet", "classes": {0: "helmet"}}) == {}
 
 
@@ -633,7 +634,7 @@ def test_several_wanted_classes_still_need_a_rewritten_copy(monkeypatch):
     way to renumber them to 0 and 1."""
     from ppe_pipeline_api import track2_shared as t2
 
-    monkeypatch.setattr(t2, "dataset_classes", lambda folder: {
+    patch_everywhere(monkeypatch, "dataset_classes", lambda folder: {
         0: "helmet", 1: "gloves", 2: "person"})
     out = t2.class_filter_for("f", {"slug": "ppe",
                                     "classes": {0: "helmet", 1: "gloves"}})
@@ -645,7 +646,7 @@ def test_a_class_the_dataset_does_not_have_falls_through_to_the_copy(monkeypatch
     filtering on an index that means something else."""
     from ppe_pipeline_api import track2_shared as t2
 
-    monkeypatch.setattr(t2, "dataset_classes", lambda folder: {0: "helmet"})
+    patch_everywhere(monkeypatch, "dataset_classes", lambda folder: {0: "helmet"})
     out = t2.class_filter_for("f", {"slug": "cage", "classes": {0: "man_cage"}})
     assert out == {"derive": True}
 

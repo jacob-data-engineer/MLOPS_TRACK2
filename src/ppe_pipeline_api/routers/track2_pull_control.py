@@ -96,6 +96,8 @@ class ConfigRequest(BaseModel):
     # that a saved settings file came back with `golden_set: {}` and the
     # folders had to be found again.
     golden_set: dict | None = None
+    # The SQL tab's database, bucket, folder and query.
+    sql_explorer: dict | None = None
     # Which cards are open. Restored with everything else so a loaded
     # file puts the page back as it was left.
     card_state: dict | None = None

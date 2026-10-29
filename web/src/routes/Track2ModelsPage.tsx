@@ -1,5 +1,6 @@
 import { AlertCircle, Cpu, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { listen } from "../lib/bus";
 import { formatDayTime } from "../lib/format";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
@@ -7,15 +8,10 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Track2DatasetVersionsPanel } from "../components/Track2DatasetVersionsPanel";
 import { ProgressBar } from "../components/ProgressBar";
 import { StatTile } from "../components/StatTile";
-import { Track2AutoTrainingPanel } from "../components/Track2AutoTrainingPanel";
 import { Track2DatasetAssemblePanel } from "../components/Track2DatasetAssemblePanel";
-import { Track2GoldenSetPanel } from "../components/Track2GoldenSetPanel";
-import { SwitchedOff } from "../components/SwitchedOff";
 import { Track2DetectorsPanel } from "../components/Track2DetectorsPanel";
 import { Track2BaseModelPicker } from "../components/Track2BaseModelPicker";
 import { Track2ImportCheckpointPanel } from "../components/Track2ImportCheckpointPanel";
-import { Track2PullControlPanel } from "../components/Track2PullControlPanel";
-import { Track2PullQueuePanel } from "../components/Track2PullQueuePanel";
 import { Track2PinnedBar } from "../components/Track2PinnedBar";
 import { Track2TrainingHistory } from "../components/Track2TrainingAuditPanel";
 import {
@@ -392,6 +388,21 @@ function TrainingForm({
    * than passed down: they live on three different cards, and this one
    * only reports them. */
   const [sources, setSources] = useState({ folders: true, golden: false, pull: false });
+  // Kept current while the page is open (2026-10-28). Read once on load,
+  // ticking the golden set or Assemble's folders afterwards left this
+  // card describing -- and choosing between enqueue and queue for -- the
+  // sources as they were when the page opened. The data cards are on the
+  // Data Preparation tab now, often in another window; the notice board
+  // says when one saved, and only the three ticks are re-read.
+  useEffect(() => listen("data-sources-changed", () => {
+    getTrack2PullControl()
+      .then((status) => setSources({
+        folders: status.config.dataset_assemble?.use !== false,
+        golden: Boolean(status.config.retention?.use_golden),
+        pull: !status.config.dataset_assemble?.only,
+      }))
+      .catch(() => undefined);
+  }), []);
   // Choosing the dataset from this card, for when nothing upstream has.
   // The frozen snapshots of the training root, offered HERE as well as
   // in Retention. Repeating a past dataset is a thing you decide at the
@@ -1623,19 +1634,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
   const [historyKey, setHistoryKey] = useState(0);
   // Same idea for the detector list the training form below holds.
   const [detectorsVersion, setDetectorsVersion] = useState(0);
-  // Whether the dataset is picked by hand on the Assemble card, which
-  // switches Pull Control, Auto Training and Retention off.
-  //
-  // Declared up here with the rest of the state, not beside the cards
-  // that read it near the bottom of this file. A `const` that reads a
-  // `useState` declared BELOW it throws on every render and unmounts the
-  // whole tree -- the page went white that way once already, and `tsc`
-  // does not catch it when the read is inside a callback.
-  //
-  // Not persisted: it is off on every load, so a reload always leaves
-  // every card usable rather than leaving someone with three greyed-out
-  // panels and nothing on screen saying which tick did it.
-  const [pickFoldersByHand, setPickFoldersByHand] = useState(false);
   // The checkpoint the import card has inspected and is holding, while
   // the Class it will be filed under is defined by hand below. Held here
   // because the two cards are siblings: one knows what was inspected,
@@ -2137,66 +2135,23 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             />
           )}
 
-          {/* Pick the data by hand, instead of collecting it week by week.
-              ABOVE the golden set and everything below it, because it is
-              the first question -- where does this run's data come from --
-              and the three cards underneath are the other answer to it.
-              Ticking "Use these folders only" switches those three off
-              rather than letting both decide. */}
-          {multi && (
-            <Track2DatasetAssemblePanel
-              multiSource
-              // Same one choice, cascaded: the Model Name decides the
-              // registry the run versions into AND the class names the
-              // yaml declares, and those must be one list.
-              modelSlug={modelChoice.slug}
-              only={pickFoldersByHand}
-              onOnlyChange={setPickFoldersByHand}
-            />
-          )}
+          {/* The data cards -- Assemble, Golden Set, Pull Control, the
+              weeks with Retention inside, and the pull queue -- moved to
+              the Data Preparation tab with the data/training split
+              (2026-10-28). They prepare what a run trains on; this tab
+              decides what to train and trains it. What they chose reaches
+              this tab through the saved settings, and the notice board
+              (lib/bus.ts) says when it changed. */}
 
-          {/* Divides a set somebody curated by hand. Ahead of the pull
-              rather than after it: what belongs in a golden set is a
-              judgement made on images you already have, so it owes the
-              pull nothing and reads better settled before the collecting
-              starts. */}
-          {multi && <Track2GoldenSetPanel />}
-
-          {/* Upstream of everything below it: pull control is what puts
-              files into the week folders that Auto Training then discovers.
-              Multi-auto-training only, for the same reason Auto Training
-              is -- the standard tab works one folder at a time. */}
-          {multi && (
-            // Not wrapped in `SwitchedOff`: that makes the whole subtree
-            // inert, and the tick that turns this card back on now lives
-            // in its own heading. The card dims its own body instead, so
-            // the switch stays reachable either way.
-            <Track2PullControlPanel
-              only={pickFoldersByHand}
-              onOnlyChange={setPickFoldersByHand}
-            />
-          )}
-
-          {/* Multi-auto-training only. The standard tab assembles one
-              folder at a time; discovering a whole root of week folders is
-              the thing that tab exists for. */}
-          {/* Carries Retention inside it now. Retention decides how much
-              of each older week an assembly takes, so it was being read
-              on one card and applied on another, three cards apart. */}
-          {multi && (
-            <SwitchedOff
-              off={pickFoldersByHand}
-              reason={<>The run is using the folders picked above. Retention
-                lives inside this card, so it is off with it.</>}
-            >
-              <Track2AutoTrainingPanel />
-            </SwitchedOff>
-          )}
-
-          {/* The Assemble card's yaml build renders here, by portal --
-              the last step before the run, next to the button that trains
-              on it. Its state stays in the Assemble card. */}
-          <div id="track2-yaml-build-slot" />
+          {/* The data.yaml the run will build, next to the button that
+              trains on it. On the standard tab the Assemble card above
+              renders it here by portal. On this tab the card is on the
+              Data Preparation tab, so its preview-only mode draws the same
+              preview from the saved settings -- the same code, so the two
+              cannot disagree. */}
+          {multi
+            ? <Track2DatasetAssemblePanel multiSource modelSlug={modelChoice.slug} previewOnly />
+            : <div id="track2-yaml-build-slot" />}
 
           <TrainingForm
             selection={selection}
@@ -2205,14 +2160,8 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             detectorsVersion={detectorsVersion}
           />
 
-          {/* The two queues, side by side. Pull first because it is
-              upstream: a sweep puts files where a training run then reads
-              them, so reading left to right follows the work.
-
-              Multi only -- the standard tab has no Pull Control card, so
-              a pull queue there would queue settings nothing on that tab
-              can see or change. */}
-          {multi && <Track2PullQueuePanel />}
+          {/* The pull queue is on the Data Preparation tab now, with the
+              Pull Control card whose settings it queues. */}
 
           <Card
             title="Training queue"

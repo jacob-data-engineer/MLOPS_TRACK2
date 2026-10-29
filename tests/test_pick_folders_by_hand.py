@@ -23,7 +23,10 @@ from __future__ import annotations
 import pathlib
 
 WEB = pathlib.Path(__file__).resolve().parents[1] / "web" / "src"
-PAGE = (WEB / "routes" / "Track2ModelsPage.tsx").read_text(encoding="utf-8")
+# The week-by-week cards and the tick that switches them off live on the
+# Data Preparation tab since the data/training split (2026-10-28).
+PAGE = (WEB / "routes" / "Track2DataPrepPage.tsx").read_text(encoding="utf-8")
+MODELS = (WEB / "routes" / "Track2ModelsPage.tsx").read_text(encoding="utf-8")
 PANEL = (WEB / "components" / "Track2DatasetAssemblePanel.tsx").read_text(encoding="utf-8")
 OFF = (WEB / "components" / "SwitchedOff.tsx").read_text(encoding="utf-8")
 
@@ -99,7 +102,9 @@ def test_the_tick_is_only_offered_where_it_turns_something_off():
     """The standard tab has none of those three cards, so a tick there
     would claim to switch off nothing."""
     assert "onOnlyChange ?" in PANEL
-    standard = PAGE[PAGE.index("{!multi && ("):PAGE.index("only={pickFoldersByHand}")]
+    # The standard tab is still on the training page, and still has no tick.
+    at = MODELS.index("{!multi && (")
+    standard = MODELS[at:MODELS.index(")}", at)]
     assert "onOnlyChange" not in standard
 
 

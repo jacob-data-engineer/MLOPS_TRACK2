@@ -92,6 +92,16 @@
   --color-verdict-violation: #9c1c17;
   --color-verdict-clear: #1f6b3a;
   --color-verdict-escalate: #1c4f9c;
+
+  /* HOW FINISHED EACH TAB IS, on the sidebar (2026-10-28). Green: in use.
+     Yellow: a prototype, still changing. Red: kept in view, not worked on.
+     The same dark-ink family as the verdicts, so they sit on the paper
+     at one weight; the amber is new, darkened until it clears 4.5:1 on
+     both the page (5.8:1) and the highlighted row (4.9:1). Words carry
+     it too -- "prototype", "(KIV)", and the tooltip -- never colour alone. */
+  --color-status-ready: #1f6b3a;
+  --color-status-prototype: #7a4f00;
+  --color-status-kiv: #9c1c17;
 }
 
 :root {

@@ -250,9 +250,9 @@ def test_it_runs_the_same_chain_as_everything_else():
 # --- wired to tickers that already exist ------------------------------------------------------
 
 def test_the_apps_poll_loop_calls_it():
-    from ppe_pipeline_api import track2_shared as t2
+    from ppe_pipeline_api.chain import ticker
 
-    code = inspect.getsource(t2.queue_poll_loop)
+    code = inspect.getsource(ticker.queue_poll_loop)
     assert "retrain_schedule.check_training_schedule" in code
 
 

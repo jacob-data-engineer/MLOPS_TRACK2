@@ -2150,6 +2150,13 @@ export interface Track2PullConfig {
   /** Step 2's own choices. Server-side so the settings file holds them --
    * they used to be browser-tab state only, so a saved file recorded the
    * golden set's on/off switch and none of the folders it pointed at. */
+  /** The SQL tab's choices, saved so a settings file brings them back. */
+  sql_explorer?: {
+    database?: string;
+    bucket?: string;
+    folder?: string;
+    sql?: string;
+  };
   golden_set?: {
     bucket?: string;
     source?: string;
@@ -3605,4 +3612,55 @@ export function startTrack2CustomTraining(
   params: Track2TrainingParams,
 ): Promise<{ message: string; run_id: string; execution_arn: string; audit_id: string }> {
   return apiPost("/track2/models/train/custom", params);
+}
+
+
+// --- the SQL tab (2026-10-28) -------------------------------------------
+
+/** A Postgres database the SQL tab can query, and whether it is up. */
+export interface Track2SqlDatabase {
+  key: string;
+  label: string;
+  status: string;
+  available: boolean;
+}
+
+export interface Track2SqlTable {
+  name: string;
+  columns: { name: string; type: string }[];
+}
+
+/** One image found in the result, narrowed by the chosen bucket and folder. */
+export interface Track2SqlImage {
+  uri: string;
+  bucket: string;
+  key: string;
+  /** The column it was found in, and the row. */
+  column: string;
+  row: number;
+}
+
+export interface Track2SqlResult {
+  columns: string[];
+  rows: unknown[][];
+  /** Cut short near the 6 MB a query function may return. */
+  truncated: boolean;
+  images: Track2SqlImage[];
+}
+
+export function getTrack2SqlDatabases(): Promise<{ databases: Track2SqlDatabase[] }> {
+  return apiGet("/track2/sql/databases");
+}
+
+export function getTrack2SqlSchema(database: string): Promise<{ tables: Track2SqlTable[] }> {
+  return apiPost("/track2/sql/schema", { database });
+}
+
+export function runTrack2Sql(
+  database: string,
+  sql: string,
+  bucket: string,
+  folder: string,
+): Promise<Track2SqlResult> {
+  return apiPost("/track2/sql/query", { database, sql, bucket, folder });
 }

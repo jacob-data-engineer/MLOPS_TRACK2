@@ -15,6 +15,7 @@ internal tool per the architect's decision; revisit if that changes.
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, Response
 
 from . import auth, track2_shared
+from .chain import ticker
 from .routers import (
     track2_cost,
     track2_deploy,
@@ -37,24 +39,43 @@ from .routers import (
     track2_retention,
     track2_review,
     track2_schedule,
+    track2_sql,
 )
+
+
+def background_enabled() -> bool:
+    """False in a container started with APP_BACKGROUND=off.
+
+    Every container shares production's tables, bucket and queue, so its
+    background work acts on real data: the startup recovery fails any
+    in-flight inference/eval row it finds, and the poll loop starts queued
+    runs, chains retrains and drains pulls. A container showing code still
+    being built (the refactor slot on 8092) must only LOOK -- with this
+    off it serves pages and leaves all of that to the stable container,
+    dev and the queue Lambda. Unset means on, as before.
+    """
+    return os.environ.get("APP_BACKGROUND", "on").strip().lower() != "off"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not background_enabled():
+        print("APP_BACKGROUND=off: no startup recovery, no queue poll loop.")
     # Any inference/eval job still marked in-flight belongs to a process
     # that no longer exists -- this one just started, and its workers are
     # created below. Left alone, such a row reads as unfinished work
     # forever, which blocks the endpoint teardown and bills until someone
     # notices. Runs before the workers so it can never race one.
-    try:
-        track2_shared.recover_interrupted_jobs()
-    except Exception as exc:  # never block startup on this
-        print(f"Could not recover interrupted jobs: {exc}")
+    if background_enabled():
+        try:
+            track2_shared.recover_interrupted_jobs()
+        except Exception as exc:  # never block startup on this
+            print(f"Could not recover interrupted jobs: {exc}")
     # Advances the ad-hoc Track2 training queue in the background -- see
     # track2_shared.py's module docstring on why this state is in-memory,
     # single-process only, same as session_store.py.
-    poll_task = asyncio.create_task(track2_shared.queue_poll_loop())
+    poll_task = (asyncio.create_task(ticker.queue_poll_loop())
+                 if background_enabled() else None)
     # Fill the registry cache before anybody asks for it.
     #
     # Review & Metrics lists every model package group and describes every
@@ -76,7 +97,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        poll_task.cancel()
+        if poll_task is not None:
+            poll_task.cancel()
         warm_task.cancel()
         refresh_task.cancel()
 
@@ -117,6 +139,7 @@ app.include_router(track2_cost.router, prefix="/track2/cost", tags=["track2-cost
 app.include_router(track2_eval.router, prefix="/track2/eval", tags=["track2-eval"])
 app.include_router(track2_pull_control.router, prefix="/track2/pull-control", tags=["track2-pull-control"])
 app.include_router(track2_retention.router, prefix="/track2/retention", tags=["track2-retention"])
+app.include_router(track2_sql.router, prefix="/track2/sql", tags=["track2-sql"])
 
 
 @app.get("/health")

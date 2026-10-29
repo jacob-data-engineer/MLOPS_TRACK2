@@ -54,7 +54,8 @@ def settings_dir(tmp_path, monkeypatch):
 def _pc_of_mx():
     """The pull_control `mx` itself imports -- `src.ppe_pipeline_api...`
     here, a different module object from `ppe_pipeline_api.pull_control`."""
-    return importlib.import_module(mx.__name__.rsplit(".", 1)[0] + ".pull_control")
+    # `mx` lives in `<package>.training` since the split; pull_control at the top.
+    return importlib.import_module(mx.__name__.rsplit(".", 2)[0] + ".pull_control")
 
 
 # --- picking ------------------------------------------------------------
@@ -335,14 +336,14 @@ def test_the_tick_calls_it(settings_dir):
     call site rather than trusting that it is there."""
     import inspect
 
-    from src.ppe_pipeline_api import track2_shared as t2
+    from src.ppe_pipeline_api.chain import ticker
 
-    source = inspect.getsource(t2.queue_poll_loop)
+    source = inspect.getsource(ticker.queue_poll_loop)
     # Handed to a thread rather than called inline -- it is synchronous
     # boto3 and the loop it rides is the one serving every request -- so
-    # the call reads `to_thread(metrics_export.check)`, with no parens.
-    assert "metrics_export" in source
-    assert "asyncio.to_thread(metrics_export.check" in source
+    # the call reads `to_thread(training.check_auto_export)`, with no
+    # parens. Through the training front door since the split.
+    assert "asyncio.to_thread(training.check_auto_export" in source
 
 
 # --- what gets exported -------------------------------------------------
@@ -805,7 +806,7 @@ def test_the_queue_lambda_runs_the_watcher():
     import inspect
     from ppe_pipeline_api import queue_runner
 
-    assert "metrics_export.check()" in inspect.getsource(queue_runner.lambda_handler)
+    assert "training.check_auto_export()" in inspect.getsource(queue_runner.lambda_handler)
 
 
 def test_the_lambda_is_allowed_to_do_it():

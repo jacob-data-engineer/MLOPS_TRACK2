@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ppe_pipeline_api import retained_lists as rl
+from _sides import patch_everywhere
 
 
 WEEKS = {
@@ -46,11 +47,11 @@ def bucket(monkeypatch):
     monkeypatch.setattr(rl.pc, "destination_bucket", lambda: "track2-s3")
 
     from ppe_pipeline_api import track2_shared as t2
-    monkeypatch.setattr(t2, "_basenames", basenames)
+    patch_everywhere(monkeypatch, "_basenames", basenames)
     # The inventory (`retention.read_inventory`) lists keys, not stems.
-    monkeypatch.setattr(t2, "_list_keys",
+    patch_everywhere(monkeypatch, "_list_keys",
                         lambda prefix: sorted(k for k in keys if k.startswith(prefix)))
-    monkeypatch.setattr(t2, "list_s3_folders", lambda root: list(WEEKS))
+    patch_everywhere(monkeypatch, "list_s3_folders", lambda root: list(WEEKS))
     return written
 
 

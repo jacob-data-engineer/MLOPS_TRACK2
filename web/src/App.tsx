@@ -28,6 +28,7 @@ import { RequireAuth } from "./components/RequireAuth";
 import { RouteBoundary } from "./components/RouteBoundary";
 import { LoginPage } from "./routes/LoginPage";
 import { Track2CostPage } from "./routes/Track2CostPage";
+import { Track2DataPrepPage } from "./routes/Track2DataPrepPage";
 import { Track2DeployPage } from "./routes/Track2DeployPage";
 import { Track2EvalPage } from "./routes/Track2EvalPage";
 import { Track2ExportPage } from "./routes/Track2ExportPage";
@@ -38,6 +39,7 @@ import { Track2ModelsPage } from "./routes/Track2ModelsPage";
 import { Track2NotificationsPage } from "./routes/Track2NotificationsPage";
 import { Track2ScheduledPage } from "./routes/Track2ScheduledPage";
 import { Track2SchedulePage } from "./routes/Track2SchedulePage";
+import { Track2SqlPage } from "./routes/Track2SqlPage";
 import { Track2SyntheticPage } from "./routes/Track2SyntheticPage";
 
 export function App() {
@@ -94,6 +96,11 @@ export function App() {
           path="/track2/multi-auto-training"
           element={<Track2ModelsPage variant="multi" />}
         />
+        {/* The data side of the data/training split (2026-10-28): the
+            cards that decide what a run trains on. */}
+        <Route path="/track2/data-preparation" element={<Track2DataPrepPage />} />
+        {/* Read-only SQL against a Postgres database, answered as images. */}
+        <Route path="/track2/sql" element={<Track2SqlPage />} />
         {/* A suggested read-only view of the same settings as one picture.
             Nothing on it writes; every stage links back to its card. */}
         <Route path="/track2/schedule" element={<Track2SchedulePage />} />

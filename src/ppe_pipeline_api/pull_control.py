@@ -160,6 +160,11 @@ DEFAULTS = {
     # the folders it pointed at. `{bucket, source, target_bucket,
     # target_folder, split, train_percent}`.
     "golden_set": {},
+    # The SQL tab's choices: which database, the bucket and folder that
+    # narrow the images, and the query last typed. `{database, bucket,
+    # folder, sql}`. A setting like any other card's, so a settings file
+    # brings the query back with everything else.
+    "sql_explorer": {},
     # The Assemble card's own choices: the folders it merges into a
     # dataset, the detector it writes classes for, whether it may replace
     # a data.yaml it did not write, and whether it is the ONLY source of

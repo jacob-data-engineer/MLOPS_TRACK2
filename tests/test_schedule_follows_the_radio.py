@@ -143,8 +143,8 @@ def test_a_frozen_source_rebuilds_nothing():
     code = inspect.getsource(rs._run_chain_body)
     block = code.split("if frozen is not None:")[1]
     block = block[:block.index("elif assembled is not None:")]
-    assert "dy.write_in_place(" not in block
-    assert "rl.write(" not in block
+    assert "data.write_yaml_in_place(" not in block
+    assert "data.write_retained(" not in block
     assert "already frozen" in block or "nothing is rebuilt" in block
 
 
@@ -155,7 +155,7 @@ def test_a_frozen_source_is_not_re_frozen():
     at = code.index("# 2. freeze it")
     block = code[at:at + 1200]
     assert "if frozen is not None:" in block
-    assert block.index("if frozen is not None:") < block.index("ds.create(")
+    assert block.index("if frozen is not None:") < block.index("data.create_snapshot(")
 
 
 def test_the_chain_trains_the_folder_that_was_frozen():

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ppe_pipeline_api import retention as rt
+from _sides import patch_everywhere
 
 
 def week(name: str, count: int) -> dict:
@@ -136,7 +137,7 @@ def test_assembly_honours_the_allowlist(monkeypatch):
     from ppe_pipeline_api import track2_shared as t2
 
     copied = []
-    monkeypatch.setattr(t2, "_basenames", lambda prefix, exts: (
+    patch_everywhere(monkeypatch, "_basenames", lambda prefix, exts: (
         {f"img{i}": f"{prefix}/img{i}.jpg" for i in range(6)}
         if "images" in prefix
         else {f"img{i}": f"{prefix}/img{i}.txt" for i in range(6)}

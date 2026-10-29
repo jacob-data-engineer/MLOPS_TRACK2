@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from ppe_pipeline_api import track2_shared as t2
 from ppe_pipeline_api.main import app
+from _sides import patch_everywhere
 
 _PASSWORD = "test-suite-password"
 
@@ -468,7 +469,7 @@ def importable(detector_table, monkeypatch):
             self.uploaded.append(key)
 
     s3 = FakeS3()
-    monkeypatch.setattr(t2, "s3", s3)
+    patch_everywhere(monkeypatch, "s3", s3)
     return registry, s3
 
 
@@ -579,7 +580,7 @@ def test_the_tarball_holds_model_pt_at_its_root(importable, tmp_path, monkeypatc
         def upload_file(self, local, bucket, key):
             written["names"] = _tarfile.open(local, "r:gz").getnames()
 
-    monkeypatch.setattr(t2, "s3", CapturingS3())
+    patch_everywhere(monkeypatch, "s3", CapturingS3())
     t2.register_uploaded_base_model(
         key="external_models/uploaded/yolo11s/abc/model.pt",
         detector_slug="vehicle", architecture="yolo11s",
@@ -645,7 +646,7 @@ def test_importing_rejects_an_unknown_architecture(importable):
 def test_a_fresh_upload_is_inspectable_without_touching_s3(monkeypatch):
     """The upload prefix short-circuits: this app just wrote the object, so
     re-checking its existence is a round trip for nothing."""
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda key: pytest.fail("should not check"))
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda key: pytest.fail("should not check"))
     key = f"{t2.BASE_MODEL_UPLOAD_PREFIX}/yolo11s/abc/model.pt"
     assert t2.assert_inspectable_checkpoint(key) == key
 
@@ -653,13 +654,13 @@ def test_a_fresh_upload_is_inspectable_without_touching_s3(monkeypatch):
 def test_an_existing_bucket_checkpoint_is_inspectable(monkeypatch):
     """Importing a .pt already in the bucket -- the same set the training
     form will hand the trainer as starting weights."""
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda key: True)
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda key: True)
     assert t2.assert_inspectable_checkpoint("ming_yang_yolos/run/weights/best.pt") \
         == "ming_yang_yolos/run/weights/best.pt"
 
 
 def test_a_missing_object_is_refused(monkeypatch):
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda key: False)
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda key: False)
     with pytest.raises(ValueError, match="does not exist"):
         t2.assert_inspectable_checkpoint("nowhere/best.pt")
 
@@ -668,7 +669,7 @@ def test_a_missing_object_is_refused(monkeypatch):
 def test_a_non_checkpoint_is_refused(monkeypatch, key):
     """Reading one means unpickling it inside the container that holds the
     estate's credentials, so the file has to be a checkpoint."""
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda k: True)
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda k: True)
     with pytest.raises(ValueError):
         t2.assert_inspectable_checkpoint(key)
 
@@ -873,7 +874,7 @@ def site_dataset(monkeypatch):
         images=["train/a.jpg", "train/b.jpg", "val/c.jpg"],
         names=names,
     )
-    monkeypatch.setattr(t2, "s3", fake)
+    patch_everywhere(monkeypatch, "s3", fake)
     return fake
 
 
@@ -964,15 +965,15 @@ def test_filtering_refuses_when_the_class_is_absent(site_dataset):
 
 def test_validation_accepts_a_superset_because_the_run_filters_it(detector_table, monkeypatch):
     t2.upsert_detector("helmet", "Helmet", {"0": "helmet"})
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda key: True)
-    monkeypatch.setattr(t2, "dataset_classes", lambda f: {0: "helmet", 1: "gloves"})
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda key: True)
+    patch_everywhere(monkeypatch, "dataset_classes", lambda f: {0: "helmet", 1: "gloves"})
     t2.validate_dataset_folder("data/site", used_for_evaluation=False, detector_slug="helmet")
 
 
 def test_validation_still_refuses_a_dataset_missing_the_class(detector_table, monkeypatch):
     t2.upsert_detector("helmet", "Helmet", {"0": "helmet"})
-    monkeypatch.setattr(t2, "_s3_object_exists", lambda key: True)
-    monkeypatch.setattr(t2, "dataset_classes", lambda f: {0: "gloves", 1: "person"})
+    patch_everywhere(monkeypatch, "_s3_object_exists", lambda key: True)
+    patch_everywhere(monkeypatch, "dataset_classes", lambda f: {0: "gloves", 1: "person"})
     with pytest.raises(ValueError, match="does not declare helmet"):
         t2.validate_dataset_folder("data/site", used_for_evaluation=False, detector_slug="helmet")
 
@@ -1045,7 +1046,7 @@ def scattered(monkeypatch):
         "annotations/yolo/ghost.txt",
         "raw/valpics/v1.jpg", "annotations/val/v1.txt",
     ])
-    monkeypatch.setattr(t2, "s3", fake)
+    patch_everywhere(monkeypatch, "s3", fake)
     return fake
 
 
@@ -1189,7 +1190,7 @@ def _yaml_s3(monkeypatch, body: str | None):
                 raise RuntimeError("NoSuchKey")
             import io
             return {"Body": io.BytesIO(body.encode())}
-    monkeypatch.setattr(t2, "s3", FakeS3())
+    patch_everywhere(monkeypatch, "s3", FakeS3())
 
 
 def test_separate_train_and_val_splits_are_held_out(monkeypatch):
@@ -1417,7 +1418,7 @@ def test_the_audit_block_keeps_a_sample_and_the_rows_keep_everything(files_table
                         {"Key": f"{Prefix}images/train/img{i:05d}.jpg"} for i in range(2500)
                     ]}
             return Paginator()
-    monkeypatch.setattr(t2, "s3", FakeS3())
+    patch_everywhere(monkeypatch, "s3", FakeS3())
     block = t2._dataset_audit_block("data/site", "abc123", "train")
     assert block["file_count"] == 2500
     assert len(block["file_names"]) == t2.AUDIT_MAX_FILE_NAMES   # the preview
@@ -1526,7 +1527,7 @@ def _assembled_audit(**overrides):
 
 def _cleanup(monkeypatch, audit, keys, others=()):
     fake = _DeletingS3(list(keys))
-    monkeypatch.setattr(t2, "s3", fake)
+    patch_everywhere(monkeypatch, "s3", fake)
     monkeypatch.setattr(t2, "scan_training_audits", lambda **_kw: list(others))
     return fake, t2.cleanup_assembled_dataset(audit)
 
@@ -1732,7 +1733,7 @@ def test_the_weights_link_is_presigned_not_streamed(monkeypatch):
             captured.update(op=op, params=Params, expires=ExpiresIn)
             return "https://s3.example/signed"
 
-    monkeypatch.setattr(t2, "s3", FakeS3())
+    patch_everywhere(monkeypatch, "s3", FakeS3())
     url = t2.presign_weights_download("s3://track2-s3/models/yolo11s-helmet-detector/v2/model.pt")
     assert url == "https://s3.example/signed"
     assert captured["op"] == "get_object"
@@ -1750,7 +1751,7 @@ def test_the_download_is_named_after_the_group_and_version(monkeypatch):
             captured.update(Params)
             return "https://s3.example/signed"
 
-    monkeypatch.setattr(t2, "s3", FakeS3())
+    patch_everywhere(monkeypatch, "s3", FakeS3())
     t2.presign_weights_download("s3://b/models/yolo11s-helmet-detector/v2/model.pt")
     assert 'filename="yolo11s-helmet-detector-v2.pt"' in captured["ResponseContentDisposition"]
 
@@ -1760,7 +1761,7 @@ def test_an_unexpected_key_shape_keeps_the_original_filename(monkeypatch):
         def generate_presigned_url(self, op, Params, ExpiresIn):
             return Params["ResponseContentDisposition"]
 
-    monkeypatch.setattr(t2, "s3", FakeS3())
+    patch_everywhere(monkeypatch, "s3", FakeS3())
     assert 'filename="best.pt"' in t2.presign_weights_download("s3://b/best.pt")
 
 
@@ -1806,15 +1807,16 @@ def two_sources(monkeypatch):
         "siteB/images/img001.jpg", "siteB/images/img009.jpg",
         "siteB/labels/img001.txt",
     ])
-    monkeypatch.setattr(t2, "s3", fake)
+    patch_everywhere(monkeypatch, "s3", fake)
     return fake
 
 
 def test_a_single_pair_is_still_accepted():
-    assert t2._as_sources(("img", "lbl")) == [("img", "lbl")]
-    assert t2._as_sources([("a", "b"), ("c", "d")]) == [("a", "b"), ("c", "d")]
-    assert t2._as_sources(None) == []
-    assert t2._as_sources([]) == []
+    from ppe_pipeline_api.data import assemble
+    assert assemble._as_sources(("img", "lbl")) == [("img", "lbl")]
+    assert assemble._as_sources([("a", "b"), ("c", "d")]) == [("a", "b"), ("c", "d")]
+    assert assemble._as_sources(None) == []
+    assert assemble._as_sources([]) == []
 
 
 def test_several_folders_merge_into_one_split(two_sources):
@@ -1926,8 +1928,8 @@ def test_discover_dataset_sources_expands_every_week(monkeypatch):
                 return [f"{labels}img{i}.txt" for i in range(max(count - drop, 0))]
         return []
 
-    monkeypatch.setattr(t2, "list_s3_folders", fake_folders)
-    monkeypatch.setattr(t2, "_list_keys", fake_keys)
+    patch_everywhere(monkeypatch, "list_s3_folders", fake_folders)
+    patch_everywhere(monkeypatch, "_list_keys", fake_keys)
 
     out = t2.discover_dataset_sources(
         root="retraining/",

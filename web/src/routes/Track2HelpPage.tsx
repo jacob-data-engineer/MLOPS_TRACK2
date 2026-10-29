@@ -182,8 +182,13 @@ const TRAINING_STEPS: StepList = [
     title: "Choose the training data sources -- any combination",
     body: (
       <>
-        There are three sources, each ticked <em>on its own card</em>, and
-        every ticked one is combined into one{" "}
+        The data cards are on their own tab, <strong>Track2 Data
+        Preparation</strong>, above this one in the sidebar: Assemble a
+        dataset, the golden set, Pull Control, the weeks with retention, and
+        the pull queue. This tab trains on what they choose, and shows the{" "}
+        <span className={K}>data.yaml</span> preview beside the button that
+        starts the run. There are three sources, each ticked <em>on its own
+        card</em>, and every ticked one is combined into one{" "}
         <span className={K}>data.yaml</span>:
         <span className="mt-1 block">
           &bull; <strong>Use these folders</strong> on{" "}

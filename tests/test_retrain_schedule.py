@@ -225,7 +225,7 @@ def test_the_yaml_entry_comes_from_write_not_rebuilt_from_FOLDER():
     source = inspect.getsource(rs._run_chain_body)
     assert 'written["train_entry"]' in source
     assert 'written["val_entry"]' in source
-    assert "rl.FOLDER" not in source
+    assert "data.RETAINED_FOLDER" not in source
 
 
 def test_the_chain_publishes_the_dataset_it_built():
@@ -276,7 +276,7 @@ def test_queue_mode_also_starts_the_queue():
     Executing, so a schedule firing mid-run waits behind it."""
     import inspect
     source = inspect.getsource(rs._run_chain_body)
-    assert "t2.queue_start()" in source
+    assert "training.queue_start()" in source
     # ...and the failure to start must not lose the queued entry.
     assert 'record("start", False, str(exc))' in source
 

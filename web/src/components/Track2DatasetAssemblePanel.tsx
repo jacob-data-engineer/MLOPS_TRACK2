@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCardOpen } from "../lib/cardState";
+import { post } from "../lib/bus";
 import { onGoldenChanged } from "../lib/useGoldenSync";
 import {
   ApiError,
@@ -131,7 +132,9 @@ function YamlPreview({
    * Label classes, where it is visible whether or not a preview has
    * found anything. */
   dropUndeclared: boolean;
-  onNameTheRest: (indices: number[]) => void;
+  /** Absent on the Training tab's read-only preview: the classes are
+   * edited where they are saved, on the Data Preparation tab. */
+  onNameTheRest?: (indices: number[]) => void;
 }) {
   const { download } = preview;
   const wasteful = download.extra_objects > download.in_named_folders;
@@ -156,13 +159,17 @@ function YamlPreview({
             {" "}Ultralytics discards the <em>whole image</em> for any box it has no name for.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => onNameTheRest(allIndices)}
-              className="rounded-md border border-black/15 bg-page px-2.5 py-1 font-medium text-ink"
-            >
-              Name the rest as class_{allIndices[0] ?? "N"}{allIndices.length > 1 ? "..." : ""}
-            </button>
+            {onNameTheRest ? (
+              <button
+                type="button"
+                onClick={() => onNameTheRest?.(allIndices)}
+                className="rounded-md border border-black/15 bg-page px-2.5 py-1 font-medium text-ink"
+              >
+                Name the rest as class_{allIndices[0] ?? "N"}{allIndices.length > 1 ? "..." : ""}
+              </button>
+            ) : (
+              <span>Name them in <span className="font-medium">Assemble a dataset</span> on the Data Preparation tab,</span>
+            )}
             <span>
               {dropUndeclared
                 ? "The filter is on: the run drops these boxes itself."
@@ -267,6 +274,7 @@ export function Track2DatasetAssemblePanel({
   only,
   onOnlyChange,
   modelSlug = "",
+  previewOnly = false,
 }: {
   /** Several folders per split, merged into one dataset. A site's images
    * are rarely all in one place, and copying them together by hand first
@@ -289,6 +297,16 @@ export function Track2DatasetAssemblePanel({
    * here was the same question with a second answer that could differ.
    * Only one of the two ever reached the yaml, and nothing said which. */
   modelSlug?: string;
+  /** Show ONLY "Preview the data.yaml", built from the SAVED settings.
+   *
+   * The data/training split (2026-10-28) put this card on the Data
+   * Preparation tab and kept the preview on the Training tab, beside the
+   * button that trains on it. The preview is this card's own logic --
+   * folders, classes, the filter, golden, the week folders -- so the
+   * Training tab renders the card in this mode rather than a second
+   * implementation that could disagree. It reads the settings and never
+   * writes them: the card that edits them is on the other tab. */
+  previewOnly?: boolean;
 }) {
   // Multi-source mode keeps its own lists; the four single fields below
   // stay for the original mode so both can share everything downstream.
@@ -387,8 +405,8 @@ export function Track2DatasetAssemblePanel({
    * "Start the training run". Read after mount, once the page's DOM exists. */
   const [buildSlot, setBuildSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
-    setBuildSlot(document.getElementById("track2-yaml-build-slot"));
-  }, []);
+    if (!previewOnly) setBuildSlot(document.getElementById("track2-yaml-build-slot"));
+  }, [previewOnly]);
   /** The Golden Set card's switch, `retention.use_golden`. READ here,
    * never written: that card owns it and is where it is ticked. This
    * card needs it only to say what the next run will be built from.
@@ -448,7 +466,7 @@ export function Track2DatasetAssemblePanel({
   // The golden set's switch, from the card that owns it. Only on the
   // tab that has one -- the standard tab has no Golden Set card.
   useEffect(() => {
-    if (!onOnlyChange) return;
+    if (!onOnlyChange && !previewOnly) return;
     getTrack2Retention()
       .then((r) => setUseGolden(Boolean(r.config.use_golden)))
       .catch(() => setUseGolden(false));
@@ -464,7 +482,8 @@ export function Track2DatasetAssemblePanel({
   // Debounced, because picking a folder changes several of these at once
   // and each keystroke in a prefix box would otherwise be a request.
   useEffect(() => {
-    if (!settingsRead) return;
+    // A preview-only copy reads the settings and never writes them back.
+    if (!settingsRead || previewOnly) return;
     const timer = setTimeout(() => {
       void saveTrack2PullConfig({
         dataset_assemble: {
@@ -482,10 +501,14 @@ export function Track2DatasetAssemblePanel({
           // second writer would be overwritten by whichever ran last.
           built,
         },
-      }).catch(() => undefined);
+      })
+        // The folders, classes and ticks are what a run trains on; the
+        // Training tab re-reads its summary of the sources on this.
+        .then(() => post("data-sources-changed", { from: "assemble" }))
+        .catch(() => undefined);
     }, 600);
     return () => clearTimeout(timer);
-  }, [settingsRead, only, onOnlyChange, savedOnly, useFolders, labelClassesText,
+  }, [settingsRead, previewOnly, only, onOnlyChange, savedOnly, useFolders, labelClassesText,
       dropUndeclared, trainSources, evalSources, folders, detectorSlug, overwrite, built]);
 
   // Check each filled pair as it is filled. Debounced, because picking a
@@ -678,7 +701,9 @@ export function Track2DatasetAssemblePanel({
         .then((f) => previewTrack2DatasetYaml(f, classesOf(), true, dropUndeclared,
           // The week folders, when Pull Control is a ticked source -- the
           // run trains on them, so the preview has to show them.
-          Boolean(multiSource && onOnlyChange && !only)))
+          // A preview-only copy has no tick of its own: it follows the
+          // saved one, which the Data Preparation tab writes.
+          Boolean(multiSource && (onOnlyChange ? !only : previewOnly && !savedOnly))))
         .then((out) => {
           if (cancelled) return;
           setPreview(out);
@@ -694,7 +719,7 @@ export function Track2DatasetAssemblePanel({
     return () => { cancelled = true; window.clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chosen, complete, trainSources, evalSources, folders, multiSource, useGolden,
-      useFolders, labelClassesText, dropUndeclared, only]);
+      useFolders, labelClassesText, dropUndeclared, only, savedOnly, previewOnly]);
 
   useEffect(() => {
     getTrack2Buckets()
@@ -870,7 +895,8 @@ export function Track2DatasetAssemblePanel({
             value={labelClassesText}
             onChange={(e) => setLabelClassesText(e.target.value)}
             placeholder="0 helmet, 1 gloves, 2 vest, 3 boots"
-            className="tabular mt-1 w-full rounded border border-black/15 bg-page px-2 py-1 text-sm text-ink"
+            readOnly={previewOnly}
+            className="tabular mt-1 w-full rounded border border-black/15 bg-page px-2 py-1 text-sm text-ink read-only:opacity-70"
           />
         </label>
         {/* ALWAYS VISIBLE, not only when a mismatch has been found. It is
@@ -883,6 +909,7 @@ export function Track2DatasetAssemblePanel({
             type="checkbox"
             checked={dropUndeclared}
             onChange={(e) => setDropUndeclared(e.target.checked)}
+            disabled={previewOnly}
             className="mt-0.5 h-3.5 w-3.5 shrink-0"
           />
           <span>
@@ -966,12 +993,21 @@ export function Track2DatasetAssemblePanel({
         <YamlPreview
           preview={preview}
           dropUndeclared={dropUndeclared}
-          onNameTheRest={nameTheRest}
+          onNameTheRest={previewOnly ? undefined : nameTheRest}
         />
       )}
 
     </>
   );
+
+  if (previewOnly) {
+    return (
+      <Card title="Preview the data.yaml" collapsible={false}
+            caption="What the run's data.yaml will be, from the sources ticked on the Data Preparation tab. The label classes and the filter are set in Assemble a dataset there. Nothing is written here -- the run builds it at Add to Queue and on the schedule, after the retention policy.">
+        {buildSection}
+      </Card>
+    );
+  }
 
   return (
     // collapsible={false}: this card runs its own Show/Hide,

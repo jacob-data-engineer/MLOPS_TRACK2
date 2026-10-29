@@ -197,9 +197,11 @@ def test_the_poll_tick_runs_off_the_event_loop():
     """Every call in the tick is synchronous boto3. Inline, they stalled
     every request handler in this single-worker process -- which is the
     very thing the `asyncio.sleep` above them was chosen to avoid."""
-    source = inspect.getsource(t2.queue_poll_loop)
-    for call in ("try_advance_queue", "reconcile_training_audits",
-                 "queue_after_pull.check", "metrics_export.check"):
+    from ppe_pipeline_api.chain import ticker
+
+    source = inspect.getsource(ticker.queue_poll_loop)
+    for call in ("training.try_advance_queue", "training.reconcile_training_audits",
+                 "queue_after_pull.check", "training.check_auto_export"):
         assert f"asyncio.to_thread({call}" in source, f"{call} still blocks the loop"
 
 

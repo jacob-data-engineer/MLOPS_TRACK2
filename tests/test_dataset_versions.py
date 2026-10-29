@@ -216,9 +216,9 @@ def test_snapshot_listings_do_not_show_versions(world):
 
 def test_the_chain_freezes_a_version_before_it_hands_over():
     code = inspect.getsource(rs._run_chain_body)
-    assert code.index("dsv.for_run(") < code.index("# 3. submit")
+    assert code.index("data.version_for_run(") < code.index("# 3. submit")
     assert '"dataset_version_id": version_id,' in code
-    assert "fields = dsv.run_fields(version)" in code
+    assert "fields = data.version_run_fields(version)" in code
 
 
 def test_the_manual_queue_add_freezes_one_too():

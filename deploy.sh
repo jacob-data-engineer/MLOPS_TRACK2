@@ -23,6 +23,9 @@ CONTAINER="${CONTAINER:-track2-app}"
 # Shown in the UI beside the build tag, so which container you are looking
 # at is never a guess. Two may now run side by side -- see the sweep below.
 APP_ROLE="${APP_ROLE:-stable}"
+# "off" for a container that must only show pages: no startup recovery and
+# no queue poll loop (see main.background_enabled). The refactor slot.
+APP_BACKGROUND="${APP_BACKGROUND:-on}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # This folder's own stack -- nothing here reads the jurong-port state.
 # terraform/app is this app's own stack (ECR, CodeBuild, the audit table).
@@ -247,6 +250,7 @@ docker run -d --name $CONTAINER --restart unless-stopped -p $PORT:8501 \\
   -e PPE_APP_PASSWORD="\$APP_PASSWORD" \\
   -e APP_BUILD_TAG='$TAG' \\
   -e APP_ROLE='$APP_ROLE' \\
+  -e APP_BACKGROUND='$APP_BACKGROUND' \\
   -e APP_PORT='$PORT' \\
   -e AWS_REGION='$REGION' \\
   -e REVIEW_QUEUE_TABLE='track2-yolo-review-queue' \\
@@ -328,7 +332,12 @@ fi
 # NOTE: there is ONE router, shared by both containers. A development
 # deploy therefore updates the function that sweeps unattended against
 # real data -- the same trade already accepted for the shared tables.
-if [ "${SKIP_LAMBDA:-}" = "1" ]; then
+if [ "$APP_BACKGROUND" = "off" ]; then
+  # A look-only container (the refactor slot) carries code that has not
+  # been promoted. The router and the queue runner are SHARED with
+  # production, so its deploy must never ship them that code.
+  echo "APP_BACKGROUND=off -- leaving both shared Lambdas on their current code."
+elif [ "${SKIP_LAMBDA:-}" = "1" ]; then
   echo "SKIP_LAMBDA=1 -- leaving the router on its current code."
 else
   echo
