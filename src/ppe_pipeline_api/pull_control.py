@@ -165,6 +165,12 @@ DEFAULTS = {
     # folder, sql}`. A setting like any other card's, so a settings file
     # brings the query back with everything else.
     "sql_explorer": {},
+    # The CENTRAL DATA STORE (2026-10-29): the one bucket and folder where
+    # all the data and images are meant to be kept. `{bucket, folder}`.
+    # Chosen on its own card on Data Preparation, below the Pull queue,
+    # and saved like every other card's choice -- a setting nobody can
+    # restore is not a setting.
+    "central_store": {},
     # The Assemble card's own choices: the folders it merges into a
     # dataset, the detector it writes classes for, whether it may replace
     # a data.yaml it did not write, and whether it is the ONLY source of
@@ -2975,7 +2981,7 @@ SCOPES = {
         "schedule_start_date", "schedule_time",
         "image_extensions", "label_extensions", "overwrite",
         "retention", "golden_set", "dataset_assemble", "auto_training",
-        "sql_explorer",
+        "sql_explorer", "central_store",
     ),
     "at": (
         "default_detector", "default_training", "default_source",
@@ -2993,7 +2999,7 @@ SUFFIXES = {"dp": "_DP", "at": "_AT"}
 DP_CARDS = frozenset({
     "assemble", "golden_set", "pull_control", "retention",
     "assemble a dataset", "pick golden set / edge cases", "pull control",
-    "auto training", "pull queue",
+    "auto training", "pull queue", "central data store",
 })
 
 

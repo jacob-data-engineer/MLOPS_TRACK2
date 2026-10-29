@@ -181,3 +181,15 @@ def test_each_tab_lists_only_its_own_files():
     bar = (WEB / "components" / "Track2PinnedBar.tsx").read_text(encoding="utf-8")
     assert "const mine = out.files.filter((f) => f.scope === scope);" in bar
     assert "old, both tabs" not in bar
+
+
+def test_the_central_data_store_is_a_saved_data_preparation_setting():
+    from ppe_pipeline_api.routers.track2_pull_control import ConfigRequest
+    assert pc.DEFAULTS["central_store"] == {}
+    assert "central_store" in ConfigRequest.model_fields
+    assert "central_store" in pc.SCOPES["dp"]
+    assert "central data store" in pc.DP_CARDS
+    panel = (WEB / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
+    assert "saveTrack2PullConfig({ central_store: { bucket, folder } })" in panel
+    page = (WEB / "routes" / "Track2DataPrepPage.tsx").read_text(encoding="utf-8")
+    assert page.index("<Track2PullQueuePanel />") < page.index("<Track2CentralStorePanel />")

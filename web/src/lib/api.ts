@@ -2154,6 +2154,9 @@ export interface Track2PullConfig {
    * they used to be browser-tab state only, so a saved file recorded the
    * golden set's on/off switch and none of the folders it pointed at. */
   /** The SQL tab's choices, saved so a settings file brings them back. */
+  /** The central data store: the one bucket and folder where all the
+   * data and images are kept (2026-10-29). */
+  central_store?: { bucket?: string; folder?: string };
   sql_explorer?: {
     database?: string;
     bucket?: string;

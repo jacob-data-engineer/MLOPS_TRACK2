@@ -114,7 +114,7 @@ const LISTS: { key: PickList; label: string; hint: string; side: "train" | "val"
 /** Buckets the stack grants week-folder writes to. Mirrors
  * `dataset_write_buckets` in terraform/app; adding one there means adding
  * it here, and a bucket in neither simply cannot be chosen. */
-const WRITABLE = ["track2-s3", "safety-model-dataset-dev", "safety-model-dataset"];
+export const WRITABLE = ["track2-s3", "safety-model-dataset-dev", "safety-model-dataset"];
 
 const EMPTY_PICKS: Record<PickList, string[]> = {
   train_images: [], train_labels: [], val_images: [], val_labels: [],

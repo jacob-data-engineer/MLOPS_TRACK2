@@ -2,6 +2,7 @@ import { Database } from "lucide-react";
 import { useState } from "react";
 import { SwitchedOff } from "../components/SwitchedOff";
 import { Track2AutoTrainingPanel } from "../components/Track2AutoTrainingPanel";
+import { Track2CentralStorePanel } from "../components/Track2CentralStorePanel";
 import { Track2DatasetAssemblePanel } from "../components/Track2DatasetAssemblePanel";
 import { Track2GoldenSetPanel } from "../components/Track2GoldenSetPanel";
 import { Track2PinnedBar } from "../components/Track2PinnedBar";
@@ -91,6 +92,10 @@ export function Track2DataPrepPage() {
         {/* Sweeps waiting their turn. Here with the Pull Control card whose
             settings they queue; the training queue is on the Training tab. */}
         <Track2PullQueuePanel />
+
+        {/* Where all the data and images are kept -- the one bucket and
+            folder everything else is meant to file into. */}
+        <Track2CentralStorePanel />
       </div>
     </div>
   );
