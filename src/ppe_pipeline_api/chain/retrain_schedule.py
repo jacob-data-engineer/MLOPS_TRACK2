@@ -763,6 +763,8 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
 
     `submit` decides the last step only:
 
+      * "build" -- stop once the dataset is rebuilt, frozen and published;
+        train nothing (Assemble's "Scheduled").
       * "start" -- begin the pipeline execution now.
       * "queue" -- append it to the training queue AND start the queue,
         which is what "do it automatically" means: a schedule that
@@ -1255,6 +1257,16 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
         # carries its own dataset_folder. This only decides whether the
         # card shows it.
         record("publish", False, str(exc))
+
+    # "build" stops HERE: the dataset is rebuilt, frozen and published as
+    # the one the training card opens on, and nothing is trained. It is
+    # what Assemble's "Scheduled" runs after each Data Preparation pull
+    # (2026-10-29) -- the data side on its own clock, the training side on
+    # its own. Everything below is about a run.
+    if submit == "build":
+        return {"trigger": trigger, "at": _now().isoformat(timespec="seconds"),
+                "ok": True, "steps": steps, "folder": root,
+                "snapshot_id": snapshot["snapshot_id"]}
 
     # 2c. What it continues FROM.
     #

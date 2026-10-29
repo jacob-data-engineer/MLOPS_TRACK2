@@ -61,6 +61,18 @@ async def queue_poll_loop() -> None:
             await asyncio.to_thread(queue_after_pull.check)
         except Exception as exc:
             print(f"Queue-after-pull check failed: {exc}")
+        # Rebuild the Assemble card's dataset after a scheduled pull when
+        # the card says "Scheduled" -- Data Preparation's own clock, no
+        # training (2026-10-29). Here and not in the queue-runner Lambda,
+        # which may only read S3.
+        try:
+            from . import assemble_after_pull
+            built = await asyncio.to_thread(assemble_after_pull.check)
+            if built.get("run_id"):
+                print(f"Scheduled assemble after {built['run_id']}: "
+                      f"{'built ' + built.get('folder', '') if built.get('built') else built.get('detail')}")
+        except Exception as exc:
+            print(f"Scheduled assemble check failed: {exc}")
         # ...and start a retrain if its OWN clock says one is due.
         #
         # On this tick rather than a schedule of its own in AWS: the

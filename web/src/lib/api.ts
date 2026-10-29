@@ -2110,6 +2110,9 @@ export interface Track2PullConfig {
     folders?: Track2DatasetFolders;
     detector_slug?: string;
     overwrite?: boolean;
+    /** Manual or Scheduled (2026-10-29): scheduled rebuilds this dataset
+     * after each scheduled Data Preparation pull, training nothing. */
+    run?: "manual" | "scheduled";
     /** Runs this card's build as the unattended chain's first step, in
      * place of the root-and-week-folders one. Read server-side by
      * `retrain_schedule.assemble_plan`; absent or false means the old
@@ -2224,6 +2227,12 @@ export interface Track2PullConfig {
    * saved (2026-10-29). */
   settings_file_dp?: string;
   settings_file_at?: string;
+  /** The last build Assemble's "Scheduled" made after a pull. A result,
+   * written by the server; never saved in a settings file. */
+  assemble_schedule_last?: {
+    run_id?: string; ok?: boolean; at?: string; folder?: string;
+    snapshot_id?: string; detail?: string;
+  };
   default_dataset?: {
     folder?: string; snapshot_id?: string; files?: number;
     set_by?: string;

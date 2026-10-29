@@ -354,6 +354,14 @@ export function Track2DatasetAssemblePanel({
   const [preview, setPreview] = useState<Track2DatasetYamlInPlace | null>(null);
   // Replace a data.yaml this card did not write. Off unless ticked.
   const [overwrite, setOverwrite] = useState(false);
+  // MANUAL or SCHEDULED (2026-10-29). Scheduled: rebuilt by itself after
+  // each scheduled pull on Data Preparation's PULL SCHEDULE, training
+  // nothing (chain/assemble_after_pull.py). Manual: built when asked.
+  const [runMode, setRunMode] = useState<"manual" | "scheduled">("manual");
+  // Read alongside, to say what "Scheduled" will actually do right now.
+  const [pullMode, setPullMode] = useState("off");
+  const [lastScheduled, setLastScheduled] = useState<
+    { ok?: boolean; at?: string; folder?: string; detail?: string } | null>(null);
   // Open by default, unlike Pull control: this is the card most visits to
   // the page are for, so it would be shut-then-opened every time.
   const [open, setOpen] = useCardOpen("assemble", true);
@@ -441,6 +449,9 @@ export function Track2DatasetAssemblePanel({
         if (inherited) setDetectorSlug(inherited);
         else if (saved.detector_slug) setDetectorSlug(saved.detector_slug);
         if (typeof saved.overwrite === "boolean") setOverwrite(saved.overwrite);
+        if (saved.run === "scheduled" || saved.run === "manual") setRunMode(saved.run);
+        setPullMode(String(status.config.mode || "off"));
+        setLastScheduled(status.config.assemble_schedule_last ?? null);
         if (typeof saved.use === "boolean") setUseFolders(saved.use);
         if (saved.built?.folder) setBuilt(saved.built);
         // Restored through the page, which owns the switch and uses it to
@@ -496,6 +507,7 @@ export function Track2DatasetAssemblePanel({
           folders,
           detector_slug: detectorSlug,
           overwrite,
+          run: runMode,
           // Carried through the writer rather than written separately:
           // this effect sends the whole `dataset_assemble` object, so a
           // second writer would be overwritten by whichever ran last.
@@ -509,7 +521,8 @@ export function Track2DatasetAssemblePanel({
     }, 600);
     return () => clearTimeout(timer);
   }, [settingsRead, previewOnly, only, onOnlyChange, savedOnly, useFolders, labelClassesText,
-      dropUndeclared, trainSources, evalSources, folders, detectorSlug, overwrite, built]);
+      dropUndeclared, trainSources, evalSources, folders, detectorSlug, overwrite, built,
+      runMode]);
 
   // Check each filled pair as it is filled. Debounced, because picking a
   // folder changes a field per click and every keystroke in a prefix box
@@ -1068,6 +1081,39 @@ export function Track2DatasetAssemblePanel({
           )}
           {useGolden ? " (the golden set's val side is the held-out evaluation set)" : ""}
         </p>
+      )}
+      {/* ---- MANUAL or SCHEDULED ---- On the Data Preparation copy only:
+           the preview copy on the Training tab follows what is set here. */}
+      {onOnlyChange && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+          <span className="font-medium text-ink">Run</span>
+          {(["manual", "scheduled"] as const).map((value) => (
+            <label key={value} className="flex items-center gap-1.5 text-ink">
+              <input type="radio" name="assemble-run" checked={runMode === value}
+                     onChange={() => setRunMode(value)} />
+              {value === "manual" ? "Manual" : "Scheduled"}
+            </label>
+          ))}
+          <span className="text-ink-muted">
+            {runMode === "manual"
+              ? "Built when you ask for it."
+              : pullMode === "schedule"
+                ? "Rebuilt and frozen by itself after each scheduled pull (Data Preparation's PULL SCHEDULE). Nothing is trained."
+                : null}
+          </span>
+          {runMode === "scheduled" && pullMode !== "schedule" && (
+            <span className="text-critical">
+              The PULL SCHEDULE above is not &ldquo;On a schedule&rdquo;, so this will not run
+              until it is.
+            </span>
+          )}
+          {runMode === "scheduled" && lastScheduled?.at && (
+            <span className={lastScheduled.ok ? "text-ink-muted" : "text-critical"}>
+              Last scheduled build {lastScheduled.at.slice(0, 16).replace("T", " ")}:{" "}
+              {lastScheduled.ok ? `built ${lastScheduled.folder ?? ""}` : lastScheduled.detail}
+            </span>
+          )}
+        </div>
       )}
       {only && onOnlyChange && (
         <p className="mb-3 rounded-md border border-accent/40 bg-accent-subtle px-3 py-2 text-xs text-ink-secondary">
