@@ -1,0 +1,407 @@
+"""Reading the catalog, and exporting from it (2026-10-29).
+
+What the Data Catalog page shows: every training run (by run number) and
+every dataset version and snapshot (by version number), the files each
+used or holds, and exports of either as a zip.
+
+An EXPORT is built in the background, inside AWS: every file is fetched
+from S3 and streamed straight into a zip that is itself written to S3 in
+64 MB parts -- a training set is gigabytes, too big for a request or for
+the browser to assemble. The zip carries the training layout
+(`images/<split>/`, `labels/<split>/`), a `data.yaml` when the class
+names are known, and `manifest.csv` naming every file's source. A file
+that can no longer be read is listed in the manifest as missing rather
+than failing the whole export.
+"""
+
+from __future__ import annotations
+
+import csv
+import datetime as _dt
+import hashlib
+import io
+import json
+import threading
+import uuid
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
+
+from .. import pull_control as pc
+from .. import storage
+from . import catalog
+
+PAGE = 100
+#: Exports building at once. Each streams gigabytes; two is plenty.
+_building = threading.BoundedSemaphore(2)
+#: Bytes held before a part is sent. S3 parts must be >= 5 MB.
+PART = 64 * 1024 * 1024
+#: Files fetched in parallel while a zip is written.
+FETCHERS = 16
+
+
+def _rows(sql: str, params: tuple = ()) -> list[dict]:
+    conn = catalog.connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        names = [d[0] for d in cur.description]
+        return [dict(zip(names, row)) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _iso(rows: list[dict]) -> list[dict]:
+    for row in rows:
+        for k, v in row.items():
+            if isinstance(v, (_dt.datetime, _dt.date)):
+                row[k] = v.isoformat()
+    return rows
+
+
+# --- browsing ---------------------------------------------------------------
+
+def runs(limit: int = PAGE, offset: int = 0) -> dict:
+    total = _rows("SELECT count(*) AS n FROM training_runs")[0]["n"]
+    rows = _rows(
+        "SELECT r.run_number, r.run_id, r.submitted_at, r.ended_at, r.status, r.detector,"
+        " r.architecture, r.version_id, v.version_number, v.kind AS version_kind,"
+        " r.model_package_arn,"
+        " (SELECT count(*) FROM run_files f WHERE f.run_id = r.run_id AND f.kind = 'image')"
+        "   AS images"
+        " FROM training_runs r LEFT JOIN dataset_versions v ON v.id = r.version_id"
+        " ORDER BY r.run_number DESC LIMIT %s OFFSET %s",
+        (min(int(limit), 500), max(0, int(offset))))
+    return {"total": total, "runs": _iso(rows)}
+
+
+def versions(limit: int = PAGE, offset: int = 0) -> dict:
+    total = _rows("SELECT count(*) AS n FROM dataset_versions")[0]["n"]
+    rows = _rows(
+        "SELECT v.version_number, v.id, v.kind, v.created_at, v.state, v.train_images,"
+        " v.val_images, v.class_names,"
+        " (SELECT count(*) FROM dataset_members m WHERE m.version_id = v.id) AS members,"
+        " (SELECT array_agg(r.run_number ORDER BY r.run_number) FROM training_runs r"
+        "   WHERE r.version_id = v.id) AS runs"
+        " FROM dataset_versions v ORDER BY v.version_number DESC LIMIT %s OFFSET %s",
+        (min(int(limit), 500), max(0, int(offset))))
+    return {"total": total, "versions": _iso(rows)}
+
+
+def _run_filter(run_id: str, split: str, role: str, kind: str) -> tuple[str, tuple]:
+    where, params = ["run_id = %s"], [run_id]
+    for column, value in (("split", split), ("role", role), ("kind", kind)):
+        if value:
+            where.append(f"{column} = %s")
+            params.append(value)
+    return " AND ".join(where), tuple(params)
+
+
+def run_files(run_id: str, *, split: str = "", role: str = "", kind: str = "image",
+              limit: int = PAGE, offset: int = 0) -> dict:
+    where, params = _run_filter(run_id, split, role, kind)
+    total = _rows(f"SELECT count(*) AS n FROM run_files WHERE {where}", params)[0]["n"]
+    rows = _rows(f"SELECT s3_uri AS uri, role, split, kind, folder FROM run_files WHERE {where}"
+                 " ORDER BY file_key LIMIT %s OFFSET %s",
+                 params + (min(int(limit), 500), max(0, int(offset))))
+    return {"total": total, "files": rows}
+
+
+def version_files(version_id: str, *, split: str = "", limit: int = PAGE,
+                  offset: int = 0) -> dict:
+    where, params = "version_id = %s", (version_id,)
+    if split:
+        where, params = where + " AND split = %s", params + (split,)
+    total = _rows(f"SELECT count(*) AS n FROM dataset_members WHERE {where}", params)[0]["n"]
+    rows = _rows("SELECT image_uri AS uri, label_uri, split, included, reason, decay_weight,"
+                 f" week FROM dataset_members WHERE {where}"
+                 " ORDER BY image_uri LIMIT %s OFFSET %s",
+                 params + (min(int(limit), 500), max(0, int(offset))))
+    return {"total": total, "files": rows}
+
+
+def file_list_csv(kind: str, ident: str) -> str:
+    """Every file of a run or a version, as CSV -- the list without the
+    bytes, for a spreadsheet or a script."""
+    out = io.StringIO()
+    writer = csv.writer(out)
+    if kind == "run":
+        writer.writerow(["s3_uri", "role", "split", "kind", "folder"])
+        for r in _rows("SELECT s3_uri, role, split, kind, folder FROM run_files"
+                       " WHERE run_id = %s ORDER BY file_key", (ident,)):
+            writer.writerow([r["s3_uri"], r["role"], r["split"], r["kind"], r["folder"]])
+    else:
+        writer.writerow(["image_uri", "label_uri", "split", "included", "reason",
+                         "decay_weight", "week"])
+        for r in _rows("SELECT image_uri, label_uri, split, included, reason, decay_weight,"
+                       " week FROM dataset_members WHERE version_id = %s ORDER BY image_uri",
+                       (ident,)):
+            writer.writerow([r["image_uri"], r["label_uri"], r["split"], r["included"],
+                             r["reason"], r["decay_weight"], r["week"]])
+    return out.getvalue()
+
+
+# --- export ------------------------------------------------------------------
+
+class _MultipartSink:
+    """A write-only file that is an S3 multipart upload. No seek or tell:
+    `zipfile` then writes a streaming zip (data descriptors), which is
+    exactly what an upload in one pass needs."""
+
+    def __init__(self, bucket: str, key: str):
+        self.bucket, self.key = bucket, key
+        self.upload = storage.s3.create_multipart_upload(
+            Bucket=bucket, Key=key, ContentType="application/zip")["UploadId"]
+        self.parts, self.buffer, self.size = [], bytearray(), 0
+
+    def write(self, data) -> int:
+        self.buffer += data
+        self.size += len(data)
+        if len(self.buffer) >= PART:
+            self._send()
+        return len(data)
+
+    def flush(self) -> None:
+        pass
+
+    def _send(self) -> None:
+        number = len(self.parts) + 1
+        etag = storage.s3.upload_part(Bucket=self.bucket, Key=self.key, UploadId=self.upload,
+                                      PartNumber=number, Body=bytes(self.buffer))["ETag"]
+        self.parts.append({"PartNumber": number, "ETag": etag})
+        self.buffer = bytearray()
+
+    def finish(self) -> None:
+        if self.buffer or not self.parts:
+            self._send()
+        storage.s3.complete_multipart_upload(Bucket=self.bucket, Key=self.key,
+                                             UploadId=self.upload,
+                                             MultipartUpload={"Parts": self.parts})
+
+    def abort(self) -> None:
+        try:
+            storage.s3.abort_multipart_upload(Bucket=self.bucket, Key=self.key,
+                                              UploadId=self.upload)
+        except Exception:                                          # noqa: BLE001
+            pass
+
+
+def _split_uri(uri: str) -> tuple[str, str]:
+    bucket, _, key = uri[5:].partition("/")
+    return bucket, key
+
+
+def _fetch(uri: str) -> bytes | None:
+    if not uri or not uri.startswith("s3://"):
+        return None
+    bucket, key = _split_uri(uri)
+    try:
+        return storage.s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+    except Exception:                                              # noqa: BLE001
+        return None
+
+
+def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | None, str]:
+    """[(zip path, source uri, manifest row)], the class names, a label."""
+    entries, taken = [], set()
+
+    def unique(path: str, uri: str) -> str:
+        """A path nothing else in the zip uses. A renamed image and its
+        label get the SAME suffix -- taken from the image's address -- so
+        they still pair after renaming."""
+        if path not in taken:
+            taken.add(path)
+            return path
+        image_uri = uri
+        if "/labels/" in "/" + uri:
+            head, _, tail = ("/" + uri).rpartition("/labels/")
+            image_uri = f"{head}/images/{tail}"[1:]
+        pair_key = image_uri.rsplit(".", 1)[0]
+        stem, dot, ext = path.rpartition(".")
+        path = f"{stem}_{hashlib.sha1(pair_key.encode()).hexdigest()[:8]}{dot}{ext}"
+        taken.add(path)
+        return path
+
+    if kind == "run":
+        run = _rows("SELECT run_number, version_id FROM training_runs WHERE run_id = %s", (ident,))
+        if not run:
+            raise ValueError(f"No run {ident}.")
+        names = None
+        if run[0]["version_id"]:
+            got = _rows("SELECT class_names FROM dataset_versions WHERE id = %s",
+                        (run[0]["version_id"],))
+            names = got[0]["class_names"] if got else None
+        for f in _rows("SELECT s3_uri, role, split, kind FROM run_files WHERE run_id = %s"
+                       " ORDER BY file_key", (ident,)):
+            leaf = f["s3_uri"].rsplit("/", 1)[-1]
+            side = "eval/" if f["role"] == "eval" else ""
+            sub = "images" if f["kind"] == "image" else "labels"
+            path = unique(f"{side}{sub}/{f['split'] or 'train'}/{leaf}", f["s3_uri"])
+            entries.append((path, f["s3_uri"], {"path": path, "source": f["s3_uri"],
+                                                "role": f["role"], "split": f["split"]}))
+        return entries, names, f"run-{run[0]['run_number']}"
+
+    version = _rows("SELECT version_number, class_names FROM dataset_versions WHERE id = %s",
+                    (ident,))
+    if not version:
+        raise ValueError(f"No dataset version {ident}.")
+    for m in _rows("SELECT image_uri, label_uri, split, included, reason, decay_weight, week"
+                   " FROM dataset_members WHERE version_id = %s ORDER BY image_uri", (ident,)):
+        row = {"split": m["split"], "included": m["included"], "reason": m["reason"],
+               "decay_weight": m["decay_weight"], "week": m["week"]}
+        if not m["included"]:
+            # Recorded in the manifest, not packed: it was not trained on.
+            entries.append(("", m["image_uri"], {**row, "path": "", "source": m["image_uri"]}))
+            continue
+        leaf = m["image_uri"].rsplit("/", 1)[-1]
+        path = unique(f"images/{m['split'] or 'train'}/{leaf}", m["image_uri"])
+        entries.append((path, m["image_uri"], {**row, "path": path, "source": m["image_uri"]}))
+        if m["label_uri"]:
+            label_path = path.replace("images/", "labels/", 1).rsplit(".", 1)[0] + ".txt"
+            entries.append((label_path, m["label_uri"],
+                            {**row, "path": label_path, "source": m["label_uri"]}))
+    return entries, version[0]["class_names"], f"version-{version[0]['version_number']}"
+
+
+def _numbered(names) -> dict:
+    """Class names as {index: name}, whichever way they were recorded:
+    `{"0": "helmet"}`, `["helmet", ...]` (index = position), or either of
+    those as JSON text. {} when there are none."""
+    if isinstance(names, str):
+        try:
+            names = json.loads(names)
+        except ValueError:
+            return {}
+    if isinstance(names, list):
+        return {i: str(n) for i, n in enumerate(names)}
+    if isinstance(names, dict):
+        try:
+            return {int(k): str(v) for k, v in names.items()}
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
+def _export_bucket() -> tuple[str, str]:
+    """Into the central store when one is set, else this app's bucket."""
+    store = (pc.read_config().get("central_store") or {})
+    bucket = str(store.get("bucket") or storage.BUCKET or "track2-s3")
+    folder = str(store.get("folder") or "").strip("/")
+    return bucket, f"{folder}/_exports" if folder else "_exports"
+
+
+def _build(export_id: str, kind: str, ident: str, label: str, entries: list, names) -> None:
+    sink = None
+    try:
+        bucket, prefix = _export_bucket()
+        key = f"{prefix}/{export_id}/{label}.zip"
+        sink = _MultipartSink(bucket, key)
+        manifest = io.StringIO()
+        writer = csv.DictWriter(manifest, fieldnames=["path", "source", "role", "split",
+                                                      "included", "reason", "decay_weight",
+                                                      "week", "missing"],
+                                extrasaction="ignore")
+        writer.writeheader()
+        packed, missing = 0, 0
+        with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+            wanted = [e for e in entries if e[0]]
+            with ThreadPoolExecutor(max_workers=FETCHERS) as pool:
+                for start in range(0, len(wanted), FETCHERS * 4):
+                    chunk = wanted[start:start + FETCHERS * 4]
+                    for (path, uri, row), body in zip(chunk, pool.map(lambda e: _fetch(e[1]), chunk)):
+                        if body is None:
+                            missing += 1
+                            writer.writerow({**row, "missing": True})
+                            continue
+                        zf.writestr(zipfile.ZipInfo(path, date_time=(2026, 1, 1, 0, 0, 0)), body)
+                        packed += 1
+                        writer.writerow(row)
+            for path, uri, row in entries:
+                if not path:
+                    writer.writerow(row)
+            numbered = _numbered(names)
+            if numbered:
+                lines = "\n".join(f"  {k}: {v}" for k, v in sorted(numbered.items()))
+                zf.writestr("data.yaml", "path: .\ntrain: images/train\nval: images/val\n"
+                                         f"names:\n{lines}\n")
+            zf.writestr("manifest.csv", manifest.getvalue())
+        sink.finish()
+        _finish(export_id, "UPDATE exports SET state = 'ready', finished_at = now(), zip_uri = %s,"
+                           " bytes = %s, files = %s, missing = %s WHERE id = %s",
+                (f"s3://{bucket}/{key}", sink.size, packed, missing, export_id))
+    except Exception as exc:                                       # noqa: BLE001
+        if sink:
+            sink.abort()
+        _finish(export_id, "UPDATE exports SET state = 'failed', finished_at = now(), error = %s"
+                           " WHERE id = %s", (f"{type(exc).__name__}: {exc}", export_id))
+    finally:
+        _building.release()
+
+
+def _finish(export_id: str, sql: str, params: tuple) -> None:
+    """Record how an export ended, on a FRESH connection: one held idle for
+    a 40-minute build can be gone by the end, and the row would then say
+    'building' for ever. Retried once; printed if it still fails."""
+    for attempt in (1, 2):
+        try:
+            conn = catalog.connect()
+            try:
+                conn.cursor().execute(sql, params)
+                conn.commit()
+                return
+            finally:
+                conn.close()
+        except Exception as exc:                                   # noqa: BLE001
+            if attempt == 2:
+                print(f"Export {export_id}: could not record its result: {exc}")
+
+
+def start_export(kind: str, ident: str) -> dict:
+    """Start building a zip of a run or a dataset version. Returns at once;
+    `exports()` shows its progress."""
+    if kind not in ("run", "version"):
+        raise ValueError("Export a run or a dataset version.")
+    entries, names, label = _plan(kind, ident)
+    if not any(path for path, _, _ in entries):
+        raise ValueError("Nothing to export: no files are recorded for it.")
+    if not _building.acquire(blocking=False):
+        raise ValueError("Two exports are already building; try again when one finishes.")
+    export_id = uuid.uuid4().hex[:12]
+    try:
+        conn = catalog.connect()
+        try:
+            conn.cursor().execute(
+                "INSERT INTO exports (id, version_id, run_id, label, state, files)"
+                " VALUES (%s, %s, %s, %s, 'building', %s)",
+                (export_id, ident if kind == "version" else None,
+                 ident if kind == "run" else None, label,
+                 sum(1 for path, _, _ in entries if path)))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        _building.release()
+        raise
+    threading.Thread(target=_build, args=(export_id, kind, ident, label, entries, names),
+                     name=f"export-{export_id}", daemon=True).start()
+    return {"id": export_id, "label": label, "state": "building"}
+
+
+def exports(limit: int = 50) -> list[dict]:
+    return _iso(_rows("SELECT id, label, version_id, run_id, state, created_at, finished_at,"
+                      " bytes, files, missing, error FROM exports"
+                      " ORDER BY created_at DESC LIMIT %s", (min(int(limit), 200),)))
+
+
+def download_url(export_id: str) -> str:
+    rows = _rows("SELECT zip_uri, label, state FROM exports WHERE id = %s", (export_id,))
+    if not rows or rows[0]["state"] != "ready" or not rows[0]["zip_uri"]:
+        raise ValueError("That export is not ready.")
+    bucket, key = _split_uri(rows[0]["zip_uri"])
+    return storage.s3.generate_presigned_url(
+        "get_object", ExpiresIn=3600,
+        Params={"Bucket": bucket, "Key": key,
+                "ResponseContentDisposition": f'attachment; filename="{rows[0]["label"]}.zip"'})
+
+
+def summary_json(value) -> str:
+    return json.dumps(value, default=str)

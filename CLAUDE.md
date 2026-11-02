@@ -169,7 +169,6 @@ leaves containers on other ports alone.** Two may run side by side:
 |---|---|---|---|
 | Stable | 8501 | `ppe-pipeline-track2-test` | `stable` |
 | Development | 8090 | `track2-app-dev` | `dev` |
-| Refactor (look-only) | 8092 | `track2-app-refactor` | `refactor`, `APP_BACKGROUND=off` |
 
 ```bash
 # stable

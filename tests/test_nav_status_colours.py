@@ -27,7 +27,7 @@ def test_each_tab_has_its_colour():
 
 def test_sql_comes_first_then_data_then_training():
     order = re.findall(r'to: "(/track2/[\w-]+)"', NAV)
-    assert order[:3] == ["/track2/sql", "/track2/data-preparation",
+    assert order[:4] == ["/track2/sql", "/track2/data-preparation", "/track2/catalog",
                          "/track2/multi-auto-training"]
 
 

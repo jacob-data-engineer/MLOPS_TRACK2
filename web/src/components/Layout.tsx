@@ -4,6 +4,7 @@ import {
   Database,
   DatabaseZap,
   Layers,
+  Library,
   Bell,
   Factory,
   HelpCircle,
@@ -60,6 +61,8 @@ const NAV_ITEMS: NavItem[] = [
   // The data side, ahead of training because it comes first: what a run
   // learns from is prepared here, then trained on next door (2026-10-28).
   { to: "/track2/data-preparation", label: "Track2 Data Preparation", icon: Database, status: "ready" },
+  // Every run and dataset version, their files, and exports (2026-10-29).
+  { to: "/track2/catalog", label: "Track2 Data Catalog", icon: Library },
   { to: "/track2/multi-auto-training", label: "Track2 Multi-Auto Training", icon: Layers, status: "ready" },
   // What the clocks will start, and when -- read-only, every control
   // stays on Multi-Auto Training.

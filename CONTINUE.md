@@ -57,7 +57,12 @@ untouched, and so are both shared Lambdas.**
   the old staleness: the ticks were read only on load). `useGoldenSync`
   rides on it.
 
-### The refactor slot, 8092
+### The refactor slot, 8092 -- REMOVED 2026-11-02
+
+The container is gone, its settings folder removed, and rule
+`sgr-0ee95b1dbcced7c2d` revoked; `terraform/platform/ec2.tf` no longer
+declares the port. The split runs on dev (8090). What follows is history.
+
 
 - `track2-app-refactor`, role `refactor`, **`APP_BACKGROUND=off`**: no
   startup recovery (it would fail production's in-flight inference/eval

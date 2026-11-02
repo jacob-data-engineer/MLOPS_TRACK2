@@ -525,10 +525,7 @@ def label_key_for(image_key: str) -> str:
     """Where Ultralytics would look for this image's label: `/images/`
     swapped for `/labels/`, extension for `.txt`. "" when the image is
     not under an `images/` folder, so has no label by that rule."""
-    if "/images/" not in "/" + image_key:
-        return ""
-    swapped = ("/" + image_key).replace("/images/", "/labels/", 1)[1:]
-    return swapped.rsplit(".", 1)[0] + ".txt"
+    return storage.label_path_for(image_key)
 
 
 def split_for(uri: str, train_percent: int) -> str:

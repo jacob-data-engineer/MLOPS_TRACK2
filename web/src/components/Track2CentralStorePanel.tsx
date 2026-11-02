@@ -5,8 +5,11 @@ import {
   getTrack2CatalogStatus,
   getTrack2PullControl,
   saveTrack2PullConfig,
+  syncTrack2Catalog,
   type Track2CatalogStatus,
 } from "../lib/api";
+import { Link } from "react-router-dom";
+import { formatDayTime } from "../lib/format";
 import { Card } from "./Card";
 import { S3FolderField } from "./S3FolderField";
 import { WRITABLE } from "./Track2PullControlPanel";
@@ -37,6 +40,18 @@ export function Track2CentralStorePanel() {
   useEffect(() => {
     getTrack2CatalogStatus().then(setCatalog).catch(() => setCatalog(null));
   }, []);
+
+  function syncNow() {
+    setCatalogBusy(true);
+    setCatalogError("");
+    syncTrack2Catalog()
+      .then((res) => setCatalogError(res.started ? "" : res.detail))
+      .then(() => window.setTimeout(() => {
+        getTrack2CatalogStatus().then(setCatalog).catch(() => undefined);
+      }, 5000))
+      .catch((err) => setCatalogError(err instanceof ApiError ? err.detail : "Could not start it."))
+      .finally(() => setCatalogBusy(false));
+  }
 
   function createTables() {
     setCatalogBusy(true);
@@ -135,13 +150,34 @@ export function Track2CentralStorePanel() {
             </button>
           </div>
         ) : (
-          <p className="tabular text-ink-secondary">
-            {Object.entries(catalog.tables).map(([table, rows]) => (
-              <span key={table} className="mr-3">
-                {table.replace(/_/g, " ")}: <span className="text-ink">{rows.toLocaleString()}</span>
+          <>
+            <p className="tabular text-ink-secondary">
+              {Object.entries(catalog.tables).map(([table, rows]) => (
+                <span key={table} className="mr-3">
+                  {table.replace(/_/g, " ")}: <span className="text-ink">{rows.toLocaleString()}</span>
+                </span>
+              ))}
+            </p>
+            {/* Records copy across from DynamoDB every 5 minutes; this
+                says when that last happened, and how it went. */}
+            <div className="mt-1 flex flex-wrap items-center gap-3 text-ink-muted">
+              <span>
+                {catalog.last_sync
+                  ? catalog.last_sync.finished_at
+                    ? `Last copied from DynamoDB ${formatDayTime(catalog.last_sync.finished_at)}`
+                      + (catalog.last_sync.ok ? "" : ` -- failed: ${catalog.last_sync.error}`)
+                    : "Copying from DynamoDB now..."
+                  : "Not copied from DynamoDB yet."}
               </span>
-            ))}
-          </p>
+              <button type="button" onClick={syncNow} disabled={catalogBusy}
+                      className="underline disabled:opacity-40">
+                {catalogBusy ? "Starting..." : "Sync now"}
+              </button>
+              <Link to="/track2/catalog" className="font-medium text-accent underline">
+                View runs, versions and files
+              </Link>
+            </div>
+          </>
         )}
         {catalogError && <p className="mt-1 text-critical">{catalogError}</p>}
       </div>

@@ -73,6 +73,17 @@ async def queue_poll_loop() -> None:
                       f"{'built ' + built.get('folder', '') if built.get('built') else built.get('detail')}")
         except Exception as exc:
             print(f"Scheduled assemble check failed: {exc}")
+        # Copy new and changed RECORDS from DynamoDB into the catalog
+        # (2026-10-29): every SYNC_MINUTES, one container per slot, on a
+        # thread of its own so a long first copy never holds up the queue.
+        try:
+            from .. import data as _data
+            from .. import pull_control as _pcc
+            if _data.catalog_configured() and await asyncio.to_thread(
+                    _pcc.claim_once, "catalog_sync", _data.catalog_sync_slot(), days=1):
+                _data.start_catalog_sync()
+        except Exception as exc:
+            print(f"Catalog sync tick failed: {exc}")
         # ...and start a retrain if its OWN clock says one is due.
         #
         # On this tick rather than a schedule of its own in AWS: the

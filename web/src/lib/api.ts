@@ -3757,6 +3757,137 @@ export interface Track2CatalogStatus {
   schema_version?: number | null;
   tables: Record<string, number>;
   error?: string;
+  /** The last copy of records from DynamoDB (every 5 minutes). */
+  last_sync?: {
+    started_at: string | null; finished_at: string | null; ok: boolean | null;
+    counts: Record<string, unknown>; error: string | null;
+  } | null;
+}
+
+// --- the Data Catalog page (2026-10-29) --------------------------------------
+
+export interface Track2CatalogRun {
+  run_number: number;
+  run_id: string;
+  submitted_at: string | null;
+  ended_at: string | null;
+  status: string | null;
+  detector: string | null;
+  architecture: string | null;
+  version_id: string | null;
+  version_number: number | null;
+  version_kind: string | null;
+  model_package_arn: string | null;
+  images: number;
+}
+
+export interface Track2CatalogVersion {
+  version_number: number;
+  id: string;
+  kind: "version" | "snapshot";
+  created_at: string | null;
+  state: string | null;
+  train_images: number | null;
+  val_images: number | null;
+  class_names: Record<string, string> | null;
+  members: number;
+  runs: number[] | null;
+}
+
+export interface Track2CatalogFile {
+  uri: string;
+  split: string | null;
+  role?: string | null;
+  kind?: string | null;
+  folder?: string | null;
+  label_uri?: string | null;
+  included?: boolean;
+  reason?: string | null;
+  decay_weight?: number | null;
+  week?: string | null;
+}
+
+export interface Track2CatalogExport {
+  id: string;
+  label: string;
+  version_id: string | null;
+  run_id: string | null;
+  state: "building" | "ready" | "failed";
+  created_at: string;
+  finished_at: string | null;
+  bytes: number | null;
+  files: number | null;
+  missing: number;
+  error: string | null;
+}
+
+export function getTrack2CatalogRuns(offset = 0): Promise<{ total: number; runs: Track2CatalogRun[] }> {
+  return apiGet(`/track2/catalog/runs?limit=100&offset=${offset}`);
+}
+
+export function getTrack2CatalogVersions(offset = 0): Promise<{
+  total: number; versions: Track2CatalogVersion[];
+}> {
+  return apiGet(`/track2/catalog/versions?limit=100&offset=${offset}`);
+}
+
+export function getTrack2CatalogRunFiles(
+  runId: string, opts: { split?: string; role?: string; offset?: number },
+): Promise<{ total: number; files: Track2CatalogFile[] }> {
+  const q = new URLSearchParams({
+    split: opts.split ?? "", role: opts.role ?? "", kind: "image",
+    limit: "100", offset: String(opts.offset ?? 0),
+  });
+  return apiGet(`/track2/catalog/runs/${encodeURIComponent(runId)}/files?${q}`);
+}
+
+export function getTrack2CatalogVersionFiles(
+  versionId: string, opts: { split?: string; offset?: number },
+): Promise<{ total: number; files: Track2CatalogFile[] }> {
+  const q = new URLSearchParams({
+    split: opts.split ?? "", limit: "100", offset: String(opts.offset ?? 0),
+  });
+  return apiGet(`/track2/catalog/versions/${encodeURIComponent(versionId)}/files?${q}`);
+}
+
+/** Every file of a run or version as CSV. Fetched rather than linked: the
+ * route needs the bearer token, and a plain anchor would send none. */
+export async function downloadTrack2CatalogCsv(kind: "run" | "version", id: string): Promise<Blob> {
+  const headers = new Headers();
+  if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+  const path = kind === "run"
+    ? `/track2/catalog/runs/${encodeURIComponent(id)}/files.csv`
+    : `/track2/catalog/versions/${encodeURIComponent(id)}/files.csv`;
+  const res = await fetch(`${API_BASE_URL}${path}`, { headers });
+  if (!res.ok) {
+    if (res.status === 401) {
+      void confirmSessionIsDead();
+      throw new ApiError(401, "Your session ended. Sign in again and retry.");
+    }
+    throw new ApiError(res.status, `Download failed (${res.status})`);
+  }
+  return res.blob();
+}
+
+/** Start building a zip of a run or a dataset version, in the background. */
+export function startTrack2CatalogExport(kind: "run" | "version", id: string): Promise<{
+  id: string; label: string; state: string;
+}> {
+  return apiPost("/track2/catalog/exports", { kind, id });
+}
+
+export function getTrack2CatalogExports(): Promise<{ exports: Track2CatalogExport[] }> {
+  return apiGet("/track2/catalog/exports");
+}
+
+/** A one-hour link to a finished zip; the browser downloads it from S3. */
+export function getTrack2CatalogExportUrl(exportId: string): Promise<{ url: string }> {
+  return apiGet(`/track2/catalog/exports/${encodeURIComponent(exportId)}/download`);
+}
+
+/** Copy the records from DynamoDB now, in the background. */
+export function syncTrack2Catalog(): Promise<{ started: boolean; detail: string }> {
+  return apiPost("/track2/catalog/sync");
 }
 
 export function getTrack2CatalogStatus(): Promise<Track2CatalogStatus> {

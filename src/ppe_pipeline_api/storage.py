@@ -20,6 +20,20 @@ BUCKET = os.environ.get("PIPELINE_BUCKET", "")
 # IMAGE_EXTENSIONS by convention (not imported -- separate deploy unit).
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
 
+
+def label_path_for(image: str) -> str:
+    """Where Ultralytics looks for an image's label: the LAST `/images/`
+    becomes `/labels/` (its img2label_paths), and the extension of the file
+    name -- only the file name -- becomes `.txt`. Works on a key or an
+    `s3://` URI. "" when the path has no `images/` folder in it."""
+    text = "/" + image
+    if "/images/" not in text:
+        return ""
+    head, _, tail = text.rpartition("/images/")
+    folder, _, name = f"{head}/labels/{tail}".rpartition("/")
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    return f"{folder}/{stem}.txt"[1:]
+
 # boto3 clients are documented thread-safe -- one, shared.
 s3 = boto3.client("s3", region_name=REGION)
 

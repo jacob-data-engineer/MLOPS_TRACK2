@@ -30,6 +30,8 @@ __all__ = [
     "YAML_IS_THE_ONLY_SOURCE_OF_NAMES",
     # what a dataset's yaml and lists select
     "read_selection",
+    # the catalog: records copied from DynamoDB into SQL on the tick
+    "catalog_configured", "start_catalog_sync", "catalog_sync_slot",
 ]
 
 scan_weeks = _through(__name__, "dataset_yaml", "scan_root")
@@ -55,6 +57,9 @@ class_filter_for = _through(__name__, "assemble", "class_filter_for")
 derive_filtered_dataset = _through(__name__, "assemble", "derive_filtered_dataset")
 evaluates_on_its_training_images = _through(__name__, "assemble", "_evaluates_on_its_training_images")
 read_selection = _through(__name__, "selection", "read_selection")
+catalog_configured = _through(__name__, "catalog", "configured")
+start_catalog_sync = _through(__name__, "catalog_sync", "start_background")
+catalog_sync_slot = _through(__name__, "catalog_sync", "due")
 
 _CONSTANTS = {
     "RETAINED_FOLDER": ("retained_lists", "FOLDER"),

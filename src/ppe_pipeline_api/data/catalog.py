@@ -46,8 +46,9 @@ INSTANCE = "track2-catalog"
 #: Amazon's RDS root certificates, for verifying the connection.
 CA_BUNDLE = pathlib.Path(__file__).with_name("rds-ca-bundle.pem")
 
-#: Bumped with every change to SCHEMA; recorded in `schema_version`.
-SCHEMA_VERSION = 1
+#: The schema's version: SCHEMA is version 1, and each entry in MIGRATIONS
+#: takes it one step further. Recorded in `schema_version`.
+SCHEMA_VERSION = 4
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS schema_version (
@@ -121,8 +122,89 @@ SCHEMA = [
          files      integer)""",
 ]
 
+#: Version 2 (2026-10-29): the RECORDS move here from DynamoDB -- every
+#: snapshot and dataset version with its files, every training run with
+#: a run number and the files it used. Applied once, in order, on top of
+#: version 1. Additive only: columns are added, constraints relaxed, and
+#: no table or row is removed.
+MIGRATIONS = {
+    2: [
+        # Snapshots and dataset versions, numbered 1, 2, 3 ... in order.
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'version'",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS version_number bigserial",
+        "CREATE UNIQUE INDEX IF NOT EXISTS dataset_versions_number ON dataset_versions (version_number)",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS state text",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS run_id text",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS train_images integer",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS val_images integer",
+        # The DynamoDB row as it was, so nothing it held is lost in the move.
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS record jsonb NOT NULL DEFAULT '{}'::jsonb",
+        # Members by ADDRESS. The content hash is filled in once the file
+        # is in the central store; until then the address is the identity.
+        "ALTER TABLE dataset_members ADD COLUMN IF NOT EXISTS image_uri text",
+        "ALTER TABLE dataset_members ADD COLUMN IF NOT EXISTS label_uri text",
+        "ALTER TABLE dataset_members DROP CONSTRAINT IF EXISTS dataset_members_pkey",
+        "ALTER TABLE dataset_members ALTER COLUMN sha256 DROP NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS dataset_members_uri ON dataset_members (version_id, image_uri)",
+        # Training runs, numbered 1, 2, 3 ... A run from before snapshots
+        # existed has no version, so the link may be empty.
+        "ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS run_number bigserial",
+        "CREATE UNIQUE INDEX IF NOT EXISTS training_runs_number ON training_runs (run_number)",
+        "ALTER TABLE training_runs ALTER COLUMN version_id DROP NOT NULL",
+        "ALTER TABLE training_runs DROP CONSTRAINT IF EXISTS training_runs_version_id_fkey",
+        "ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS status text",
+        "ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS submitted_at timestamptz",
+        "ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS ended_at timestamptz",
+        "ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS architecture text",
+        "ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS files_synced boolean NOT NULL DEFAULT false",
+        "ALTER TABLE training_runs ADD COLUMN IF NOT EXISTS record jsonb NOT NULL DEFAULT '{}'::jsonb",
+        # Every file a run used, as the training audit recorded it.
+        """CREATE TABLE IF NOT EXISTS run_files (
+             run_id    text NOT NULL REFERENCES training_runs(run_id),
+             file_key  text NOT NULL,            -- role#kind#index, as recorded
+             s3_uri    text NOT NULL,
+             role      text,                     -- train | eval
+             split     text,
+             kind      text,                     -- image | label
+             folder    text,
+             PRIMARY KEY (run_id, file_key))""",
+        "CREATE INDEX IF NOT EXISTS run_files_uri ON run_files (s3_uri)",
+        # Each sync from DynamoDB, so "is the catalog up to date" has an answer.
+        """CREATE TABLE IF NOT EXISTS sync_runs (
+             id          bigserial PRIMARY KEY,
+             started_at  timestamptz NOT NULL DEFAULT now(),
+             finished_at timestamptz,
+             ok          boolean,
+             counts      jsonb NOT NULL DEFAULT '{}'::jsonb,
+             error       text)""",
+    ],
+    # Version 3 (2026-10-29): an export is of a dataset version OR a run
+    # (a run from before snapshots has no version), built in the
+    # background, so it has a state.
+    3: [
+        "ALTER TABLE exports ALTER COLUMN version_id DROP NOT NULL",
+        "ALTER TABLE exports DROP CONSTRAINT IF EXISTS exports_version_id_fkey",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS run_id text",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS label text",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'building'",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS finished_at timestamptz",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS missing integer NOT NULL DEFAULT 0",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS error text",
+    ],
+    # Version 4 (2026-11-02): a version's manifest is read once, and says
+    # so -- an empty or label-only one was otherwise fetched every sync.
+    4: [
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS members_synced boolean NOT NULL DEFAULT false",
+        # Versions' members were copied correctly. Snapshots are left to be
+        # read once more: composed ones were copied with the root wrongly
+        # put in front of every address, and the sync repairs them.
+        "UPDATE dataset_versions SET members_synced = true WHERE kind = 'version' AND EXISTS"
+        " (SELECT 1 FROM dataset_members m WHERE m.version_id = dataset_versions.id)",
+    ],
+}
+
 TABLES = ("files", "file_sources", "labels", "dataset_versions",
-          "dataset_members", "training_runs", "exports")
+          "dataset_members", "training_runs", "run_files", "exports")
 
 
 def configured() -> bool:
@@ -156,7 +238,7 @@ def connect():
                                 password=password, ssl_context=context, timeout=15)
 
 
-def ensure_schema() -> dict:
+def ensure_schema(report: bool = True) -> dict:
     """Create any table that is missing. Safe to run any number of times:
     every statement is IF NOT EXISTS, and nothing is ever dropped."""
     conn = connect()
@@ -164,12 +246,24 @@ def ensure_schema() -> dict:
         cur = conn.cursor()
         for statement in SCHEMA:
             cur.execute(statement)
-        cur.execute("INSERT INTO schema_version (version) VALUES (%s) "
-                    "ON CONFLICT (version) DO NOTHING", (SCHEMA_VERSION,))
+        cur.execute("INSERT INTO schema_version (version) VALUES (1) "
+                    "ON CONFLICT (version) DO NOTHING")
         conn.commit()
+        cur.execute("SELECT max(version) FROM schema_version")
+        current = int(cur.fetchone()[0] or 1)
+        for version in sorted(MIGRATIONS):
+            if version <= current:
+                continue
+            # One transaction per step: a step half-applied would leave a
+            # schema matching no version.
+            for statement in MIGRATIONS[version]:
+                cur.execute(statement)
+            cur.execute("INSERT INTO schema_version (version) VALUES (%s)", (version,))
+            conn.commit()
     finally:
         conn.close()
-    return status()
+    # The counts are for a person asking; the sync does not need them.
+    return status() if report else {}
 
 
 def status() -> dict:
@@ -187,10 +281,21 @@ def status() -> dict:
         version = cur.fetchone()[0]
         counts = {}
         for table in TABLES:
+            if table == "run_files" and int(version or 0) < 2:
+                continue
             cur.execute(f"SELECT count(*) FROM {table}")       # noqa: S608 -- fixed names
             counts[table] = int(cur.fetchone()[0])
+        last = None
+        if int(version or 0) >= 2:
+            cur.execute("SELECT started_at, finished_at, ok, counts, error FROM sync_runs "
+                        "ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                last = {"started_at": row[0].isoformat() if row[0] else None,
+                        "finished_at": row[1].isoformat() if row[1] else None,
+                        "ok": row[2], "counts": row[3], "error": row[4]}
         return {"configured": True, "reachable": True, "schema_version": version,
-                "tables": counts}
+                "tables": counts, "last_sync": last}
     except Exception as exc:                                       # noqa: BLE001
         return {"configured": True, "reachable": True,
                 "error": f"{type(exc).__name__}: {exc}", "tables": {}}
