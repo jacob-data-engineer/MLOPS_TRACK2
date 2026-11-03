@@ -59,11 +59,19 @@ export function Track2CatalogPage() {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [destination, setDestination] = useState<CatalogExportDestination>({ destination: "local", bucket: "", prefix: "", format: "zip" });
   const [error, setError] = useState("");
+  const [runsLoading, setRunsLoading] = useState(true);
+
+  function loadRuns() {
+    setRunsLoading(true);
+    setError("");
+    getTrack2CatalogRuns().then((r) => setRuns(r.runs))
+      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not read the runs."))
+      .finally(() => setRunsLoading(false));
+  }
 
   useEffect(() => {
     getTrack2CatalogStatus().then(setStatus).catch(() => setStatus(null));
-    getTrack2CatalogRuns().then((r) => setRuns(r.runs))
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not read the runs."));
+    loadRuns();
     getTrack2CatalogVersions().then((r) => setVersions(r.versions)).catch(() => setVersions([]));
     getTrack2CatalogExports().then((r) => setExportsList(r.exports)).catch(() => setExportsList([]));
   }, []);
@@ -125,7 +133,13 @@ export function Track2CatalogPage() {
         {tab === "runs" && (
           <Card title="Training runs" collapsible={false}
                 caption="Latest 10 runs shown first. Scroll inside the table for older runs. Click a run to see its files and export options below.">
-            {runs === null ? <p className="text-sm text-ink-muted">Reading...</p> : (
+            {runsLoading ? <p className="text-sm text-ink-muted">Reading...</p> : runs === null ? (
+              <div className="text-sm text-ink-secondary">
+                Could not load training runs.
+                <button type="button" className="ml-3 rounded border border-hairline px-3 py-1"
+                        onClick={loadRuns}>Retry</button>
+              </div>
+            ) : (
               <div className="max-h-[calc(22rem+2px)] overflow-auto rounded border border-hairline"
                    tabIndex={0} role="region" aria-label="Training runs; scroll for older runs">
                 {/* One 2rem header plus ten 2rem rows; older runs stay in this scroll area. */}

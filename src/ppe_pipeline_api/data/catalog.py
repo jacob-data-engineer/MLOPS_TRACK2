@@ -48,7 +48,7 @@ CA_BUNDLE = pathlib.Path(__file__).with_name("rds-ca-bundle.pem")
 
 #: The schema's version: SCHEMA is version 1, and each entry in MIGRATIONS
 #: takes it one step further. Recorded in `schema_version`.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS schema_version (
@@ -204,6 +204,9 @@ MIGRATIONS = {
     5: [
         "ALTER TABLE exports ADD COLUMN IF NOT EXISTS destination text NOT NULL DEFAULT 'local'",
         "ALTER TABLE exports ADD COLUMN IF NOT EXISTS destination_uri text",
+    ],
+    7: [
+        "CREATE INDEX IF NOT EXISTS run_files_image_count ON run_files (run_id) WHERE kind = 'image'",
     ],
     6: [
         "ALTER TABLE exports ADD COLUMN IF NOT EXISTS format text NOT NULL DEFAULT 'zip'",
