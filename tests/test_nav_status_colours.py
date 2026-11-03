@@ -27,8 +27,8 @@ def test_each_tab_has_its_colour():
 
 def test_sql_comes_first_then_data_then_training():
     order = re.findall(r'to: "(/track2/[\w-]+)"', NAV)
-    assert order[:4] == ["/track2/sql", "/track2/data-preparation", "/track2/catalog",
-                         "/track2/multi-auto-training"]
+    assert order[:4] == ["/track2/sql", "/track2/data-preparation",
+                         "/track2/multi-auto-training", "/track2/catalog"]
 
 
 def test_deploy_and_inference_is_off_the_nav_but_still_routed():

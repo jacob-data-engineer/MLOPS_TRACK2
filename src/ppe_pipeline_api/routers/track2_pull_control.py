@@ -119,6 +119,7 @@ class ConfigRequest(BaseModel):
     # "this is the only source" switch. Declared HERE or the POST drops
     # it without a word: Pydantic discards what the model does not
     # declare, so a card can look wired, answer 200, and save nothing.
+    training_data_preparation: dict | None = None
     dataset_assemble: dict | None = None
     # The Import Checkpoint card's standing choices. See pull_control.
     import_checkpoint: dict | None = None
@@ -806,6 +807,14 @@ def save_settings(payload: SettingsRequest, session=Depends(require_session)) ->
             detail=f"Could not write to {pc.SETTINGS_DIR}: {exc}. The host directory "
                    f"is mounted by deploy.sh; an older container will not have it.",
         )
+
+
+@router.post("/settings/training-data")
+def load_training_data(payload: SettingsRequest, session=Depends(require_session)) -> dict:
+    try:
+        return pc.load_training_data_file(name=payload.name, apply=payload.apply)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/settings/load")

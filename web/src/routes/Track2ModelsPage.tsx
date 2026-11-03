@@ -1,3 +1,4 @@
+import { Track2TrainingDataFile } from "../components/Track2TrainingDataFile";
 import { AlertCircle, Cpu, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "../lib/bus";
@@ -1962,6 +1963,8 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
         </p>
         <Track2PinnedBar scope="at" />
       </div>
+
+      <Track2TrainingDataFile />
 
       {/* The cost panel moved INSIDE the pinned bar, directly under the
           GPU line -- "what is the GPU doing" and "what has it cost

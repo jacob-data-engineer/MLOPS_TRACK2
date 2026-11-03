@@ -62,8 +62,8 @@ const NAV_ITEMS: NavItem[] = [
   // learns from is prepared here, then trained on next door (2026-10-28).
   { to: "/track2/data-preparation", label: "Track2 Data Preparation", icon: Database, status: "ready" },
   // Every run and dataset version, their files, and exports (2026-10-29).
-  { to: "/track2/catalog", label: "Track2 Data Catalog", icon: Library },
   { to: "/track2/multi-auto-training", label: "Track2 Multi-Auto Training", icon: Layers, status: "ready" },
+  { to: "/track2/catalog", label: "Track2 Data Catalog", icon: Library },
   // What the clocks will start, and when -- read-only, every control
   // stays on Multi-Auto Training.
   { to: "/track2/scheduled", label: "Track2 Scheduled - prototype", icon: CalendarDays, status: "prototype" },

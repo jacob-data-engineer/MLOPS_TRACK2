@@ -327,6 +327,7 @@ DEFAULTS = {
     # so each tab says which of ITS files is loaded. See SCOPES.
     "settings_file_dp": "",
     "settings_file_at": "",
+    "training_data_preparation": {},
     # The unattended retrain: pull, rebuild the data.yaml under the
     # current retention policy, freeze it, and submit a run. Off until
     # somebody sets it up, and every field it needs is here rather than
@@ -2991,6 +2992,7 @@ SCOPES = {
         "default_detector", "default_training", "default_source",
         "default_version", "data_source", "default_dataset",
         "last_pull_dataset", "import_checkpoint", "freeze_on_run",
+        "training_data_preparation",
         "retrain_schedule", "queue_after_pull",
     ),
 }
@@ -3043,6 +3045,11 @@ def scope_slice(config: dict, scope: str) -> dict:
     if not scope:
         return dict(config)
     out = {k: config[k] for k in SCOPES[scope] if k in config}
+    if scope == "at" and config.get("training_data_preparation") and "dataset_assemble" in config:
+        out["training_data_preparation"] = {
+            **config["training_data_preparation"],
+            "config": {key: config[key] for key in TRAINING_DATA_KEYS if key in config},
+        }
     cards = config.get("card_state")
     if isinstance(cards, dict):
         out["card_state"] = {k: v for k, v in cards.items()
@@ -3318,6 +3325,40 @@ def read_settings_section(name: str, key: str) -> dict:
     return section if isinstance(section, dict) else {}
 
 
+TRAINING_DATA_KEYS = (
+    "sources", "picked", "source_bucket", "destination_bucket", "root",
+    "training_root", "eval_root", "week_cutoff", "week_anchor",
+    "images_subpath", "labels_subpath", "week_prefix", "week_length_days",
+    "auto_create_weeks", "first_week_takes_all", "week_by",
+    "image_extensions", "label_extensions", "overwrite", "retention",
+    "golden_set", "dataset_assemble", "auto_training", "central_store",
+)
+
+
+def load_training_data_file(*, name: str, apply: bool = False) -> dict:
+    """Import a preparation recipe without touching schedules or starting jobs."""
+    from copy import deepcopy
+
+    if scope_of(name) != "dp":
+        raise ValueError("Choose a Data Preparation (_DP) file.")
+    saved = load_settings_file(name=name, apply=False, scope="dp")
+    recipe = {key: deepcopy(saved["config"].get(key, DEFAULTS.get(key)))
+              for key in TRAINING_DATA_KEYS if key in DEFAULTS or key in saved["config"]}
+    assemble = recipe.get("dataset_assemble") or {}
+    if not isinstance(assemble, dict):
+        raise ValueError("Invalid dataset assembly settings in this file.")
+    assemble.pop("built", None)
+    recipe["dataset_assemble"] = assemble
+    if recipe.get("picked"):
+        recipe["sources"] = sources_from_picked({**DEFAULTS, **recipe})
+    if apply:
+        write_config({**recipe, "data_source": "assembled",
+                      "training_data_preparation": {"name": name,
+                          "saved_at": saved.get("saved_at", ""), "config": recipe}})
+    return {"name": name, "saved_at": saved.get("saved_at", ""),
+            "config": recipe, "applied": apply}
+
+
 def load_settings_file(*, name: str = "pull_control", apply: bool = True,
                        scope: str = "") -> dict:
     """Reads a settings file back and makes every part of it live.
@@ -3358,6 +3399,9 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True,
     if apply:
         live = read_config()
         update = dict(config)
+        if scope == "at" and config.get("training_data_preparation"):
+            recipe = config["training_data_preparation"].get("config") or {}
+            update.update({key: recipe[key] for key in TRAINING_DATA_KEYS if key in recipe})
         if scope:
             # Merged, not replaced: the record also holds the other tab's
             # cards, and `write_config` replaces a top-level key whole.

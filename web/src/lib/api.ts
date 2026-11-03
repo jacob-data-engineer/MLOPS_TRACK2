@@ -2234,6 +2234,7 @@ export interface Track2PullConfig {
    * saved (2026-10-29). */
   settings_file_dp?: string;
   settings_file_at?: string;
+  training_data_preparation?: { name: string; saved_at: string; config: Record<string, unknown> };
   /** The last build Assemble's "Scheduled" made after a pull. A result,
    * written by the server; never saved in a settings file. */
   assemble_schedule_last?: {
@@ -4002,4 +4003,10 @@ export function pullTrack2Sql(params: {
     train_percent: params.trainPercent,
     with_labels: params.withLabels,
   });
+}
+
+export function loadTrack2TrainingData(name: string, apply = false): Promise<{
+  name: string; saved_at: string; config: Record<string, unknown>; applied: boolean;
+}> {
+  return apiPost("/track2/pull-control/settings/training-data", { name, apply });
 }
