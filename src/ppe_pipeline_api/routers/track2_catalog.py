@@ -103,6 +103,7 @@ class ExportRequest(BaseModel):
     include_metadata: bool = False
     include_images: bool = True
     include_model: bool = False
+    metadata_groups: list[str] | None = None
 
 
 class WeightsExportRequest(BaseModel):
@@ -126,12 +127,18 @@ def start_export(payload: ExportRequest, session=Depends(require_session)) -> di
         payload.kind, payload.id, destination=payload.destination,
         bucket=payload.bucket, prefix=payload.prefix, format=payload.format,
         include_metadata=payload.include_metadata, include_images=payload.include_images,
-        include_model=payload.include_model))
+        include_model=payload.include_model, metadata_groups=payload.metadata_groups))
 
 
 @router.get("/metadata")
 def metadata(kind: str, id: str, session=Depends(require_session)) -> dict:
     return _guard(lambda: catalog_metadata.describe(kind, id))
+
+
+@router.post("/metadata/export")
+def export_metadata(payload: ExportRequest, session=Depends(require_session)) -> dict:
+    return _guard(lambda: catalog_view.export_metadata(payload.kind, payload.id, destination=payload.destination,
+                  bucket=payload.bucket, prefix=payload.prefix, metadata_groups=payload.metadata_groups))
 
 
 @router.post("/metadata/inspect")

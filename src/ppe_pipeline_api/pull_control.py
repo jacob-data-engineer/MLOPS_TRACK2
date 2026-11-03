@@ -172,7 +172,8 @@ DEFAULTS = {
     # restore is not a setting.
     "central_store": {},
     # Catalog package choices belong in saved settings; uploaded documents do not.
-    "catalog_export": {"include_images": True, "include_model": True},
+    "catalog_export": {"include_images": True, "include_model": True, "output_type": "complete"},
+    "catalog_export_destination": {},  # Destination shared by all catalog export modes.
     "catalog_pt_metadata": {},  # Selected categories for direct checkpoint exports.
     # The Assemble card's own choices: the folders it merges into a
     # dataset, the detector it writes classes for, whether it may replace
@@ -2984,7 +2985,7 @@ SCOPES = {
         "schedule_start_date", "schedule_time",
         "image_extensions", "label_extensions", "overwrite",
         "retention", "golden_set", "dataset_assemble", "auto_training",
-        "sql_explorer", "central_store", "catalog_export", "catalog_pt_metadata",
+        "sql_explorer", "central_store", "catalog_export", "catalog_pt_metadata", "catalog_export_destination",
     ),
     "at": (
         "default_detector", "default_training", "default_source",

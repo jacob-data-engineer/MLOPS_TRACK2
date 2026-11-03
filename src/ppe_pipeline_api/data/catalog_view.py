@@ -427,7 +427,7 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                             continue
                         if metadata and path == f"models/{label}.pt":
                             check(True)
-                            body = catalog_metadata.embed(body, metadata, manifest.getvalue())
+                            body = catalog_metadata.embed(body, metadata, manifest.getvalue() if "File provenance" in metadata["groups"] else None)
                         zf.writestr(zipfile.ZipInfo(path, date_time=(2026, 1, 1, 0, 0, 0)), body)
                         packed += 1
                         writer.writerow({**row, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()})
@@ -444,8 +444,10 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                 metadata["export_result"] = {"files_written": packed, "missing_files": missing,
                                              "completed_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
                 zf.writestr("metadata.json", catalog_metadata.dumps(metadata))
-                zf.writestr("metrics.json", catalog_metadata.dumps(metadata["groups"]["Evaluation"]))
-                zf.writestr("training-history.json", catalog_metadata.dumps(metadata["groups"]["Training history"]))
+                if "Evaluation" in metadata["groups"]:
+                    zf.writestr("metrics.json", catalog_metadata.dumps(metadata["groups"]["Evaluation"]))
+                if "Training history" in metadata["groups"]:
+                    zf.writestr("training-history.json", catalog_metadata.dumps(metadata["groups"]["Training history"]))
                 if not numbered:
                     zf.writestr("data.yaml", "path: .\ntrain: images/train\nval: images/val\nnames: {}\n# Class mapping was not recorded.\n")
                 zf.writestr("README.txt", "Track2 export\nmetadata.json: recorded run/dataset information; unavailable fields are listed.\n"
@@ -511,7 +513,8 @@ def _finish(export_id: str, sql: str, params: tuple) -> bool | None:
 
 def start_export(kind: str, ident: str, *, destination: str = "local",
                  bucket: str = "", prefix: str = "", format: str | None = None,
-                 include_metadata: bool = False, include_images: bool = True, include_model: bool = False) -> dict:
+                 include_metadata: bool = False, include_images: bool = True, include_model: bool = False,
+                 metadata_groups: list[str] | None = None) -> dict:
     """Start building a zip of a run or a dataset version. Returns at once;
     `exports()` shows its progress."""
     if kind not in ("run", "version"):
@@ -538,6 +541,10 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
                 entries.append((path, uri, {"path": path, "source": uri, "role": "model", "included": True}))
             else:
                 metadata["notes"].append("No published checkpoint was recorded for this run; no .pt is included.")
+    if metadata and metadata_groups is not None:
+        options = metadata["export_options"]
+        metadata = catalog_metadata.select_groups(metadata, metadata_groups)
+        metadata["export_options"] = options
     if not metadata and not any(path for path, _, _ in entries):
         raise ValueError("Nothing to export: no files are recorded for it.")
     if not _building.acquire(blocking=False):
@@ -633,3 +640,17 @@ def export_run_weights(run_id: str, *, destination: str = "local", bucket: str =
 
 def summary_json(value) -> str:
     return json.dumps(value, default=str)
+
+
+def export_metadata(kind: str, ident: str, *, destination="local", bucket="", prefix="", metadata_groups=None):
+    metadata = catalog_metadata.describe(kind, ident)
+    if metadata_groups is not None:
+        metadata = catalog_metadata.select_groups(metadata, metadata_groups)
+    bucket, prefix = _destination(destination, bucket, prefix)
+    filename = metadata["label"] + "-metadata.json"
+    key = "/".join(p for p in (prefix, metadata["label"] + "-" + uuid.uuid4().hex[:12], filename) if p)
+    storage.s3.put_object(Bucket=bucket, Key=key, Body=catalog_metadata.dumps(metadata).encode("utf-8"), ContentType="application/json")
+    if destination == "s3":
+        return {"uri": f"s3://{bucket}/{key}"}
+    return {"url": storage.s3.generate_presigned_url("get_object", ExpiresIn=3600, Params={"Bucket": bucket, "Key": key,
+                  "ResponseContentDisposition": f'attachment; filename="{filename}"'})}

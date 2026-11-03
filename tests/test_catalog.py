@@ -323,7 +323,7 @@ def test_export_route_forwards_destination_and_old_requests_default_to_local(mon
     monkeypatch.setattr(cv, "start_export", lambda *args, **kwargs: got.append((args, kwargs)) or {"state": "building"})
     router.start_export(router.ExportRequest(kind="run", id="r", destination="s3", bucket="chosen-bucket", prefix="exports"), session={})
     assert got[-1] == (("run", "r"), {"destination": "s3", "bucket": "chosen-bucket", "prefix": "exports", "format": None,
-                                      "include_metadata": False, "include_images": True, "include_model": False})
+                                      "include_metadata": False, "include_images": True, "include_model": False, "metadata_groups": None})
     router.start_export(router.ExportRequest(kind="version", id="v"), session={})
     assert got[-1][1]["destination"] == "local"
 
@@ -491,7 +491,7 @@ def test_complete_bundle_contains_enriched_model_and_checksums(monkeypatch):
         monkeypatch.setattr(cv,'_rows',lambda *a:[{'state':'building'}])
         slots=threading.BoundedSemaphore(1);slots.acquire();monkeypatch.setattr(cv,'_building',slots)
         results=[];monkeypatch.setattr(cv,'_finish',lambda *a:results.append(a))
-        metadata={'schema':cm.SCHEMA,'label':'run-1','groups':{'Evaluation':{'mAP50':0.8},'Training history':{}},'records':{}}
+        metadata={'schema':cm.SCHEMA,'label':'run-1','groups':{'Evaluation':{'mAP50':0.8},'Training history':{},'File provenance':{}},'records':{}}
         entries=[(path,'s3://source/'+key,{'path':path,'source':'s3://source/'+key}) for path,key in [('images/train/a.jpg','a.jpg'),('models/run-1.pt','model.pt')]]
         entries.insert(0, ('', 's3://source/excluded.jpg', {'path':'images/val/excluded.jpg','source':'s3://source/excluded.jpg','included':False}))
         cv._build('bundle','run','r','run-1',entries,['helmet'],'s3','dest','exports',fmt,metadata)

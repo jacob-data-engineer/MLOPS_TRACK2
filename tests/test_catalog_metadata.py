@@ -91,3 +91,22 @@ def test_direct_model_export_embeds_only_selected_groups(monkeypatch):
     count=len(s3.written)
     assert cv.export_run_weights('run54',metadata_groups=[])=={'url':'signed'}
     assert len(s3.written)==count
+
+
+def test_json_export_uses_shared_category_selection(monkeypatch):
+    doc=sample();doc.update(captured_at='now',unavailable=[],records={'unselected_secret_record':123})
+    doc['groups']={'Evaluation':{'mAP50':0.8},'Training settings':{'epochs':10}}
+    monkeypatch.setattr(cm,'describe',lambda *a:doc)
+    monkeypatch.setattr(cv,'_export_bucket',lambda:('local-bucket','exports'))
+    class S3:
+        def __init__(self): self.writes=[]
+        def put_object(self,**kw):self.writes.append(kw)
+        def generate_presigned_url(self,*a,**kw):return 'signed'
+    s3=S3();monkeypatch.setattr(cv.storage,'s3',s3)
+    for target in ('local','s3'):
+        result=cv.export_metadata('run','r',destination=target,bucket='chosen-bucket',prefix='folder',metadata_groups=['Evaluation'])
+        assert ('url' if target=='local' else 'uri') in result
+        saved=json.loads(s3.writes[-1]['Body'])
+        assert saved['groups']=={'Evaluation':{'mAP50':0.8}}
+        assert 'records' not in saved
+        assert s3.writes[-1]['ContentType']=='application/json'
