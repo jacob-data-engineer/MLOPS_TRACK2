@@ -322,7 +322,8 @@ def test_export_route_forwards_destination_and_old_requests_default_to_local(mon
     got = []
     monkeypatch.setattr(cv, "start_export", lambda *args, **kwargs: got.append((args, kwargs)) or {"state": "building"})
     router.start_export(router.ExportRequest(kind="run", id="r", destination="s3", bucket="chosen-bucket", prefix="exports"), session={})
-    assert got[-1] == (("run", "r"), {"destination": "s3", "bucket": "chosen-bucket", "prefix": "exports", "format": None})
+    assert got[-1] == (("run", "r"), {"destination": "s3", "bucket": "chosen-bucket", "prefix": "exports", "format": None,
+                                      "include_metadata": False, "include_images": True, "include_model": False})
     router.start_export(router.ExportRequest(kind="version", id="v"), session={})
     assert got[-1][1]["destination"] == "local"
 
@@ -477,3 +478,35 @@ def test_export_run_weights_missing_checkpoint(monkeypatch):
     with pytest.raises(ValueError,match='Run not found'): cv.export_run_weights('gone')
     monkeypatch.setattr(cv,'_rows',lambda *a: [{'run_number':1,'record':{}}])
     with pytest.raises(ValueError,match='No .pt checkpoint'): cv.export_run_weights('pending')
+
+
+def test_complete_bundle_contains_enriched_model_and_checksums(monkeypatch):
+    import io,zipfile,threading,json,csv,hashlib
+    from ppe_pipeline_api.data import catalog_metadata as cm
+    checkpoint=io.BytesIO()
+    with zipfile.ZipFile(checkpoint,'w') as z: z.writestr('archive/data.pkl',b'opaque-model')
+    for fmt in ('zip','folder'):
+        s3=_S3Zip({('source','a.jpg'):b'image',('source','model.pt'):checkpoint.getvalue()})
+        monkeypatch.setattr(cv.storage,'s3',s3)
+        monkeypatch.setattr(cv,'_rows',lambda *a:[{'state':'building'}])
+        slots=threading.BoundedSemaphore(1);slots.acquire();monkeypatch.setattr(cv,'_building',slots)
+        results=[];monkeypatch.setattr(cv,'_finish',lambda *a:results.append(a))
+        metadata={'schema':cm.SCHEMA,'label':'run-1','groups':{'Evaluation':{'mAP50':0.8},'Training history':{}},'records':{}}
+        entries=[(path,'s3://source/'+key,{'path':path,'source':'s3://source/'+key}) for path,key in [('images/train/a.jpg','a.jpg'),('models/run-1.pt','model.pt')]]
+        entries.insert(0, ('', 's3://source/excluded.jpg', {'path':'images/val/excluded.jpg','source':'s3://source/excluded.jpg','included':False}))
+        cv._build('bundle','run','r','run-1',entries,['helmet'],'s3','dest','exports',fmt,metadata)
+        root='exports/run-1-bundle/'
+        if fmt=='zip':
+            z=zipfile.ZipFile(io.BytesIO(s3.objects[('dest',root+'run-1.zip')]))
+            files={n:z.read(n) for n in z.namelist()}
+        else: files={key[len(root):]:value for (bucket,key),value in s3.objects.items() if bucket=='dest'}
+        assert {'metadata.json','metrics.json','training-history.json','data.yaml','manifest.csv','models/run-1.pt','images/train/a.jpg'} <= files.keys()
+        assert json.loads(files['metadata.json'])['export_result']['missing_files']==0
+        embedded=cm.inspect_file(io.BytesIO(files['models/run-1.pt']),'model.pt')
+        assert embedded['groups']['Evaluation']['mAP50']==0.8
+        assert 'images/train/a.jpg' in embedded['file_manifest']
+        assert 'excluded.jpg' in embedded['file_manifest']
+        for row in csv.DictReader(io.StringIO(files['manifest.csv'].decode())):
+            if row['included']=='False': continue
+            assert hashlib.sha256(files[row['path']]).hexdigest()==row['sha256']
+        assert results[-1][2][0]=='ready'

@@ -4,12 +4,12 @@ versions, recreation and export build on these tables."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from ..auth import require_session
-from ..data import catalog, catalog_sync, catalog_view
+from ..data import catalog, catalog_sync, catalog_view, catalog_metadata
 
 router = APIRouter()
 
@@ -100,6 +100,9 @@ class ExportRequest(BaseModel):
     bucket: str = ""
     prefix: str = ""
     format: str | None = None
+    include_metadata: bool = False
+    include_images: bool = True
+    include_model: bool = False
 
 
 class WeightsExportRequest(BaseModel):
@@ -119,7 +122,24 @@ def start_export(payload: ExportRequest, session=Depends(require_session)) -> di
     """Build a zip of a run or a dataset version, in the background."""
     return _guard(lambda: catalog_view.start_export(
         payload.kind, payload.id, destination=payload.destination,
-        bucket=payload.bucket, prefix=payload.prefix, format=payload.format))
+        bucket=payload.bucket, prefix=payload.prefix, format=payload.format,
+        include_metadata=payload.include_metadata, include_images=payload.include_images,
+        include_model=payload.include_model))
+
+
+@router.get("/metadata")
+def metadata(kind: str, id: str, session=Depends(require_session)) -> dict:
+    return _guard(lambda: catalog_metadata.describe(kind, id))
+
+
+@router.post("/metadata/inspect")
+def inspect_metadata(file: UploadFile, session=Depends(require_session)) -> dict:
+    try:
+        if file.size is None or file.size > 512 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Choose a file up to 512 MB. For larger exports, open metadata.json instead.")
+        return _guard(lambda: catalog_metadata.inspect_file(file.file, file.filename or ""))
+    finally:
+        file.file.close()
 
 
 @router.get("/exports")

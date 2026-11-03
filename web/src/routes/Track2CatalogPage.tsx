@@ -1,6 +1,7 @@
 import { AlertCircle, Archive, Download, FileText, Library, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Card } from "../components/Card";
+import { Track2CatalogMetadata } from "../components/Track2CatalogMetadata";
 import { Track2S3FolderBrowser } from "../components/Track2S3FolderBrowser";
 import {
   ApiError,
@@ -225,6 +226,11 @@ export function Track2CatalogPage() {
                      destination={destination} onDestination={setDestination}
                      onExported={() => { refreshExports(); setTab("exports"); }} />
         )}
+        <Track2CatalogMetadata
+          selection={picked && (tab === "exports" || picked.kind === (tab === "runs" ? "run" : "version"))
+            ? picked.kind === "run" ? { kind: "run", id: picked.run.run_id, label: `Run ${picked.run.run_number}` }
+              : { kind: "version", id: picked.version.id, label: `Version ${picked.version.version_number}` } : null}
+          destination={destination} onExported={() => { refreshExports(); setTab("exports"); }} />
       </div>
     </div>
   );

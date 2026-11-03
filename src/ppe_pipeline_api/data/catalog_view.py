@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .. import pull_control as pc
 from .. import storage
-from . import catalog
+from . import catalog, catalog_metadata
 
 PAGE = 100
 #: Exports building at once. Each streams gigabytes; two is plenty.
@@ -366,7 +366,8 @@ def _destination(destination: str, bucket: str, prefix: str) -> tuple[str, str]:
 
 
 def _build(export_id: str, kind: str, ident: str, label: str, entries: list, names,
-           destination: str = "local", bucket: str = "", prefix: str = "", format: str | None = None) -> None:
+           destination: str = "local", bucket: str = "", prefix: str = "", format: str | None = None,
+           metadata: dict | None = None) -> None:
     sink = None
     output = None
     completed = False
@@ -404,9 +405,13 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
         manifest = io.StringIO()
         writer = csv.DictWriter(manifest, fieldnames=["path", "source", "role", "split",
                                                       "included", "reason", "decay_weight",
-                                                      "week", "missing"],
+                                                      "week", "missing", "bytes", "sha256"],
                                 extrasaction="ignore")
         writer.writeheader()
+        # Include unselected/excluded inventory before enriching the checkpoint.
+        for path, uri, row in entries:
+            if not path:
+                writer.writerow(row)
         packed, missing = 0, 0
         with output as zf:
             wanted = [e for e in entries if e[0]]
@@ -420,12 +425,12 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                             missing += 1
                             writer.writerow({**row, "missing": True})
                             continue
+                        if metadata and path == f"models/{label}.pt":
+                            check(True)
+                            body = catalog_metadata.embed(body, metadata, manifest.getvalue())
                         zf.writestr(zipfile.ZipInfo(path, date_time=(2026, 1, 1, 0, 0, 0)), body)
                         packed += 1
-                        writer.writerow(row)
-            for path, uri, row in entries:
-                if not path:
-                    writer.writerow(row)
+                        writer.writerow({**row, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()})
             numbered = _numbered(names)
             check(True)
             if numbered:
@@ -434,6 +439,21 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                 zf.writestr("data.yaml", f"path: .\ntrain: images/train\nval: {val_path}\n"
                                          f"names:\n{lines}\n")
             zf.writestr("manifest.csv", manifest.getvalue())
+            if metadata:
+                check(True)
+                metadata["export_result"] = {"files_written": packed, "missing_files": missing,
+                                             "completed_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+                zf.writestr("metadata.json", catalog_metadata.dumps(metadata))
+                zf.writestr("metrics.json", catalog_metadata.dumps(metadata["groups"]["Evaluation"]))
+                zf.writestr("training-history.json", catalog_metadata.dumps(metadata["groups"]["Training history"]))
+                if not numbered:
+                    zf.writestr("data.yaml", "path: .\ntrain: images/train\nval: images/val\nnames: {}\n# Class mapping was not recorded.\n")
+                zf.writestr("README.txt", "Track2 export\nmetadata.json: recorded run/dataset information; unavailable fields are listed.\n"
+                            "manifest.csv: source addresses, relative paths, missing files, byte sizes and SHA-256 checksums.\n"
+                            "models/*.pt: a copy of the model with extra/track2_metadata.json and extra/track2_manifest.csv embedded.\n"
+                            "The embedded manifest describes dataset files; the outer manifest includes the enriched model checksum.\n"
+                            "Open metadata.json, the enriched .pt or this ZIP in the Data Catalog information viewer.\n"
+                            "Only files selected for export and still available are included. Original model files are unchanged.\n")
         if sink:
             check(True)
             sink.finish()
@@ -490,7 +510,8 @@ def _finish(export_id: str, sql: str, params: tuple) -> bool | None:
 
 
 def start_export(kind: str, ident: str, *, destination: str = "local",
-                 bucket: str = "", prefix: str = "", format: str | None = None) -> dict:
+                 bucket: str = "", prefix: str = "", format: str | None = None,
+                 include_metadata: bool = False, include_images: bool = True, include_model: bool = False) -> dict:
     """Start building a zip of a run or a dataset version. Returns at once;
     `exports()` shows its progress."""
     if kind not in ("run", "version"):
@@ -500,11 +521,30 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
     if format not in ("zip", "folder") or (destination == "local" and format != "zip"):
         raise ValueError("Choose ZIP for a local download, or ZIP / folder for S3.")
     entries, names, label = _plan(kind, ident)
-    if not any(path for path, _, _ in entries):
+    metadata = catalog_metadata.describe(kind, ident) if include_metadata else None
+    if metadata:
+        metadata["export_options"] = {"images": include_images, "model": include_model,
+                                      "destination": destination, "format": format,
+                                      "checkpoint_embedding": "JSON and CSV stored inside the .pt archive; model tensors are unchanged"}
+        if not include_images:
+            entries = [("", uri, {**row, "included": False, "reason": "Not selected for export"}) for _, uri, row in entries]
+        if include_model and kind == "run":
+            selected = metadata["records"]["selected"]["record"]
+            if isinstance(selected, str):
+                selected = json.loads(selected)
+            uri = str(selected.get("weights_uri") or "")
+            if uri:
+                path = f"models/{label}.pt"
+                entries.append((path, uri, {"path": path, "source": uri, "role": "model", "included": True}))
+            else:
+                metadata["notes"].append("No published checkpoint was recorded for this run; no .pt is included.")
+    if not metadata and not any(path for path, _, _ in entries):
         raise ValueError("Nothing to export: no files are recorded for it.")
     if not _building.acquire(blocking=False):
         raise ValueError("Two exports are already building; try again when one finishes.")
     export_id = uuid.uuid4().hex[:12]
+    if metadata:
+        metadata["export_id"] = export_id
     try:
         conn = catalog.connect()
         try:
@@ -521,7 +561,7 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
     except Exception:
         _building.release()
         raise
-    threading.Thread(target=_build, args=(export_id, kind, ident, label, entries, names, destination, bucket, prefix, format),
+    threading.Thread(target=_build, args=(export_id, kind, ident, label, entries, names, destination, bucket, prefix, format, metadata),
                      name=f"export-{export_id}", daemon=True).start()
     return {"id": export_id, "label": label, "state": "building"}
 

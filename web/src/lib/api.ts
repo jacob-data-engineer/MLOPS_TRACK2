@@ -2158,6 +2158,7 @@ export interface Track2PullConfig {
   /** The central data store: the one bucket and folder where all the
    * data and images are kept (2026-10-29). */
   central_store?: { bucket?: string; folder?: string };
+  catalog_export?: { include_images?: boolean; include_model?: boolean };
   sql_explorer?: {
     database?: string;
     bucket?: string;
@@ -3879,6 +3880,30 @@ export interface CatalogExportDestination {
   bucket: string;
   prefix: string;
   format: "zip" | "folder";
+  include_metadata?: boolean;
+  include_images?: boolean;
+  include_model?: boolean;
+}
+
+export interface CatalogMetadata {
+  schema: string;
+  label: string;
+  captured_at: string;
+  checkpoint_available: boolean;
+  groups: Record<string, unknown>;
+  unavailable: string[];
+  records: unknown;
+  notes: string[];
+  file_manifest?: string;
+}
+
+export function getTrack2CatalogMetadata(kind: "run" | "version", id: string): Promise<CatalogMetadata> {
+  return apiGet(`/track2/catalog/metadata?${new URLSearchParams({ kind, id })}`);
+}
+
+export function inspectTrack2CatalogMetadata(file: File): Promise<CatalogMetadata> {
+  const form = new FormData(); form.append("file", file);
+  return apiPostForm("/track2/catalog/metadata/inspect", form);
 }
 
 export function startTrack2CatalogExport(kind: "run" | "version", id: string,
