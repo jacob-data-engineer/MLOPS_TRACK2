@@ -7,7 +7,6 @@ import { Track2DatasetAssemblePanel } from "../components/Track2DatasetAssembleP
 import { Track2GoldenSetPanel } from "../components/Track2GoldenSetPanel";
 import { Track2PinnedBar } from "../components/Track2PinnedBar";
 import { Track2PullControlPanel } from "../components/Track2PullControlPanel";
-import { Track2PullQueuePanel } from "../components/Track2PullQueuePanel";
 
 /** DATA PREPARATION: everything that decides what a run trains on.
  *
@@ -37,8 +36,7 @@ export function Track2DataPrepPage() {
 
   return (
     <div>
-      {/* The same pinned strip as Training: the pull mode in it is the
-          one switch for the automatic chain, which starts on this tab. */}
+      {/* File controls only; scheduling lives on Multi-Auto Training. */}
       <div className="sticky top-0 z-30 -mx-4 -mt-6 mb-4 border-b border-hairline bg-page px-4 pb-2 pt-6 md:-mx-8 md:-mt-8 md:px-8 md:pt-8">
         <h1 className="mb-1 flex items-center gap-2 text-xl font-semibold text-ink">
           <Database size={20} className="text-accent" strokeWidth={2} />
@@ -88,10 +86,6 @@ export function Track2DataPrepPage() {
         >
           <Track2AutoTrainingPanel />
         </SwitchedOff>
-
-        {/* Sweeps waiting their turn. Here with the Pull Control card whose
-            settings they queue; the training queue is on the Training tab. */}
-        <Track2PullQueuePanel />
 
         {/* Where all the data and images are kept -- the one bucket and
             folder everything else is meant to file into. */}

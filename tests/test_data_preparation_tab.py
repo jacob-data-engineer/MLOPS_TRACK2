@@ -15,12 +15,13 @@ PANEL = (WEB / "components" / "Track2DatasetAssemblePanel.tsx").read_text(encodi
 BUS = (WEB / "lib" / "bus.ts").read_text(encoding="utf-8")
 
 DATA_CARDS = ("<Track2GoldenSetPanel", "<Track2PullControlPanel",
-              "<Track2AutoTrainingPanel", "<Track2PullQueuePanel")
+              "<Track2AutoTrainingPanel")
 
 
 def test_the_data_cards_are_on_the_data_tab_in_working_order():
     at = [DATA.index(card) for card in ("<Track2DatasetAssemblePanel", *DATA_CARDS)]
-    assert at == sorted(at), "Assemble, Golden, Pull Control, weeks, pull queue"
+    assert at == sorted(at), "Assemble, Golden, Pull Control, weeks"
+    assert "Track2PullQueuePanel" not in DATA
 
 
 def test_and_only_there():

@@ -1,10 +1,4 @@
-"""Each tab saves its own settings file, with its own schedule (2026-10-29).
-
-Data Preparation saves `<name>_DP` holding only the data side and the
-PULL schedule; Multi-Auto Training saves `<name>_AT` holding only the
-training side and the TRAINING schedule. Saving, loading or resetting one
-tab must leave the other's live settings exactly as they were.
-"""
+"""Data Preparation owns recipes; Multi-Auto Training owns both schedules."""
 from __future__ import annotations
 
 import json
@@ -47,11 +41,11 @@ def test_each_tab_saves_only_its_own_settings_under_its_own_ending(live):
     assert pc.save_settings_file(name="site", scope="at")["name"] == "site_AT"
 
     dp, at = _file("site_DP")["config"], _file("site_AT")["config"]
-    assert dp["root"] == "retraining" and dp["mode"] == "schedule"
+    assert dp["root"] == "retraining" and "mode" not in dp
     assert "default_detector" not in dp and "retrain_schedule" not in dp
     assert at["default_detector"]["slug"] == "helmet"
     assert at["retrain_schedule"]["trigger"] == "clock"
-    assert "root" not in at and "mode" not in at
+    assert "root" not in at and at["mode"] == "schedule"
     # Run state is a result, saved by neither.
     assert "chain_state" not in dp and "chain_state" not in at
     # Each file carries only its own cards' open state.
@@ -79,13 +73,13 @@ def test_loading_one_tab_leaves_the_other_alone(live):
 
     pc.load_settings_file(name="before_DP", scope="dp")
     config = pc.read_config()
-    assert config["root"] == "retraining" and config["mode"] == "schedule"
+    assert config["root"] == "retraining" and config["mode"] == "off"
     assert config["default_detector"]["slug"] == "vest"          # untouched
     assert config["card_state"] == {"pull_control": True, "training_advanced": False}
-    assert live, "the pull's trigger is re-armed on a Data Preparation load"
+    assert not live, "Data Preparation must not re-arm schedules"
 
 
-def test_a_training_load_does_not_touch_the_pull(live):
+def test_a_training_load_restores_the_pull_schedule(live):
     pc.save_settings_file(name="t", scope="at")
     pc.write_config({"mode": "arrival",
                      "default_detector": {"slug": "vest", "architecture": "yolo11m"}})
@@ -94,8 +88,8 @@ def test_a_training_load_does_not_touch_the_pull(live):
     pc.load_settings_file(name="t_AT", scope="at")
     config = pc.read_config()
     assert config["default_detector"]["slug"] == "helmet"
-    assert config["mode"] == "arrival"
-    assert not live, "no EventBridge rule is touched by a training load"
+    assert config["mode"] == "schedule"
+    assert live[-1]["mode"] == "schedule"
 
 
 def test_a_file_from_the_other_tab_is_refused(live):
@@ -118,12 +112,15 @@ def test_new_resets_one_tab_only(live):
     pc.reset_to_defaults(scope="at")
     config = pc.read_config()
     assert config["default_detector"] == {}
-    assert config["root"] == "retraining" and config["mode"] == "schedule"
+    assert config["root"] == "retraining" and config["mode"] == "off"
     assert config["card_state"] == {"pull_control": True}
 
+    pc.write_config({"mode": "arrival"})
+    live.clear()
     pc.reset_to_defaults(scope="dp")
     config = pc.read_config()
-    assert config["mode"] == "off" and config["golden_set"] == {}
+    assert config["mode"] == "arrival" and config["golden_set"] == {}
+    assert not live
 
 
 def test_the_listing_says_which_tab_each_file_is_for(live):
@@ -192,4 +189,13 @@ def test_the_central_data_store_is_a_saved_data_preparation_setting():
     panel = (WEB / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
     assert "saveTrack2PullConfig({ central_store: { bucket, folder } })" in panel
     page = (WEB / "routes" / "Track2DataPrepPage.tsx").read_text(encoding="utf-8")
-    assert page.index("<Track2PullQueuePanel />") < page.index("<Track2CentralStorePanel />")
+    assert page.index("<Track2AutoTrainingPanel />") < page.index("<Track2CentralStorePanel />")
+
+
+def test_legacy_training_file_preserves_pull_schedule(live):
+    path = pathlib.Path(pc.SETTINGS_DIR)
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "legacy_AT.json").write_text(json.dumps({"config": {"default_training": {"epochs": 2}}}))
+    pc.load_settings_file(name="legacy_AT", scope="at")
+    assert pc.read_config()["mode"] == "schedule"
+    assert not live

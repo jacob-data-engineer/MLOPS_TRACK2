@@ -21,18 +21,9 @@ import {
 } from "../lib/api";
 import { pendingCards } from "../lib/pendingChanges";
 
-/** The two things you reach for from anywhere on the page, pinned: the
- * settings file and the schedule.
- *
- * ONE PER TAB (2026-10-29). Data Preparation saves `<name>_DP` and owns the
- * PULL schedule; Multi-Auto Training saves `<name>_AT` and owns the
- * TRAINING schedule. Each file holds only its own page -- the server keeps
- * the list of which settings are whose (`pull_control.SCOPES`) -- so
- * saving one tab can no longer write the other's choices into its file,
- * and loading one cannot change the other.
- *
- * It saves what is IN EFFECT, not what is typed into a card and not yet
- * applied. A card with an Apply button has to be applied first.
+/** Shared settings-file toolbar. Data Preparation shows file controls only;
+ * Multi-Auto Training also shows its schedule, GPU status and cost.
+ * Settings are saved by scope, and only applied card values are saved.
  */
 /** Both readings on this strip -- when the settings were saved, and when the
  * schedule next fires -- are instants the SERVER recorded or computed, so
@@ -68,7 +59,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
   const [clashed, setClashed] = useState(false);
   const [allowClash, setAllowClash] = useState(false);
 
-  // The PULL schedule (Data Preparation): off, on arrival, on a clock.
+  // Both pull and training timing are controlled on Multi-Auto Training.
   const [mode, setMode] = useState<"off" | "arrival" | "schedule">("off");
   const [everyDays, setEveryDays] = useState(1);
   const [timeOfDay, setTimeOfDay] = useState("");
@@ -76,12 +67,13 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
   // the pulls then keep. Saved server-side with the rest of the schedule.
   const [countFrom, setCountFrom] = useState<"today" | "date">("today");
   const [startDate, setStartDate] = useState("");
+  const [pullDirty, setPullDirty] = useState(false);
+  const [pullNext, setPullNext] = useState("");
   // The TRAINING schedule (Multi-Auto Training): after each pull, its own
   // clock, or nothing.
   const [trigger, setTrigger] = useState<Track2TrainingTrigger>("pull");
   const [trainEvery, setTrainEvery] = useState(7);
   const [trainAt, setTrainAt] = useState("02:00");
-  const [pullNext, setPullNext] = useState("");
   const [trainNext, setTrainNext] = useState("");
   const [scheduleDirty, setScheduleDirty] = useState(false);
   // The arrival trigger's guards: smallest batch worth a run, and the
@@ -105,8 +97,8 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
       const [out, status, after, retrain] = await Promise.all([
         getTrack2SettingsFiles(),
         getTrack2PullControl().catch(() => null),
-        getTrack2QueueAfterPull().catch(() => null),
-        getTrack2Retrain().catch(() => null),
+        scope === "at" ? getTrack2QueueAfterPull().catch(() => null) : Promise.resolve(null),
+        scope === "at" ? getTrack2Retrain().catch(() => null) : Promise.resolve(null),
       ]);
       setMinFiles(Number(after?.settings.min_files ?? 1) || 1);
       setCooldown(Number(after?.settings.cooldown_minutes ?? 0) || 0);
@@ -129,7 +121,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
       setPicked((p) =>
         names.includes(p) ? p : names.includes(live) ? live : names[0] ?? "");
 
-      if (status && (force || !scheduleDirty)) {
+      if (status && (force || !pullDirty)) {
         const c = status.config;
         setMode((c.mode as typeof mode) || "off");
         setEveryDays(Number(c.schedule_every_days ?? 1) || 1);
@@ -138,6 +130,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
         setTimeOfDay(String(c.schedule_time ?? ""));
         const rule = status.triggers?.schedule;
         setPullNext(rule?.enabled ? (rule.next_run || rule.schedule || "") : "");
+
       }
       if (retrain && (force || !scheduleDirty)) {
         setTrigger(retrain.trigger ?? "pull");
@@ -375,10 +368,8 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
         </span>
       </div>
 
-      {/* ---- SECOND ROW: this tab's own schedule ---- */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-hairline pt-1.5 text-xs">
-        {scope === "dp" ? (
-          <>
+      {/* Scheduling belongs to Multi-Auto Training. */}
+      {scope === "at" && <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-hairline pt-1.5 text-xs">
             <span className="font-medium text-ink">PULL SCHEDULE</span>
             <div className="flex overflow-hidden rounded-md border border-black/15">
               {([
@@ -390,7 +381,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                   key={value}
                   type="button"
                   disabled={!!busy}
-                  onClick={() => { setMode(value); setScheduleDirty(true); }}
+                  onClick={() => { setMode(value); setPullDirty(true); }}
                   className={`px-2.5 py-1 font-medium disabled:opacity-40 ${
                     mode === value
                       ? "bg-accent text-white"
@@ -412,7 +403,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                     value={everyDays}
                     onChange={(e) => {
                       setEveryDays(Number(e.target.value) || 1);
-                      setScheduleDirty(true);
+                      setPullDirty(true);
                     }}
                   />
                   day(s) at
@@ -420,7 +411,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                     className="tabular w-16 rounded border border-black/15 bg-page px-1 py-1"
                     placeholder="18:33"
                     value={timeOfDay}
-                    onChange={(e) => { setTimeOfDay(e.target.value); setScheduleDirty(true); }}
+                    onChange={(e) => { setTimeOfDay(e.target.value); setPullDirty(true); }}
                   />
                   SGT
                 </label>
@@ -430,12 +421,12 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                 <div className="flex items-center gap-2 text-ink-muted">
                   <label className="flex items-center gap-1">
                     <input type="radio" name="pull-count-from" checked={countFrom === "today"}
-                      onChange={() => { setCountFrom("today"); setScheduleDirty(true); }} />
+                      onChange={() => { setCountFrom("today"); setPullDirty(true); }} />
                     every {everyDays} day(s)
                   </label>
                   <label className="flex items-center gap-1">
                     <input type="radio" name="pull-count-from" checked={countFrom === "date"}
-                      onChange={() => { setCountFrom("date"); setScheduleDirty(true); }} />
+                      onChange={() => { setCountFrom("date"); setPullDirty(true); }} />
                     every {everyDays} day(s) from
                   </label>
                   <input
@@ -444,31 +435,31 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                     className="tabular rounded border border-black/15 bg-page px-1 py-0.5 disabled:opacity-40"
                     value={startDate}
                     disabled={countFrom !== "date"}
-                    onChange={(e) => { setStartDate(e.target.value); setScheduleDirty(true); }}
+                    onChange={(e) => { setStartDate(e.target.value); setPullDirty(true); }}
                   />
                 </div>
               </>
             )}
-            {scheduleDirty ? (
+            {pullDirty ? (
               <button
                 type="button"
                 disabled={!!busy}
-                onClick={() => void run("Apply", async () => {
+                onClick={() => void run("Apply pull", async () => {
                   const res = await setTrack2PullMode(mode, {
                     everyDays, timeOfDay: mode === "schedule" ? timeOfDay : "",
                     from: countFrom, startDate,
                   });
-                  setScheduleDirty(false);
+                  setPullDirty(false);
                   setNote(res.problems?.length
                     ? res.problems.join(" ")
                     : `Pull is now ${mode === "schedule"
                         ? `every ${everyDays} day(s) at ${timeOfDay} SGT${
                             countFrom === "date" && startDate ? ` from ${startDate}` : ""}` : mode}.`);
-                  await refresh(true);
+                  await refresh();
                 })}
                 className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40"
               >
-                {busy === "Apply" ? "Applying..." : "Apply"}
+                {busy === "Apply pull" ? "Applying..." : "Apply pull schedule"}
               </button>
             ) : pullNext ? (
               <span className="tabular text-ink-muted">
@@ -490,9 +481,8 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                 Training&rsquo;s own schedule
               </span>
             )}
-          </>
-        ) : (
-          <>
+      </div>}
+      {scope === "at" && <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-hairline pt-1.5 text-xs">
             <span className="font-medium text-ink">TRAINING SCHEDULE</span>
             <div className="flex overflow-hidden rounded-md border border-black/15">
               {([
@@ -577,8 +567,8 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
             )}
             {trigger === "pull" && !pullOn && (
               <span className="text-critical">
-                Data Preparation&rsquo;s pull is off, so nothing will train &mdash;
-                turn the pull on there, or pick &ldquo;On its own schedule&rdquo;
+                The data pull is off, so nothing will train &mdash;
+                enable the pull schedule above, or pick &ldquo;On its own schedule&rdquo;
               </span>
             )}
             {trigger === "pull" && mode === "schedule" && (
@@ -634,12 +624,10 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                 )}
               </>
             )}
-          </>
-        )}
-      </div>
+      </div>}
 
       {/* ---- THIRD ROW: what the chain is doing right now ---- */}
-      <Track2ChainStatusBar />
+      {scope === "at" && <Track2ChainStatusBar />}
       {/* Training spend belongs with the training schedule. */}
       {scope === "at" && <Track2TrainingCostToday />}
     </div>

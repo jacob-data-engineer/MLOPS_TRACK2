@@ -2982,13 +2982,13 @@ SCOPES = {
         "training_root", "eval_root", "week_cutoff", "week_anchor",
         "images_subpath", "labels_subpath", "week_prefix", "week_length_days",
         "auto_create_weeks", "first_week_takes_all", "week_by",
-        "mode", "schedule_expression", "schedule_every_days", "schedule_from",
-        "schedule_start_date", "schedule_time",
         "image_extensions", "label_extensions", "overwrite",
         "retention", "golden_set", "dataset_assemble", "auto_training",
         "sql_explorer", "central_store", "catalog_export", "catalog_pt_metadata", "catalog_export_destination",
     ),
     "at": (
+        "mode", "schedule_expression", "schedule_every_days", "schedule_from",
+        "schedule_start_date", "schedule_time",
         "default_detector", "default_training", "default_source",
         "default_version", "data_source", "default_dataset",
         "last_pull_dataset", "import_checkpoint", "freeze_on_run",
@@ -3275,7 +3275,7 @@ def reset_to_defaults(scope: str = "") -> dict:
                                if (k in DP_CARDS) != (scope == "dp")}
         fresh[f"settings_file_{scope}"] = ""
         merged = write_config(fresh)
-        if scope == "at":
+        if scope == "dp":
             return {"config": merged, "problems": []}
         problems: list = []
         try:
@@ -3415,16 +3415,16 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True,
             update["settings_file"] = name
         merged = write_config(update)
 
-        if scope == "at":
-            # Nothing to re-arm: the training clock is read on every tick,
-            # and the pull's rules belong to the other tab.
+        if merged.get("picked"):
+            merged = write_config({"sources": sources_from_picked(merged)})
+
+        # Data recipes do not own clocks. Older AT files have no pull mode;
+        # preserve the live schedule when loading those files as well.
+        if scope == "dp" or (scope == "at" and "mode" not in config):
             return {"name": name, "saved_at": body.get("saved_at", ""),
                     "config": config, "applied": True, "scope": scope,
                     "mode": str(merged.get("mode") or "off"),
                     "sources": len(merged.get("sources") or []), "problems": []}
-
-        if merged.get("picked"):
-            merged = write_config({"sources": sources_from_picked(merged)})
 
         try:
             applied_trigger = set_mode(

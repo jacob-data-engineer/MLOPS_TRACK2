@@ -50,6 +50,7 @@ def test_training_file_roundtrip_preserves_edited_recipe(tmp_path, monkeypatch):
     saved = pc.scope_slice(live, "at")
     (tmp_path / "training_AT.json").write_text(json.dumps({"config": saved}))
     live["dataset_assemble"] = {}
+    monkeypatch.setattr(pc, "set_mode", lambda **kw: {"problems": []})
     pc.load_settings_file(name="training_AT", scope="at", apply=True)
     assert live["dataset_assemble"]["train_sources"] == [{"prefix": "edited"}]
     assert live["mode"] == "off"

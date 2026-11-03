@@ -2235,12 +2235,6 @@ export interface Track2PullConfig {
   settings_file_dp?: string;
   settings_file_at?: string;
   training_data_preparation?: { name: string; saved_at: string; config: Record<string, unknown> };
-  /** The last build Assemble's "Scheduled" made after a pull. A result,
-   * written by the server; never saved in a settings file. */
-  assemble_schedule_last?: {
-    run_id?: string; ok?: boolean; at?: string; folder?: string;
-    snapshot_id?: string; detail?: string;
-  };
   default_dataset?: {
     folder?: string; snapshot_id?: string; files?: number;
     set_by?: string;

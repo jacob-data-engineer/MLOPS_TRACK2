@@ -73,9 +73,3 @@ def test_it_is_a_saved_setting():
     assert ConfigRequest(schedule_from="date", schedule_start_date="2026-10-01").model_dump(
         exclude_none=True) == {"schedule_from": "date", "schedule_start_date": "2026-10-01"}
     assert ModeRequest(mode="schedule", schedule_from="date").schedule_from == "date"
-
-
-def test_the_bar_has_the_radio_and_the_date():
-    bar = (ROOT / "web" / "src" / "components" / "Track2PinnedBar.tsx").read_text(encoding="utf-8")
-    assert 'name="pull-count-from"' in bar and 'type="date"' in bar
-    assert "from: countFrom, startDate," in bar
