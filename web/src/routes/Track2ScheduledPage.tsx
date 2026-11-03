@@ -219,9 +219,9 @@ export function Track2ScheduledPage() {
         <span className="text-sm font-normal text-ink-muted">- prototype</span>
       </h1>
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-        Every pull and training run the clocks will start, in Singapore time.
+        Pull and training timing from Multi-Auto Training only, in Singapore time.
         Only the <strong>loaded</strong> settings file actually runs; any other
-        saved file picked below is shown as what it would run if it were
+        saved Multi-Auto Training (_AT) file picked below is shown as what it would run if it were
         loaded. Hover over a slot to see what that run trains on. Nothing
         here changes a setting; they are all on{" "}
         <Link to="/track2/multi-auto-training" className="underline decoration-dotted underline-offset-2 hover:text-ink">
@@ -240,13 +240,13 @@ export function Track2ScheduledPage() {
 
       {data && (
         <>
-          <Card title="Settings files" collapsible={false}>
+          <Card title="Multi-Auto Training schedules" collapsible={false}>
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
               <span className="text-ink-muted">Show beside the loaded file:</span>
               <label className="flex items-center gap-1 font-medium text-ink">
                 <input type="checkbox" checked={picks === "*"}
                        onChange={(e) => choose(e.target.checked ? "*" : [])} />
-                All saved files
+                All saved training files
               </label>
               {savedOthers.map((name) => (
                 <label key={name} className="flex items-center gap-1 text-ink">
@@ -268,7 +268,8 @@ export function Track2ScheduledPage() {
                 <thead className="text-ink-muted">
                   <tr>
                     <th className="py-1 pr-3 font-normal">File</th>
-                    <th className="py-1 pr-3 font-normal">Next training run</th>
+                    <th className="py-1 pr-3 font-normal">Next pull (SGT)</th>
+                    <th className="py-1 pr-3 font-normal">Next training run (SGT)</th>
                     <th className="py-1 pr-3 font-normal">Kind of run (data it trains on)</th>
                   </tr>
                 </thead>
@@ -287,6 +288,9 @@ export function Track2ScheduledPage() {
                         </span>
                         {f.error && <p className="text-critical">{f.error}</p>}
                         {f.notes.map((n) => <p key={n} className="text-ink-muted">{n}</p>)}
+                      </td>
+                      <td className="tabular py-1.5 pr-3 text-ink">
+                        {f.next_pull ? formatDayTime(f.next_pull.at) : <span className="text-ink-muted">none scheduled</span>}
                       </td>
                       <td className="tabular py-1.5 pr-3 text-ink">
                         {f.next ? formatDayTime(f.next.at) : <span className="text-ink-muted">none scheduled</span>}

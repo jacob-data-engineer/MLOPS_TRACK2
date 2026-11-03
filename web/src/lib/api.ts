@@ -3057,6 +3057,7 @@ export interface Track2ScheduledFile {
   error: string;
   sources: string[];
   next: Track2ScheduledEvent | null;
+  next_pull: Track2ScheduledEvent | null;
   notes: string[];
 }
 

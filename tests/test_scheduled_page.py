@@ -77,25 +77,37 @@ def test_the_page_is_routed_and_in_the_nav_under_training():
 
 
 def test_saved_files_are_shown_beside_the_live_one_and_marked(monkeypatch):
-    live = _config(settings_file="live_one")
-    other = _config(settings_file="other", schedule_time="09:00",
-                    retention={"use_golden": False})
+    live = _config(settings_file_at="live_one_AT")
+    other = _config(settings_file="other_AT", schedule_time="09:00",
+                    training_data_preparation={"config": {"retention": {"use_golden": False}}})
+    other.pop("dataset_assemble")  # Saved AT files carry data inside the recipe.
     monkeypatch.setattr(tr.pc, "read_config", lambda: live)
     monkeypatch.setattr(tr.pc, "read_settings_file",
-                        lambda name: other if name == "other" else (_ for _ in ()).throw(ValueError("No settings file called x.")))
+                        lambda name: other if name == "other_AT" else (_ for _ in ()).throw(ValueError("No settings file called x.")))
     monkeypatch.setattr(tr.pc, "list_settings_files",
-                        lambda: {"files": [{"name": "live_one"}, {"name": "other"}, {"name": "x"}]})
-    out = tr.scheduled_for_files(["live_one", "other", "x"], days=14, now=NOW)
+                        lambda: {"files": [{"name": "live_one_AT"}, {"name": "other_AT"}, {"name": "x_AT"}]})
+    out = tr.scheduled_for_files(["live_one_AT", "other_AT", "x_AT"], days=14, now=NOW)
     names = [(f["name"], f["live"]) for f in out["files"]]
-    assert names == [("live_one", True), ("other", False), ("x", False)]
+    assert names == [("live_one_AT", True), ("other_AT", False), ("x_AT", False)]
     assert out["files"][2]["error"]
-    assert {e["file"] for e in out["events"]} == {"live_one", "other"}
-    assert all(e["live"] == (e["file"] == "live_one") for e in out["events"])
+    assert {e["file"] for e in out["events"]} == {"live_one_AT", "other_AT"}
+    assert all(e["live"] == (e["file"] == "live_one_AT") for e in out["events"])
     assert "Golden set" not in out["files"][1]["sources"]
-    assert out["available"] == ["live_one", "other", "x"]
+    assert out["available"] == ["live_one_AT", "other_AT", "x_AT"]
 
 
 def test_the_page_offers_all_files_and_a_hover_popup():
     page = (ROOT / "web" / "src" / "routes" / "Track2ScheduledPage.tsx").read_text(encoding="utf-8")
-    assert "All saved files" in page and "group-hover:block" in page
+    assert "All saved training files" in page and "group-hover:block" in page
     assert "Not loaded -- would run if this file were loaded" in page
+
+
+def test_data_preparation_and_legacy_files_are_excluded(monkeypatch):
+    monkeypatch.setattr(tr.pc, "read_config", lambda: _config(settings_file_at="live_AT", settings_file="old_DP"))
+    monkeypatch.setattr(tr.pc, "list_settings_files", lambda: {"files": [{"name": "data_DP"}, {"name": "legacy"}, {"name": "live_AT"}]})
+    monkeypatch.setattr(tr.pc, "read_settings_file", lambda name: (_ for _ in ()).throw(AssertionError("Excluded file read")))
+    out = tr.scheduled_for_files(["data_DP", "legacy"], days=14, now=NOW)
+    assert out["available"] == ["live_AT"]
+    assert [f["name"] for f in out["files"]] == ["live_AT"]
+    assert out["settings_file"] == "live_AT"
+    assert out["files"][0]["next_pull"] == out["next_pull"]

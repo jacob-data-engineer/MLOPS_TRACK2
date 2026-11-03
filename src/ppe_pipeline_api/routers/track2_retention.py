@@ -1173,34 +1173,40 @@ def scheduled_for_files(names: list, *, days: int = 42,
     actually runs.
     """
     live_config = pc.read_config()
-    live_name = str(live_config.get("settings_file") or "")
+    live_name = str(live_config.get("settings_file_at") or "")
+    live_config = {**live_config, "settings_file": live_name}
     out = scheduled_events(live_config, days=days, now=now)
-    blocks = [{"name": live_name or "(live settings)", "live": True, "error": "",
-               "sources": out["sources"], "next": out["next"], "notes": out["notes"]}]
+    blocks = [{"name": live_name or "(Multi-Auto Training live settings)", "live": True, "error": "",
+               "sources": out["sources"], "next": out["next"], "next_pull": out["next_pull"], "notes": out["notes"]}]
     for ev in out["events"]:
         ev.update(file=blocks[0]["name"], live=True)
     events = list(out["events"])
 
     for name in names:
-        if not name or name == live_name:
+        if not name or name == live_name or pc.scope_of(name) != "at":
             continue
         try:
-            got = scheduled_events(pc.read_settings_file(name), days=days, now=now)
+            saved = pc.scope_slice(pc.read_settings_file(name), "at")
+            preview = {**live_config, **saved, "settings_file": name}
+            recipe = (saved.get("training_data_preparation") or {}).get("config") or {}
+            preview.update({key: recipe[key] for key in pc.TRAINING_DATA_KEYS if key in recipe})
+            got = scheduled_events(preview, days=days, now=now)
         except Exception as exc:                                  # noqa: BLE001
             blocks.append({"name": name, "live": False, "error": str(exc),
-                           "sources": [], "next": None, "notes": []})
+                           "sources": [], "next": None, "next_pull": None, "notes": []})
             continue
         for ev in got["events"]:
             ev.update(file=name, live=False)
         events += got["events"]
         blocks.append({"name": name, "live": False, "error": "", "sources": got["sources"],
-                       "next": got["next"], "notes": got["notes"]})
+                       "next": got["next"], "next_pull": got["next_pull"], "notes": got["notes"]})
 
     events.sort(key=lambda e: (e["at"], not e["live"], e["file"], e["kind"] != "pull"))
     out["events"] = events
     out["files"] = blocks
     try:
-        out["available"] = [f["name"] for f in pc.list_settings_files().get("files") or []]
+        out["available"] = [f["name"] for f in pc.list_settings_files().get("files") or []
+                            if pc.scope_of(f["name"]) == "at"]
     except Exception:                                             # noqa: BLE001
         out["available"] = []
     return out
@@ -1218,7 +1224,8 @@ def get_scheduled(days: int = 42, files: str = "",
     wanted = [n.strip() for n in files.split(",") if n.strip()]
     if wanted == ["*"]:
         try:
-            wanted = [f["name"] for f in pc.list_settings_files().get("files") or []]
+            wanted = [f["name"] for f in pc.list_settings_files().get("files") or []
+                            if pc.scope_of(f["name"]) == "at"]
         except Exception:                                         # noqa: BLE001
             wanted = []
     return scheduled_for_files(wanted, days=days)
