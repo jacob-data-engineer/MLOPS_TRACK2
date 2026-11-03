@@ -17,6 +17,7 @@ import {
   getTrack2CatalogVersions,
   getTrack2SqlPreviews,
   startTrack2CatalogExport,
+  stopTrack2CatalogExport,
   type Track2CatalogExport,
   type Track2CatalogFile,
   type Track2CatalogRun,
@@ -77,7 +78,7 @@ export function Track2CatalogPage() {
   }, []);
 
   // While an export is building, look again every 10 s.
-  const building = exportsList?.some((e) => e.state === "building");
+  const building = exportsList?.some((e) => e.state === "building" || e.state === "stopping");
   useEffect(() => {
     if (!building) return;
     const timer = window.setInterval(() => {
@@ -476,6 +477,16 @@ function ExportsCard({ exportsList, destination, onDestination, onExported }: {
     } finally { setBusy(false); }
   }
 
+  async function stop(id: string) {
+    setError(""); setBusy(true);
+    try {
+      await stopTrack2CatalogExport(id);
+      onExported();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Could not stop the export.");
+    } finally { setBusy(false); }
+  }
+
   function download(id: string) {
     setError("");
     getTrack2CatalogExportUrl(id)
@@ -505,8 +516,9 @@ function ExportsCard({ exportsList, destination, onDestination, onExported }: {
                 <tr key={e.id} className="border-b border-hairline/50">
                   <td className="px-2 py-1 font-medium text-ink">{e.label}</td>
                   <td className={`px-2 py-1 ${e.state === "failed" || e.missing > 0 ? "text-critical" : ""}`} title={e.error ?? ""}>
-                    {e.state === "building"
-                      ? <span className="inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" />building</span>
+                    {e.state === "building" || e.state === "stopping"
+                      ? <span className="inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" />{e.state === "stopping" ? "Stopping…" : "building"}</span>
+                      : e.state === "cancelled" ? "Stopped"
                       : e.state === "partial" || (e.state === "ready" && e.missing > 0) ? "Incomplete" : e.state}
                     {e.state === "failed" && e.error ? ` -- ${e.error}` : ""}
                   </td>
@@ -533,7 +545,12 @@ function ExportsCard({ exportsList, destination, onDestination, onExported }: {
                         <Download size={12} /> {e.missing ? "Download incomplete ZIP" : "Download ZIP"}
                       </button>
                     )}
-                    {(e.run_id || e.version_id) && <button type="button" className="mt-1 block underline disabled:opacity-40"
+                    {(e.state === "building" || e.state === "stopping") && <button type="button"
+                      className="rounded-md border border-black/15 bg-page px-2 py-1 font-medium disabled:opacity-40"
+                      disabled={busy || e.state === "stopping"} onClick={() => void stop(e.id)}>
+                      {e.state === "stopping" ? "Stopping…" : "Stop export"}
+                    </button>}
+                    {e.state !== "building" && e.state !== "stopping" && (e.run_id || e.version_id) && <button type="button" className="mt-1 block underline disabled:opacity-40"
                       disabled={busy || (destination.destination === "s3" && !destination.bucket.trim())}
                       onClick={() => void exportAgain(e)}>
                       {destination.destination === "s3" ? (destination.format === "zip" ? "Export ZIP to S3" : "Copy files to S3 folder") : "Prepare new ZIP"}

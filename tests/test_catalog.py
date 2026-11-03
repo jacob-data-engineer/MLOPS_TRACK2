@@ -156,6 +156,12 @@ class _S3Zip:
     def put_object(self, Bucket, Key, Body):
         self.objects[(Bucket, Key)] = Body
 
+    def abort_multipart_upload(self, Bucket, Key, UploadId):
+        self.parts.pop(Key, None)
+
+    def delete_object(self, Bucket, Key):
+        self.objects.pop((Bucket, Key), None)
+
 
 def test_an_export_is_a_valid_zip_in_the_training_layout(monkeypatch):
     import io, zipfile
@@ -255,6 +261,7 @@ def test_the_repair_cuts_by_position_not_by_pattern():
 
 
 def test_exports_write_real_bytes_to_both_destinations(monkeypatch):
+    monkeypatch.setattr(cv, "_rows", lambda *a: [{"state": "building"}])
     import io
     import threading
     import zipfile
@@ -331,6 +338,7 @@ def test_partial_zip_remains_downloadable(monkeypatch):
 
 
 def test_s3_write_failure_is_recorded_and_releases_slot(monkeypatch):
+    monkeypatch.setattr(cv, "_rows", lambda *a: [{"state": "building"}])
     import threading
     from botocore.exceptions import ClientError
 
@@ -347,4 +355,92 @@ def test_s3_write_failure_is_recorded_and_releases_slot(monkeypatch):
               None, "s3", "destination", "exports")
     assert "state = 'failed'" in results[-1][1]
     assert "AccessDenied" in results[-1][2][0]
+    assert slots.acquire(blocking=False)
+
+
+def test_stop_during_export_cleans_output_and_releases_slot(monkeypatch):
+    import threading
+    for fmt in ('zip', 'folder'):
+        s3 = _S3Zip({('source', 'a.jpg'): b'image'})
+        monkeypatch.setattr(cv.storage, 's3', s3)
+        monkeypatch.setattr(cv, '_rows', lambda *a: [{'state': 'building'}])
+        event = threading.Event()
+        cv._stop_events['cancel-test'] = event
+        original_fetch = cv._fetch
+        def fetch(uri):
+            body = original_fetch(uri)
+            event.set()
+            return body
+        with monkeypatch.context() as patch:
+            patch.setattr(cv, '_fetch', fetch)
+            slots = threading.BoundedSemaphore(1)
+            slots.acquire()
+            patch.setattr(cv, '_building', slots)
+            results = []
+            patch.setattr(cv, '_finish', lambda *a: results.append(a))
+            cv._build('cancel-test', 'run', 'r', 'run-1', [('images/train/a.jpg', 's3://source/a.jpg', {})], None, 's3', 'dest', 'exports', fmt)
+            assert "state = 'cancelled'" in results[-1][1]
+            assert not s3.parts
+            assert not any(bucket == 'dest' for bucket, key in s3.objects)
+            assert slots.acquire(blocking=False)
+            assert 'cancel-test' not in cv._stop_events
+
+
+def test_stop_wins_final_publication_race(monkeypatch):
+    import threading
+    s3 = _S3Zip({('source', 'a.jpg'): b'image'})
+    monkeypatch.setattr(cv.storage, 's3', s3)
+    monkeypatch.setattr(cv, '_rows', lambda *a: [{'state': 'building'}])
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(cv, '_building', slots)
+    results = []
+    def finish(*args):
+        results.append(args)
+        if 'AND state' in args[1]:
+            return False
+    monkeypatch.setattr(cv, '_finish', finish)
+    cv._build('race', 'run', 'r', 'run-1', [('images/train/a.jpg', 's3://source/a.jpg', {})], None, 'local', 'dest', 'exports', 'zip')
+    assert "state = 'cancelled'" in results[-1][1]
+    assert not any(bucket == 'dest' for bucket, key in s3.objects)
+
+
+def test_cancel_cleanup_failure_is_visible(monkeypatch):
+    import threading
+    class DeniedAbort(_S3Zip):
+        def abort_multipart_upload(self, **kwargs):
+            raise RuntimeError('abort denied')
+    s3 = DeniedAbort({})
+    monkeypatch.setattr(cv.storage, 's3', s3)
+    monkeypatch.setattr(cv, '_rows', lambda *a: [{'state': 'building'}])
+    event = threading.Event()
+    cv._stop_events['denied-stop'] = event
+    def fetch(uri):
+        event.set()
+        return b'image'
+    monkeypatch.setattr(cv, '_fetch', fetch)
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(cv, '_building', slots)
+    results = []
+    monkeypatch.setattr(cv, '_finish', lambda *a: results.append(a))
+    cv._build('denied-stop','run','r','run-1',[('images/a.jpg','s3://source/a.jpg',{})],None,'local','dest','exports','zip')
+    assert "state = 'failed'" in results[-1][1]
+    assert 'cleanup failed: abort denied' in results[-1][2][0]
+    assert slots.acquire(blocking=False)
+
+
+def test_stop_before_build_creates_no_upload(monkeypatch):
+    import threading
+    s3 = _S3Zip({})
+    monkeypatch.setattr(cv.storage, 's3', s3)
+    monkeypatch.setattr(cv, '_rows', lambda *a: [{'state': 'stopping'}])
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(cv, '_building', slots)
+    results=[]
+    monkeypatch.setattr(cv, '_finish', lambda *a: results.append(a))
+    cv._build('early-stop','run','r','run-1',[],None,'local','dest','exports','zip')
+    assert "state = 'cancelled'" in results[-1][1]
+    assert not s3.parts
     assert slots.acquire(blocking=False)

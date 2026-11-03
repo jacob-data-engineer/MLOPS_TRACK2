@@ -23,6 +23,7 @@ import io
 import json
 import re
 import threading
+import time
 import uuid
 import zipfile
 from botocore.exceptions import ClientError
@@ -304,11 +305,36 @@ def _export_bucket() -> tuple[str, str]:
     return bucket, f"{folder}/_exports" if folder else "_exports"
 
 
+class _ExportStopped(Exception):
+    pass
+
+
+_stop_events: dict[str, threading.Event] = {}
+
+
+def stop_export(export_id: str) -> dict:
+    conn = catalog.connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE exports SET state = 'stopping' WHERE id = %s AND state = 'building'", (export_id,))
+        cur.execute("SELECT state FROM exports WHERE id = %s", (export_id,))
+        row = cur.fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+    if not row:
+        raise ValueError("Export not found.")
+    if row[0] == "stopping" and export_id in _stop_events:
+        _stop_events[export_id].set()
+    return {"id": export_id, "state": row[0]}
+
+
 class _ObjectWriter:
     """Write actual files into a unique S3 export folder, in the ZIP layout."""
 
     def __init__(self, bucket: str, prefix: str):
         self.bucket, self.prefix, self.size = bucket, prefix, 0
+        self.keys = []
 
     def __enter__(self):
         return self
@@ -322,6 +348,7 @@ class _ObjectWriter:
         if isinstance(body, str):
             body = body.encode("utf-8")
         storage.s3.put_object(Bucket=self.bucket, Key=f"{self.prefix}/{path}", Body=body)
+        self.keys.append(f"{self.prefix}/{path}")
         self.size += len(body)
 
 
@@ -341,7 +368,29 @@ def _destination(destination: str, bucket: str, prefix: str) -> tuple[str, str]:
 def _build(export_id: str, kind: str, ident: str, label: str, entries: list, names,
            destination: str = "local", bucket: str = "", prefix: str = "", format: str | None = None) -> None:
     sink = None
+    output = None
+    completed = False
+    event = _stop_events.setdefault(export_id, threading.Event())
+    checked = 0.0
+
+    def check(force=False):
+        nonlocal checked
+        if event.is_set():
+            raise _ExportStopped()
+        if force or time.monotonic() - checked >= 1:
+            rows = _rows("SELECT state FROM exports WHERE id = %s", (export_id,))
+            if not rows or rows[0]["state"] != "building":
+                event.set()
+                raise _ExportStopped()
+            checked = time.monotonic()
+
+    def fetch(entry):
+        if event.is_set():
+            raise _ExportStopped()
+        return _fetch(entry[1])
+
     try:
+        check(True)
         if not bucket:
             bucket, prefix = _export_bucket()
         folder = "/".join(p for p in (prefix, f"{label}-{export_id}") if p)
@@ -363,8 +412,10 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
             wanted = [e for e in entries if e[0]]
             with ThreadPoolExecutor(max_workers=FETCHERS) as pool:
                 for start in range(0, len(wanted), FETCHERS * 4):
+                    check()
                     chunk = wanted[start:start + FETCHERS * 4]
-                    for (path, uri, row), body in zip(chunk, pool.map(lambda e: _fetch(e[1]), chunk)):
+                    for (path, uri, row), body in zip(chunk, pool.map(fetch, chunk)):
+                        check()
                         if body is None:
                             missing += 1
                             writer.writerow({**row, "missing": True})
@@ -376,6 +427,7 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                 if not path:
                     writer.writerow(row)
             numbered = _numbered(names)
+            check(True)
             if numbered:
                 lines = "\n".join(f"  {k}: {v}" for k, v in sorted(numbered.items()))
                 val_path = "eval/images/val" if any(p.startswith("eval/images/val/") for p, _, _ in entries) else "images/val"
@@ -383,23 +435,42 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                                          f"names:\n{lines}\n")
             zf.writestr("manifest.csv", manifest.getvalue())
         if sink:
+            check(True)
             sink.finish()
+            completed = True
+        check(True)
         state = "partial" if missing else "ready"
-        _finish(export_id, "UPDATE exports SET state = %s, finished_at = now(), zip_uri = %s,"
-                           " bytes = %s, files = %s, missing = %s, destination_uri = %s WHERE id = %s",
+        saved = _finish(export_id, "UPDATE exports SET state = %s, finished_at = now(), zip_uri = %s,"
+                           " bytes = %s, files = %s, missing = %s, destination_uri = %s WHERE id = %s AND state = 'building'",
                 (state, f"s3://{bucket}/{key}" if sink else None,
                  sink.size if sink else output.size, packed, missing,
                  f"s3://{bucket}/{key}" if sink else f"s3://{bucket}/{folder}/", export_id))
+        if saved is False:
+            raise _ExportStopped()
+    except _ExportStopped:
+        try:
+            if sink:
+                if completed:
+                    storage.s3.delete_object(Bucket=bucket, Key=key)
+                else:
+                    storage.s3.abort_multipart_upload(Bucket=bucket, Key=key, UploadId=sink.upload)
+            elif isinstance(output, _ObjectWriter):
+                for written_key in output.keys:
+                    storage.s3.delete_object(Bucket=bucket, Key=written_key)
+            _finish(export_id, "UPDATE exports SET state = 'cancelled', finished_at = now(), files = 0, bytes = 0, zip_uri = NULL WHERE id = %s", (export_id,))
+        except Exception as exc:
+            _finish(export_id, "UPDATE exports SET state = 'failed', finished_at = now(), error = %s WHERE id = %s", (f"Stopped; cleanup failed: {exc}", export_id))
     except Exception as exc:                                       # noqa: BLE001
         if sink:
             sink.abort()
         _finish(export_id, "UPDATE exports SET state = 'failed', finished_at = now(), error = %s"
                            " WHERE id = %s", (f"{type(exc).__name__}: {exc}", export_id))
     finally:
+        _stop_events.pop(export_id, None)
         _building.release()
 
 
-def _finish(export_id: str, sql: str, params: tuple) -> None:
+def _finish(export_id: str, sql: str, params: tuple) -> bool | None:
     """Record how an export ended, on a FRESH connection: one held idle for
     a 40-minute build can be gone by the end, and the row would then say
     'building' for ever. Retried once; printed if it still fails."""
@@ -407,9 +478,10 @@ def _finish(export_id: str, sql: str, params: tuple) -> None:
         try:
             conn = catalog.connect()
             try:
-                conn.cursor().execute(sql, params)
+                cur = conn.cursor()
+                cur.execute(sql, params)
                 conn.commit()
-                return
+                return cur.rowcount > 0
             finally:
                 conn.close()
         except Exception as exc:                                   # noqa: BLE001

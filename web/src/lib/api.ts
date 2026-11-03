@@ -3813,7 +3813,7 @@ export interface Track2CatalogExport {
   label: string;
   version_id: string | null;
   run_id: string | null;
-  state: "building" | "ready" | "partial" | "failed";
+  state: "building" | "stopping" | "cancelled" | "ready" | "partial" | "failed";
   destination: "local" | "s3";
   destination_uri: string | null;
   format: "zip" | "folder";
@@ -3890,6 +3890,10 @@ export function startTrack2CatalogExport(kind: "run" | "version", id: string,
 
 export function getTrack2CatalogExports(): Promise<{ exports: Track2CatalogExport[] }> {
   return apiGet("/track2/catalog/exports");
+}
+
+export function stopTrack2CatalogExport(exportId: string): Promise<{ id: string; state: string }> {
+  return apiPost(`/track2/catalog/exports/${encodeURIComponent(exportId)}/stop`, {});
 }
 
 /** A one-hour link to a finished zip; the browser downloads it from S3. */

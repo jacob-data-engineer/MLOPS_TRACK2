@@ -119,3 +119,8 @@ def list_exports(session=Depends(require_session)) -> dict:
 def export_download(export_id: str, session=Depends(require_session)) -> dict:
     """A one-hour link to the zip."""
     return {"url": _guard(lambda: catalog_view.download_url(export_id))}
+
+
+@router.post("/exports/{export_id}/stop")
+def export_stop(export_id: str, session=Depends(require_session)) -> dict:
+    return _guard(lambda: catalog_view.stop_export(export_id))
