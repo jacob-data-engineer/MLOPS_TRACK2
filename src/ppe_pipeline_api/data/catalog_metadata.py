@@ -82,7 +82,18 @@ def describe(kind: str, ident: str) -> dict:
                             "Credentials are redacted. Registry status is a recorded snapshot."]})
 
 
-def embed(checkpoint: bytes, metadata: dict, manifest: str) -> bytes:
+def select_groups(metadata: dict, selected: list[str]) -> dict:
+    unknown = set(selected) - set(metadata["groups"])
+    if unknown:
+        raise ValueError("Unknown metadata categories: " + ", ".join(sorted(unknown)))
+    # Raw records would reintroduce categories the user explicitly unchecked.
+    return {"schema": SCHEMA, "label": metadata["label"], "captured_at": metadata["captured_at"],
+            "groups": {k: v for k, v in metadata["groups"].items() if k in selected},
+            "selected_groups": selected, "unavailable": [k for k in metadata["unavailable"] if k in selected],
+            "notes": ["Only selected catalog categories are added. Existing model checkpoint contents are preserved."]}
+
+
+def embed(checkpoint: bytes, metadata: dict, manifest: str | None) -> bytes:
     """Append JSON/CSV under the checkpoint root; never deserialize model code."""
     stream = io.BytesIO(checkpoint)
     if not zipfile.is_zipfile(stream):
@@ -95,7 +106,8 @@ def embed(checkpoint: bytes, metadata: dict, manifest: str) -> bytes:
         if path in archive.namelist():
             raise ValueError("This checkpoint is already enriched; export from the original model.")
         archive.writestr(path, dumps(metadata))
-        archive.writestr(roots[0] + "extra/track2_manifest.csv", manifest)
+        if manifest is not None:
+            archive.writestr(roots[0] + "extra/track2_manifest.csv", manifest)
     return stream.getvalue()
 
 

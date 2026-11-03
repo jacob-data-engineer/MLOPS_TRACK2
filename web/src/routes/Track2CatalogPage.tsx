@@ -20,6 +20,9 @@ import {
   startTrack2CatalogExport,
   stopTrack2CatalogExport,
   exportTrack2CatalogWeights,
+  getTrack2CatalogMetadata,
+  getTrack2PullControl,
+  saveTrack2PullConfig,
   type Track2CatalogExport,
   type Track2CatalogFile,
   type Track2CatalogRun,
@@ -321,6 +324,32 @@ function FilesCard({ picked, emptyMessage, onExported, destination, onDestinatio
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [weightsMessage, setWeightsMessage] = useState("");
+  const [metadataOptions, setMetadataOptions] = useState<Record<string, unknown> | null>(null);
+  const [metadataSelected, setMetadataSelected] = useState<string[]>([]);
+  const [metadataReady, setMetadataReady] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setMetadataReady(false);
+    if (picked?.kind !== "run") return;
+    Promise.all([getTrack2CatalogMetadata("run", picked.run.run_id), getTrack2PullControl()])
+      .then(([info, settings]) => {
+        if (!active) return;
+        setMetadataOptions(info.groups);
+        const available = Object.keys(info.groups).filter((name) => !info.unavailable.includes(name));
+        setMetadataSelected((settings.config.catalog_pt_metadata?.selected_groups ?? available).filter((name) => available.includes(name)));
+        setMetadataReady(true);
+      }).catch((err) => { if (active) setError(err instanceof ApiError ? err.detail : "Could not load metadata choices. Refresh to retry."); });
+    return () => { active = false; };
+  }, [picked?.kind === "run" ? picked.run.run_id : ""]);
+
+  async function selectMetadata(names: string[]) {
+    setBusy("metadata"); setError("");
+    try {
+      await saveTrack2PullConfig({ catalog_pt_metadata: { selected_groups: names } });
+      setMetadataSelected(names);
+    } catch (err) { setError(err instanceof ApiError ? err.detail : "Could not save metadata choices."); }
+    finally { setBusy(""); }
+  }
 
   async function exportWeights(target: "local" | "s3") {
     if (picked?.kind !== "run") return;
@@ -328,6 +357,7 @@ function FilesCard({ picked, emptyMessage, onExported, destination, onDestinatio
     try {
       const result = await exportTrack2CatalogWeights(picked.run.run_id, {
         destination: target, bucket: destination.bucket, prefix: destination.prefix,
+        metadata_groups: metadataSelected,
       });
       if (result.url) {
         const link = document.createElement("a");
@@ -403,14 +433,33 @@ function FilesCard({ picked, emptyMessage, onExported, destination, onDestinatio
       {picked?.kind === "run" && <div className="mb-3 rounded border border-hairline p-3 text-xs">
         <p className="mb-2 font-medium">Trained model (.pt) — Run {picked.run.run_number}</p>
         <p className="mb-2 text-ink-muted">Export this run’s published model checkpoint. Images and labels use the ZIP or folder export below.</p>
+        <p className="mb-2 font-medium">Choose metadata to add to the .pt file</p>
+        <div className="mb-2 flex gap-3">
+          <button type="button" className="underline disabled:opacity-40" disabled={!metadataReady || !!busy}
+            onClick={() => void selectMetadata(Object.entries(metadataOptions || {}).filter(([, value]) => value && typeof value === "object" && Object.keys(value).length > 0).map(([name]) => name))}>Select all available</button>
+          <button type="button" className="underline disabled:opacity-40" disabled={!metadataReady || !!busy} onClick={() => void selectMetadata([])}>Clear all</button>
+          <span>{metadataSelected.length} selected</span>
+        </div>
+        <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {Object.entries(metadataOptions || {}).map(([name, value]) => {
+            const available = !!value && typeof value === "object" && Object.keys(value).length > 0;
+            return <label key={name} className={`flex items-start gap-2 ${available ? "" : "text-ink-muted"}`}>
+              <input type="checkbox" checked={metadataSelected.includes(name)} disabled={!available || !!busy || !metadataReady}
+                onChange={(e) => void selectMetadata(e.target.checked ? [...metadataSelected, name] : metadataSelected.filter((key) => key !== name))} />
+              <span>{name}{!available ? " — Not recorded" : ""}</span>
+            </label>;
+          })}
+        </div>
+        {!metadataReady && <p className="mb-2">Loading metadata choices…</p>}
+        <p className="mb-3 text-ink-muted">Selections are saved. Checked categories are embedded in a new model copy. Clear all exports the original checkpoint; existing model contents are preserved. These choices apply to the .pt buttons here.</p>
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className="rounded border border-black/15 bg-page px-3 py-1 font-medium disabled:opacity-40"
-            disabled={!!busy} onClick={() => void exportWeights("local")}>
+            disabled={!!busy || !metadataReady} onClick={() => void exportWeights("local")}>
             {busy === "pt" ? "Exporting…" : "Download .pt"}
           </button>
           {destination.destination === "s3" ? <button type="button"
             className="rounded border border-black/15 bg-page px-3 py-1 font-medium disabled:opacity-40"
-            disabled={!!busy || !destination.bucket.trim()} onClick={() => void exportWeights("s3")}>
+            disabled={!!busy || !metadataReady || !destination.bucket.trim()} onClick={() => void exportWeights("s3")}>
             Export .pt to selected S3 folder
           </button> : <span className="text-ink-muted">Choose S3 bucket above to copy the model to S3.</span>}
         </div>

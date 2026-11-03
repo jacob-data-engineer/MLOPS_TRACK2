@@ -583,7 +583,8 @@ def download_url(export_id: str) -> str:
                 "ResponseContentDisposition": f'attachment; filename="{rows[0]["label"]}.zip"'})
 
 
-def export_run_weights(run_id: str, *, destination: str = "local", bucket: str = "", prefix: str = "") -> dict:
+def export_run_weights(run_id: str, *, destination: str = "local", bucket: str = "", prefix: str = "",
+                       metadata_groups: list[str] | None = None) -> dict:
     """Export this run's published checkpoint, without loading a PyTorch pickle."""
     rows = _rows("SELECT run_number, record FROM training_runs WHERE run_id = %s", (run_id,))
     if not rows:
@@ -597,6 +598,29 @@ def export_run_weights(run_id: str, *, destination: str = "local", bucket: str =
     source_bucket, source_key = _split_uri(uri)
     storage.s3.head_object(Bucket=source_bucket, Key=source_key)
     filename = f"run-{rows[0]['run_number']}.pt"
+    if metadata_groups:
+        metadata = catalog_metadata.select_groups(catalog_metadata.describe("run", run_id), metadata_groups)
+        manifest = None
+        if "File provenance" in metadata_groups:
+            entries, _, _ = _plan("run", run_id)
+            out = io.StringIO()
+            writer = csv.DictWriter(out, fieldnames=["path", "source", "role", "split", "included", "reason"], extrasaction="ignore")
+            writer.writeheader()
+            for _, _, row in entries:
+                writer.writerow(row)
+            manifest = out.getvalue()
+            metadata["groups"]["File provenance"]["checksums"] = "Not calculated: dataset files are not fetched for a model-only export."
+        body = _fetch(uri)
+        if body is None:
+            raise ValueError("The published checkpoint file is missing.")
+        body = catalog_metadata.embed(body, metadata, manifest)
+        bucket, prefix = _destination(destination, bucket, prefix)
+        key = "/".join(p for p in (prefix, f"run-{rows[0]['run_number']}-{uuid.uuid4().hex[:12]}", filename) if p)
+        storage.s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/octet-stream")
+        if destination == "local":
+            return {"url": storage.s3.generate_presigned_url("get_object", ExpiresIn=3600,
+                    Params={"Bucket": bucket, "Key": key, "ResponseContentDisposition": f'attachment; filename="{filename}"'})}
+        return {"uri": f"s3://{bucket}/{key}"}
     if destination == "local":
         return {"url": storage.s3.generate_presigned_url(
             "get_object", ExpiresIn=3600, Params={"Bucket": source_bucket, "Key": source_key,

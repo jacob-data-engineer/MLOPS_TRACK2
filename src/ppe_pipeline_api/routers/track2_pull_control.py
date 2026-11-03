@@ -108,6 +108,7 @@ class ConfigRequest(BaseModel):
     # The central data store's bucket and folder (2026-10-29).
     central_store: dict | None = None
     catalog_export: dict | None = None
+    catalog_pt_metadata: dict | None = None
     # Which cards are open. Restored with everything else so a loaded
     # file puts the page back as it was left.
     card_state: dict | None = None

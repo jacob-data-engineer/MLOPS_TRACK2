@@ -109,12 +109,14 @@ class WeightsExportRequest(BaseModel):
     destination: str = "local"
     bucket: str = ""
     prefix: str = ""
+    metadata_groups: list[str] | None = None
 
 
 @router.post("/runs/{run_id}/weights/export")
 def export_run_weights(run_id: str, payload: WeightsExportRequest, session=Depends(require_session)) -> dict:
     return _guard(lambda: catalog_view.export_run_weights(
-        run_id, destination=payload.destination, bucket=payload.bucket, prefix=payload.prefix))
+        run_id, destination=payload.destination, bucket=payload.bucket, prefix=payload.prefix,
+        metadata_groups=payload.metadata_groups))
 
 
 @router.post("/exports")

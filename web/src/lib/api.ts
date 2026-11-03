@@ -2159,6 +2159,7 @@ export interface Track2PullConfig {
    * data and images are kept (2026-10-29). */
   central_store?: { bucket?: string; folder?: string };
   catalog_export?: { include_images?: boolean; include_model?: boolean };
+  catalog_pt_metadata?: { selected_groups?: string[] };
   sql_explorer?: {
     database?: string;
     bucket?: string;
@@ -3923,6 +3924,7 @@ export function stopTrack2CatalogExport(exportId: string): Promise<{ id: string;
 
 export function exportTrack2CatalogWeights(runId: string, options: {
   destination: "local" | "s3"; bucket?: string; prefix?: string;
+  metadata_groups?: string[];
 }): Promise<{ url?: string; uri?: string }> {
   return apiPost(`/track2/catalog/runs/${encodeURIComponent(runId)}/weights/export`, options);
 }
