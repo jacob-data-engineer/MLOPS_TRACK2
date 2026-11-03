@@ -18,6 +18,7 @@ import {
   getTrack2SqlPreviews,
   startTrack2CatalogExport,
   stopTrack2CatalogExport,
+  exportTrack2CatalogWeights,
   type Track2CatalogExport,
   type Track2CatalogFile,
   type Track2CatalogRun,
@@ -313,6 +314,25 @@ function FilesCard({ picked, emptyMessage, onExported, destination, onDestinatio
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [weightsMessage, setWeightsMessage] = useState("");
+
+  async function exportWeights(target: "local" | "s3") {
+    if (picked?.kind !== "run") return;
+    setBusy("pt"); setError(""); setWeightsMessage("");
+    try {
+      const result = await exportTrack2CatalogWeights(picked.run.run_id, {
+        destination: target, bucket: destination.bucket, prefix: destination.prefix,
+      });
+      if (result.url) {
+        const link = document.createElement("a");
+        link.href = result.url;
+        document.body.appendChild(link); link.click(); link.remove();
+      }
+      if (result.uri) setWeightsMessage(`Model exported to ${result.uri}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Could not export the .pt file.");
+    } finally { setBusy(""); }
+  }
 
   const id = picked?.kind === "run" ? picked.run.run_id : picked?.version.id ?? "";
   const title = picked?.kind === "run"
@@ -374,6 +394,22 @@ function FilesCard({ picked, emptyMessage, onExported, destination, onDestinatio
             : "The images in this version, with the split each was given."}>
       <fieldset disabled={!picked} className={!picked ? "opacity-50" : undefined}>
       <ExportDestination destination={destination} onDestination={onDestination} />
+      {picked?.kind === "run" && <div className="mb-3 rounded border border-hairline p-3 text-xs">
+        <p className="mb-2 font-medium">Trained model (.pt) — Run {picked.run.run_number}</p>
+        <p className="mb-2 text-ink-muted">Export this run’s published model checkpoint. Images and labels use the ZIP or folder export below.</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" className="rounded border border-black/15 bg-page px-3 py-1 font-medium disabled:opacity-40"
+            disabled={!!busy} onClick={() => void exportWeights("local")}>
+            {busy === "pt" ? "Exporting…" : "Download .pt"}
+          </button>
+          {destination.destination === "s3" ? <button type="button"
+            className="rounded border border-black/15 bg-page px-3 py-1 font-medium disabled:opacity-40"
+            disabled={!!busy || !destination.bucket.trim()} onClick={() => void exportWeights("s3")}>
+            Export .pt to selected S3 folder
+          </button> : <span className="text-ink-muted">Choose S3 bucket above to copy the model to S3.</span>}
+        </div>
+        {weightsMessage && <p role="status" className="mt-2 break-all">{weightsMessage}</p>}
+      </div>}
       <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
         <select className={select} value={split} onChange={(e) => { setSplit(e.target.value); setOffset(0); }}>
           <option value="">All splits</option>

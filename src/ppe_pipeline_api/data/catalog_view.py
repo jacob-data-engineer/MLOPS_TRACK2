@@ -543,5 +543,29 @@ def download_url(export_id: str) -> str:
                 "ResponseContentDisposition": f'attachment; filename="{rows[0]["label"]}.zip"'})
 
 
+def export_run_weights(run_id: str, *, destination: str = "local", bucket: str = "", prefix: str = "") -> dict:
+    """Export this run's published checkpoint, without loading a PyTorch pickle."""
+    rows = _rows("SELECT run_number, record FROM training_runs WHERE run_id = %s", (run_id,))
+    if not rows:
+        raise ValueError("Run not found.")
+    record = rows[0]["record"] or {}
+    if isinstance(record, str):
+        record = json.loads(record)
+    uri = str(record.get("weights_uri") or "")
+    if not uri.startswith("s3://") or not uri.lower().endswith(".pt"):
+        raise ValueError("No .pt checkpoint has been published for this run yet.")
+    source_bucket, source_key = _split_uri(uri)
+    storage.s3.head_object(Bucket=source_bucket, Key=source_key)
+    filename = f"run-{rows[0]['run_number']}.pt"
+    if destination == "local":
+        return {"url": storage.s3.generate_presigned_url(
+            "get_object", ExpiresIn=3600, Params={"Bucket": source_bucket, "Key": source_key,
+            "ResponseContentDisposition": f'attachment; filename="{filename}"'})}
+    bucket, prefix = _destination(destination, bucket, prefix)
+    key = "/".join(p for p in (prefix, f"run-{rows[0]['run_number']}-{uuid.uuid4().hex[:12]}", filename) if p)
+    storage.s3.copy({"Bucket": source_bucket, "Key": source_key}, bucket, key)
+    return {"uri": f"s3://{bucket}/{key}"}
+
+
 def summary_json(value) -> str:
     return json.dumps(value, default=str)

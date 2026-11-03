@@ -102,6 +102,18 @@ class ExportRequest(BaseModel):
     format: str | None = None
 
 
+class WeightsExportRequest(BaseModel):
+    destination: str = "local"
+    bucket: str = ""
+    prefix: str = ""
+
+
+@router.post("/runs/{run_id}/weights/export")
+def export_run_weights(run_id: str, payload: WeightsExportRequest, session=Depends(require_session)) -> dict:
+    return _guard(lambda: catalog_view.export_run_weights(
+        run_id, destination=payload.destination, bucket=payload.bucket, prefix=payload.prefix))
+
+
 @router.post("/exports")
 def start_export(payload: ExportRequest, session=Depends(require_session)) -> dict:
     """Build a zip of a run or a dataset version, in the background."""

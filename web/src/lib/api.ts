@@ -3896,6 +3896,12 @@ export function stopTrack2CatalogExport(exportId: string): Promise<{ id: string;
   return apiPost(`/track2/catalog/exports/${encodeURIComponent(exportId)}/stop`, {});
 }
 
+export function exportTrack2CatalogWeights(runId: string, options: {
+  destination: "local" | "s3"; bucket?: string; prefix?: string;
+}): Promise<{ url?: string; uri?: string }> {
+  return apiPost(`/track2/catalog/runs/${encodeURIComponent(runId)}/weights/export`, options);
+}
+
 /** A one-hour link to a finished zip; the browser downloads it from S3. */
 export function getTrack2CatalogExportUrl(exportId: string): Promise<{ url: string }> {
   return apiGet(`/track2/catalog/exports/${encodeURIComponent(exportId)}/download`);

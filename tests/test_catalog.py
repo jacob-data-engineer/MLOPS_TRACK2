@@ -444,3 +444,36 @@ def test_stop_before_build_creates_no_upload(monkeypatch):
     assert "state = 'cancelled'" in results[-1][1]
     assert not s3.parts
     assert slots.acquire(blocking=False)
+
+
+def test_export_run_weights_uses_exact_checkpoint(monkeypatch):
+    class S3:
+        def __init__(self): self.copies=[]
+        def head_object(self, **kw): assert kw == {'Bucket':'source','Key':'models/best.pt'}
+        def generate_presigned_url(self, operation, **kw):
+            assert operation == 'get_object'
+            assert kw['Params']['Key'] == 'models/best.pt'
+            assert kw['Params']['ResponseContentDisposition'] == 'attachment; filename="run-58.pt"'
+            return 'signed-url'
+        def copy(self, source, bucket, key): self.copies.append((source,bucket,key))
+    s3=S3()
+    monkeypatch.setattr(cv.storage,'s3',s3)
+    monkeypatch.setattr(cv,'_rows',lambda *a: [{'run_number':58,'record':{'weights_uri':'s3://source/models/best.pt'}}])
+    assert cv.export_run_weights('audit58') == {'url':'signed-url'}
+    first=cv.export_run_weights('audit58',destination='s3',bucket='chosen-bucket',prefix='new/folder')
+    second=cv.export_run_weights('audit58',destination='s3',bucket='chosen-bucket',prefix='new/folder')
+    assert first != second
+    assert first['uri'].startswith('s3://chosen-bucket/new/folder/run-58-')
+    assert first['uri'].endswith('/run-58.pt')
+    assert s3.copies[0][0] == {'Bucket':'source','Key':'models/best.pt'}
+    assert s3.copies[0][1] == 'chosen-bucket'
+    import pytest
+    with pytest.raises(ValueError): cv.export_run_weights('audit58',destination='s3',bucket='chosen-bucket',prefix='../bad')
+
+
+def test_export_run_weights_missing_checkpoint(monkeypatch):
+    import pytest
+    monkeypatch.setattr(cv,'_rows',lambda *a: [])
+    with pytest.raises(ValueError,match='Run not found'): cv.export_run_weights('gone')
+    monkeypatch.setattr(cv,'_rows',lambda *a: [{'run_number':1,'record':{}}])
+    with pytest.raises(ValueError,match='No .pt checkpoint'): cv.export_run_weights('pending')
