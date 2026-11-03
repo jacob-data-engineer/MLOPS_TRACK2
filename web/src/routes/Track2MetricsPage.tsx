@@ -395,16 +395,16 @@ export function Track2MetricsPage() {
           fixed `md:h-svh`), so `top-0` is the top of the content area
           rather than of a page that is itself scrolling away.
 
-          `-mx-4 px-4` pulls the background out to the full content width,
-          so what scrolls underneath is covered rather than appearing
-          beside it. z-20 keeps it under the stale-build banner, which is
-          z-40 and has to stay the thing you see first. */}
-      <div className="sticky top-0 z-20 -mx-4 mb-5 border-b border-hairline bg-surface px-4 py-2 shadow-sm md:-mx-8 md:px-8">
+          Use the same Card shell as Models so both edges, padding and
+          borders align. z-20 keeps it under the stale-build banner. */}
+      <div className="sticky top-0 z-20 mb-5">
+        <Card collapsible={false}>
         <Track2ExportSettingsBar
           settings={exportSettings}
           onChange={setExportSettings}
           defaults={EXPORT_DEFAULTS}
         />
+        </Card>
       </div>
 
       {error && (
