@@ -8,6 +8,23 @@ from ppe_pipeline_api.data import catalog
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+def test_training_history_uses_catalog_numbers_not_row_order(monkeypatch):
+    from ppe_pipeline_api.routers import track2_models as router
+    monkeypatch.setattr(router.t2, "scan_training_audits", lambda **kwargs: [{"id": "new"}, {"id": "old"}, {"id": "unsynced"}])
+    monkeypatch.setattr(router.catalog_view, "run_numbers", lambda ids: {"old": 7, "new": 58})
+    result = router.training_audit(session={})["audits"]
+    assert [a["run_number"] for a in result] == [58, 7, None]
+
+
+def test_training_history_still_loads_when_catalog_is_unavailable(monkeypatch):
+    from ppe_pipeline_api.routers import track2_models as router
+    monkeypatch.setattr(router.t2, "scan_training_audits", lambda **kwargs: [{"id": "run"}])
+    def unavailable(ids):
+        raise RuntimeError("catalog unavailable")
+    monkeypatch.setattr(router.catalog_view, "run_numbers", unavailable)
+    assert router.training_audit(session={})["audits"] == [{"id": "run", "run_number": None}]
+
+
 def test_nothing_in_the_schema_drops_or_deletes():
     text = " ".join(catalog.SCHEMA).upper()
     for word in ("DROP ", "DELETE ", "TRUNCATE"):
@@ -121,7 +138,8 @@ class _S3Zip:
     def get_object(self, Bucket, Key):
         import io
         if (Bucket, Key) not in self.objects:
-            raise Exception("NoSuchKey")
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
 
     def create_multipart_upload(self, Bucket, Key, ContentType):
@@ -134,6 +152,9 @@ class _S3Zip:
 
     def complete_multipart_upload(self, Bucket, Key, UploadId, MultipartUpload):
         self.objects[(Bucket, Key)] = b"".join(self.parts[Key])
+
+    def put_object(self, Bucket, Key, Body):
+        self.objects[(Bucket, Key)] = Body
 
 
 def test_an_export_is_a_valid_zip_in_the_training_layout(monkeypatch):
@@ -231,3 +252,99 @@ def test_the_repair_cuts_by_position_not_by_pattern():
     import inspect
     src = inspect.getsource(cs._repair_composed)
     assert src.count("from %s::int)") == 2
+
+
+def test_exports_write_real_bytes_to_both_destinations(monkeypatch):
+    import io
+    import threading
+    import zipfile
+
+    for destination, export_format in (("local", "zip"), ("s3", "folder"), ("s3", "zip")):
+        s3 = _S3Zip({("source", "a.jpg"): b"actual-image", ("source", "a.txt"): b"0 .5 .5 .1 .1"})
+        monkeypatch.setattr(cv.storage, "s3", s3)
+        slots = threading.BoundedSemaphore(1)
+        slots.acquire()
+        monkeypatch.setattr(cv, "_building", slots)
+        results = []
+        monkeypatch.setattr(cv, "_finish", lambda *args: results.append(args))
+        entries = [(path, uri, {"path": path, "source": uri}) for path, uri in (
+            ("images/train/a.jpg", "s3://source/a.jpg"),
+            ("labels/train/a.txt", "s3://source/a.txt"),
+            ("images/val/gone.jpg", "s3://source/gone.jpg"))]
+        cv._build("export1", "run", "r", "run-1", entries, ["helmet"], destination, "chosen-bucket", "chosen/folder", export_format)
+        root = "chosen/folder/run-1-export1/"
+        if export_format == "zip":
+            with zipfile.ZipFile(io.BytesIO(s3.objects[("chosen-bucket", root + "run-1.zip")])) as archive:
+                output = {p: archive.read(p) for p in archive.namelist()}
+        else:
+            output = {k[len(root):]: v for (b, k), v in s3.objects.items() if b == "chosen-bucket"}
+        assert output["images/train/a.jpg"] == b"actual-image"
+        assert output["labels/train/a.txt"] == b"0 .5 .5 .1 .1"
+        assert b"helmet" in output["data.yaml"]
+        assert b"gone.jpg" in output["manifest.csv"]
+        assert "images/val/gone.jpg" not in output
+        params = results[-1][2]
+        assert params[0] == "partial"
+        assert params[3:5] == (2, 1)
+        assert slots.acquire(blocking=False)
+
+
+def test_access_denied_is_not_misreported_as_a_missing_file(monkeypatch):
+    import pytest
+    from botocore.exceptions import ClientError
+
+    class Denied:
+        def get_object(self, **kwargs):
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+    monkeypatch.setattr(cv.storage, "s3", Denied())
+    with pytest.raises(ClientError, match="AccessDenied"):
+        cv._fetch("s3://source/a.jpg")
+
+
+def test_export_destination_validation():
+    import pytest
+    assert cv._destination("s3", " chosen-bucket ", "/exports/helmet/") == ("chosen-bucket", "exports/helmet")
+    for destination, bucket, prefix in (("email", "bucket", ""), ("s3", "", ""),
+                                      ("s3", "s3://bucket", ""), ("s3", "bucket", "../images")):
+        with pytest.raises(ValueError):
+            cv._destination(destination, bucket, prefix)
+
+
+def test_export_route_forwards_destination_and_old_requests_default_to_local(monkeypatch):
+    from ppe_pipeline_api.routers import track2_catalog as router
+    got = []
+    monkeypatch.setattr(cv, "start_export", lambda *args, **kwargs: got.append((args, kwargs)) or {"state": "building"})
+    router.start_export(router.ExportRequest(kind="run", id="r", destination="s3", bucket="chosen-bucket", prefix="exports"), session={})
+    assert got[-1] == (("run", "r"), {"destination": "s3", "bucket": "chosen-bucket", "prefix": "exports", "format": None})
+    router.start_export(router.ExportRequest(kind="version", id="v"), session={})
+    assert got[-1][1]["destination"] == "local"
+
+
+def test_partial_zip_remains_downloadable(monkeypatch):
+    monkeypatch.setattr(cv, "_rows", lambda *args: [{"zip_uri": "s3://output/run.zip", "label": "run-1", "state": "partial"}])
+    class Signer:
+        def generate_presigned_url(self, operation, **kwargs):
+            assert kwargs["Params"]["Key"] == "run.zip"
+            return "signed-url"
+    monkeypatch.setattr(cv.storage, "s3", Signer())
+    assert cv.download_url("export1") == "signed-url"
+
+
+def test_s3_write_failure_is_recorded_and_releases_slot(monkeypatch):
+    import threading
+    from botocore.exceptions import ClientError
+
+    class Denied(_S3Zip):
+        def put_object(self, **kwargs):
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "PutObject")
+    monkeypatch.setattr(cv.storage, "s3", Denied({("source", "a.jpg"): b"image"}))
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(cv, "_building", slots)
+    results = []
+    monkeypatch.setattr(cv, "_finish", lambda *args: results.append(args))
+    cv._build("export2", "run", "r", "run-1", [("images/train/a.jpg", "s3://source/a.jpg", {})],
+              None, "s3", "destination", "exports")
+    assert "state = 'failed'" in results[-1][1]
+    assert "AccessDenied" in results[-1][2][0]
+    assert slots.acquire(blocking=False)

@@ -1,8 +1,12 @@
 import { AlertCircle, Archive, Download, FileText, Library, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Card } from "../components/Card";
+import { Track2S3FolderBrowser } from "../components/Track2S3FolderBrowser";
 import {
   ApiError,
+  getTrack2Buckets,
+  listTrack2Folders,
+  type Track2Bucket,
   downloadTrack2CatalogCsv,
   getTrack2CatalogExports,
   getTrack2CatalogExportUrl,
@@ -18,6 +22,7 @@ import {
   type Track2CatalogRun,
   type Track2CatalogStatus,
   type Track2CatalogVersion,
+  type CatalogExportDestination,
 } from "../lib/api";
 import { formatDayTime } from "../lib/format";
 
@@ -52,6 +57,7 @@ export function Track2CatalogPage() {
   const [versions, setVersions] = useState<Track2CatalogVersion[] | null>(null);
   const [exportsList, setExportsList] = useState<Track2CatalogExport[] | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
+  const [destination, setDestination] = useState<CatalogExportDestination>({ destination: "local", bucket: "", prefix: "", format: "zip" });
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -118,10 +124,12 @@ export function Track2CatalogPage() {
       <div className="flex flex-col gap-5">
         {tab === "runs" && (
           <Card title="Training runs" collapsible={false}
-                caption="Newest first. Click a run to see the files it trained and evaluated on.">
+                caption="Latest 10 runs shown first. Scroll inside the table for older runs. Click a run to see its files and export options below.">
             {runs === null ? <p className="text-sm text-ink-muted">Reading...</p> : (
-              <div className="max-h-[28rem] overflow-auto rounded border border-hairline">
-                <table className="tabular min-w-full text-xs">
+              <div className="max-h-[calc(22rem+2px)] overflow-auto rounded border border-hairline"
+                   tabIndex={0} role="region" aria-label="Training runs; scroll for older runs">
+                {/* One 2rem header plus ten 2rem rows; older runs stay in this scroll area. */}
+                <table className="tabular min-w-full whitespace-nowrap text-xs [&_tr]:h-8">
                   <thead className="sticky top-0 bg-surface text-left text-ink">
                     <tr>
                       {["Run", "Submitted", "Status", "Model", "Dataset version", "Images", "Registered as"].map((h) => (
@@ -190,12 +198,15 @@ export function Track2CatalogPage() {
         )}
 
         {tab === "exports" && (
-          <ExportsCard exportsList={exportsList} />
+          <ExportsCard exportsList={exportsList} destination={destination} onDestination={setDestination} onExported={refreshExports} />
         )}
 
-        {picked && tab !== "exports" && (
-          <FilesCard key={picked.kind === "run" ? picked.run.run_id : picked.version.id}
-                     picked={picked}
+        {tab !== "exports" && (
+          <FilesCard key={picked?.kind === "run" && tab === "runs" ? picked.run.run_id
+            : picked?.kind === "version" && tab === "versions" ? picked.version.id : `empty-${tab}`}
+                     picked={picked?.kind === (tab === "runs" ? "run" : "version") ? picked : null}
+                     emptyMessage={tab === "runs" ? "No run selected" : "No dataset version selected"}
+                     destination={destination} onDestination={setDestination}
                      onExported={() => { refreshExports(); setTab("exports"); }} />
         )}
       </div>
@@ -203,7 +214,81 @@ export function Track2CatalogPage() {
   );
 }
 
-function FilesCard({ picked, onExported }: { picked: Picked; onExported: () => void }) {
+type DestinationProps = {
+  destination: CatalogExportDestination;
+  onDestination: (value: CatalogExportDestination) => void;
+};
+
+function ExportDestination({ destination, onDestination }: DestinationProps) {
+  const field = "rounded border border-black/15 bg-page px-2 py-1 text-xs text-ink";
+  const [buckets, setBuckets] = useState<Track2Bucket[]>([]);
+  const [prefix, setPrefix] = useState(destination.prefix);
+  const [folders, setFolders] = useState<string[]>([]);
+  const [bucketError, setBucketError] = useState("");
+  const [folderError, setFolderError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    if (destination.destination !== "s3") return;
+    let cancelled = false;
+    setLoading(true); setBucketError("");
+    getTrack2Buckets().then((r) => { if (!cancelled) setBuckets(r.buckets); })
+      .catch((err) => { if (!cancelled) setBucketError(err instanceof ApiError ? err.detail : "Could not list S3 buckets."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [destination.destination, reload]);
+  useEffect(() => {
+    setFolders([]); setFolderError("");
+    if (destination.destination !== "s3" || !destination.bucket) return;
+    let cancelled = false;
+    listTrack2Folders(destination.bucket, prefix)
+      .then((r) => { if (!cancelled) setFolders(r.folders); })
+      .catch((err) => { if (!cancelled) setFolderError(err instanceof ApiError ? err.detail : "Could not list folders."); });
+    return () => { cancelled = true; };
+  }, [destination.destination, destination.bucket, prefix, reload]);
+  return <div className="mb-3 rounded border border-hairline p-3 text-xs">
+    <label className="flex items-center gap-2">Export actual files to
+      <select aria-label="Export destination" className={field} value={destination.destination}
+              onChange={(e) => onDestination({ ...destination, destination: e.target.value as "local" | "s3", format: e.target.value === "local" ? "zip" : destination.format })}>
+        <option value="local">Local PC (download ZIP)</option>
+        <option value="s3">S3 bucket</option>
+      </select>
+    </label>
+    <label className="mt-2 flex items-center gap-2">Export format
+      <select aria-label="Export format" className={field} value={destination.format}
+        onChange={(e) => onDestination({ ...destination, format: e.target.value as "zip" | "folder" })}>
+        <option value="zip">ZIP archive (images and labels)</option>
+        {destination.destination === "s3" && <option value="folder">Folder (individual images and labels)</option>}
+      </select>
+    </label>
+    {destination.destination === "s3" && <div className="mt-2 space-y-2">
+      <label>Destination bucket <select className={field} value={destination.bucket}
+        onChange={(e) => { setPrefix(""); setFolders([]); onDestination({ ...destination, bucket: e.target.value, prefix: "" }); }}>
+        <option value="">{loading ? "Loading buckets..." : "Choose a bucket"}</option>
+        {buckets.map((b) => <option key={b.name} value={b.name}>{b.name}{b.readable ? "" : " (listing restricted)"}</option>)}
+      </select></label>
+      <button type="button" className="ml-2 underline" onClick={() => setReload((n) => n + 1)}>Refresh buckets and folders</button>
+      {bucketError && <p className="text-critical">{bucketError}</p>}
+      {destination.bucket && <>
+        <p>Choose an existing folder, or enter a new folder name and press Create &amp; use.</p>
+        <Track2S3FolderBrowser key={destination.bucket} prefix={prefix} folders={folders}
+          onNavigate={setPrefix} selected={destination.prefix} allowCreate
+          onSelect={(value) => onDestination({ ...destination, prefix: value })} />
+        {folderError && <p className="text-critical">{folderError}</p>}
+        <p className="break-all">Destination: s3://{destination.bucket}/{destination.prefix ? `${destination.prefix}/` : ""}</p>
+      </>}
+    </div>}
+    <p className="mt-2 text-ink-muted">{destination.destination === "local"
+      ? "Builds a ZIP containing the images, labels and metadata. When ready, use Download ZIP; your browser chooses where to save it."
+      : destination.format === "zip"
+        ? "Writes a ZIP containing the actual images, labels and metadata to the selected S3 folder."
+        : "Copies images, labels and metadata as individual objects into a new export subfolder. New folders are created when files are written. The app needs write access to this bucket."}</p>
+  </div>;
+}
+
+function FilesCard({ picked, emptyMessage, onExported, destination, onDestination }: {
+  picked: Picked | null; emptyMessage: string; onExported: () => void;
+} & DestinationProps) {
   const [split, setSplit] = useState("");
   const [role, setRole] = useState("");
   const [offset, setOffset] = useState(0);
@@ -214,12 +299,13 @@ function FilesCard({ picked, onExported }: { picked: Picked; onExported: () => v
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
-  const id = picked.kind === "run" ? picked.run.run_id : picked.version.id;
-  const title = picked.kind === "run"
+  const id = picked?.kind === "run" ? picked.run.run_id : picked?.version.id ?? "";
+  const title = picked?.kind === "run"
     ? `Run ${picked.run.run_number}`
-    : `Version ${picked.version.version_number} (${picked.version.kind})`;
+    : picked ? `Version ${picked.version.version_number} (${picked.version.kind})` : emptyMessage;
 
   useEffect(() => {
+    if (!picked) { setFiles([]); return; }
     setFiles(null);
     const load = picked.kind === "run"
       ? getTrack2CatalogRunFiles(id, { split, role, offset })
@@ -237,6 +323,7 @@ function FilesCard({ picked, onExported }: { picked: Picked; onExported: () => v
   }, [thumbs, files]);
 
   async function downloadCsv() {
+    if (!picked) return;
     setBusy("csv");
     setError("");
     try {
@@ -254,9 +341,10 @@ function FilesCard({ picked, onExported }: { picked: Picked; onExported: () => v
   }
 
   function exportZip() {
+    if (!picked) return;
     setBusy("zip");
     setError("");
-    startTrack2CatalogExport(picked.kind, id)
+    startTrack2CatalogExport(picked.kind, id, destination)
       .then(onExported)
       .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not start the export."))
       .finally(() => setBusy(""));
@@ -265,17 +353,19 @@ function FilesCard({ picked, onExported }: { picked: Picked; onExported: () => v
   const select = "rounded border border-black/15 bg-page px-2 py-1 text-xs text-ink";
 
   return (
-    <Card title={`Files in ${title}`} collapsible={false}
-          caption={picked.kind === "run"
+    <Card title={picked ? `Files in ${title}` : "Files and exports"} collapsible={false}
+          caption={!picked ? `${emptyMessage}. Select a row above to view and export its files.` : picked.kind === "run"
             ? "The images this run trained and evaluated on, as the training audit recorded them."
             : "The images in this version, with the split each was given."}>
+      <fieldset disabled={!picked} className={!picked ? "opacity-50" : undefined}>
+      <ExportDestination destination={destination} onDestination={onDestination} />
       <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
         <select className={select} value={split} onChange={(e) => { setSplit(e.target.value); setOffset(0); }}>
           <option value="">All splits</option>
           <option value="train">train</option>
           <option value="val">val</option>
         </select>
-        {picked.kind === "run" && (
+        {picked?.kind === "run" && (
           <select className={select} value={role} onChange={(e) => { setRole(e.target.value); setOffset(0); }}>
             <option value="">Training and evaluation</option>
             <option value="train">Training only</option>
@@ -291,17 +381,19 @@ function FilesCard({ picked, onExported }: { picked: Picked; onExported: () => v
         <button type="button" onClick={() => void downloadCsv()} disabled={!!busy}
                 className="inline-flex items-center gap-1.5 rounded-md border border-black/15 bg-page px-2.5 py-1 font-medium text-ink disabled:opacity-40">
           {busy === "csv" ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
-          Download file list (CSV)
+          File paths only (CSV)
         </button>
-        <button type="button" onClick={exportZip} disabled={!!busy}
+        <button type="button" onClick={exportZip} disabled={!!busy || (destination.destination === "s3" && !destination.bucket.trim())}
                 className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40">
           {busy === "zip" ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
-          Export as zip
+          {destination.destination === "s3" ? (destination.format === "zip" ? "Export ZIP to S3" : "Copy files to S3 folder") : "Prepare ZIP for PC"}
         </button>
       </div>
+      </fieldset>
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
 
-      {files === null ? <p className="text-sm text-ink-muted">Reading...</p> : thumbs ? (
+      {!picked ? <p role="status" className="rounded border border-hairline p-6 text-center text-sm text-ink-muted">{emptyMessage}</p>
+      : files === null ? <p className="text-sm text-ink-muted">Reading...</p> : thumbs ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
           {files.map((f) => (
             <a key={f.uri} href={previews[f.uri]} target="_blank" rel="noreferrer" title={f.uri}
@@ -352,8 +444,23 @@ function FilesCard({ picked, onExported }: { picked: Picked; onExported: () => v
   );
 }
 
-function ExportsCard({ exportsList }: { exportsList: Track2CatalogExport[] | null }) {
+function ExportsCard({ exportsList, destination, onDestination, onExported }: {
+  exportsList: Track2CatalogExport[] | null; onExported: () => void;
+} & DestinationProps) {
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function exportAgain(e: Track2CatalogExport) {
+    const id = e.run_id || e.version_id;
+    if (!id) return;
+    setError(""); setBusy(true);
+    try {
+      await startTrack2CatalogExport(e.run_id ? "run" : "version", id, destination);
+      onExported();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Could not start the export.");
+    } finally { setBusy(false); }
+  }
 
   function download(id: string) {
     setError("");
@@ -364,16 +471,17 @@ function ExportsCard({ exportsList }: { exportsList: Track2CatalogExport[] | nul
 
   return (
     <Card title="Exports" collapsible={false}
-          caption="Zips of a run or a dataset version, in the training layout with a data.yaml and a manifest.csv naming where every file came from. Built in the background; this list refreshes while one is building.">
+          caption="Export actual images and labels to your PC as a ZIP, or copy them to S3. Missing source files are reported as incomplete exports. This list refreshes while an export is building.">
+      <ExportDestination destination={destination} onDestination={onDestination} />
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
       {exportsList === null ? <p className="text-sm text-ink-muted">Reading...</p>
         : exportsList.length === 0 ? (
-          <p className="text-sm text-ink-muted">No exports yet. Pick a run or a version and press Export as zip.</p>
+          <p className="text-sm text-ink-muted">No exports yet. Pick a run or a version, choose a destination, and export its files.</p>
         ) : (
           <table className="tabular min-w-full text-xs">
             <thead className="text-left text-ink">
               <tr>
-                {["Export", "State", "Started", "Finished", "Files", "Size", ""].map((h) => (
+                {["Export", "State", "Started", "Finished", "Files", "Size", "Format", "Destination", ""].map((h) => (
                   <th key={h} className="border-b border-hairline px-2 py-1.5 font-medium">{h}</th>
                 ))}
               </tr>
@@ -382,10 +490,10 @@ function ExportsCard({ exportsList }: { exportsList: Track2CatalogExport[] | nul
               {exportsList.map((e) => (
                 <tr key={e.id} className="border-b border-hairline/50">
                   <td className="px-2 py-1 font-medium text-ink">{e.label}</td>
-                  <td className={`px-2 py-1 ${e.state === "failed" ? "text-critical" : ""}`} title={e.error ?? ""}>
+                  <td className={`px-2 py-1 ${e.state === "failed" || e.missing > 0 ? "text-critical" : ""}`} title={e.error ?? ""}>
                     {e.state === "building"
                       ? <span className="inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" />building</span>
-                      : e.state}
+                      : e.state === "partial" || (e.state === "ready" && e.missing > 0) ? "Incomplete" : e.state}
                     {e.state === "failed" && e.error ? ` -- ${e.error}` : ""}
                   </td>
                   <td className="px-2 py-1">{when(e.created_at)}</td>
@@ -395,13 +503,27 @@ function ExportsCard({ exportsList }: { exportsList: Track2CatalogExport[] | nul
                     {e.missing ? <span className="text-critical"> ({e.missing} missing)</span> : ""}
                   </td>
                   <td className="px-2 py-1">{bytes(e.bytes)}</td>
+                  <td className="px-2 py-1">{e.format === "folder" ? "Folder" : "ZIP"}</td>
+                  <td className="max-w-xs break-all px-2 py-1">
+                    {e.destination === "s3" ? e.destination_uri : "Local PC (ZIP)"}
+                    {e.destination === "s3" && e.destination_uri && <button type="button" className="ml-2 underline"
+                      onClick={() => {
+                        if (!navigator.clipboard) { setError("Select and copy the S3 address shown in the table."); return; }
+                        void navigator.clipboard.writeText(e.destination_uri!).catch(() => setError("Select and copy the S3 address shown in the table."));
+                      }}>Copy address</button>}
+                  </td>
                   <td className="px-2 py-1">
-                    {e.state === "ready" && (
+                    {e.format !== "folder" && (e.state === "ready" || e.state === "partial") && (
                       <button type="button" onClick={() => download(e.id)}
                               className="inline-flex items-center gap-1 rounded-md border border-black/15 bg-page px-2 py-0.5 font-medium text-ink">
-                        <Download size={12} /> Download
+                        <Download size={12} /> {e.missing ? "Download incomplete ZIP" : "Download ZIP"}
                       </button>
                     )}
+                    {(e.run_id || e.version_id) && <button type="button" className="mt-1 block underline disabled:opacity-40"
+                      disabled={busy || (destination.destination === "s3" && !destination.bucket.trim())}
+                      onClick={() => void exportAgain(e)}>
+                      {destination.destination === "s3" ? (destination.format === "zip" ? "Export ZIP to S3" : "Copy files to S3 folder") : "Prepare new ZIP"}
+                    </button>}
                   </td>
                 </tr>
               ))}

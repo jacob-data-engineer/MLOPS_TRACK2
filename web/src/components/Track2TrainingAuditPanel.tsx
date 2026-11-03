@@ -228,6 +228,10 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
         >
           {open ? <ChevronDown size={14} className="shrink-0 text-ink-muted" /> : <ChevronRight size={14} className="shrink-0 text-ink-muted" />}
           <Badge tone={statusTone(audit.status)} label={audit.status} />
+          <span className="tabular shrink-0 text-sm font-semibold text-ink"
+                title={audit.run_number == null ? "A run number appears after the catalog syncs." : "Same run number as Data Catalog"}>
+            {audit.run_number == null ? "Run number pending" : `Run ${audit.run_number}`}
+          </span>
           {/* The MODEL NAME, not the generation/size pair.
               For a custom-class run `generation` is the literal string
               "custom" and `size` holds the architecture, so the old

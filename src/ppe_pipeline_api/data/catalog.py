@@ -48,7 +48,7 @@ CA_BUNDLE = pathlib.Path(__file__).with_name("rds-ca-bundle.pem")
 
 #: The schema's version: SCHEMA is version 1, and each entry in MIGRATIONS
 #: takes it one step further. Recorded in `schema_version`.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS schema_version (
@@ -200,6 +200,14 @@ MIGRATIONS = {
         # put in front of every address, and the sync repairs them.
         "UPDATE dataset_versions SET members_synced = true WHERE kind = 'version' AND EXISTS"
         " (SELECT 1 FROM dataset_members m WHERE m.version_id = dataset_versions.id)",
+    ],
+    5: [
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS destination text NOT NULL DEFAULT 'local'",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS destination_uri text",
+    ],
+    6: [
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS format text NOT NULL DEFAULT 'zip'",
+        "UPDATE exports SET format = 'folder' WHERE destination = 's3' AND zip_uri IS NULL",
     ],
 }
 

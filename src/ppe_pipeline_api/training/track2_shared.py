@@ -5677,7 +5677,7 @@ def training_files_table():
 
 
 def write_file_rows(audit_id: str, role: str, names: list, folder: str = "",
-                    sources: dict | None = None) -> int:
+                    sources: dict | None = None, addresses: dict | None = None) -> int:
     """One row per file a run used. Returns how many were written.
 
     Not on the run's own row: a DynamoDB item is capped at 400KB, and at
@@ -5727,6 +5727,9 @@ def write_file_rows(audit_id: str, role: str, names: list, folder: str = "",
                 if root:
                     item["folder"] = root
                     item["s3_uri"] = f"s3://{BUCKET}/{root}/{name}"
+                if addresses and name in addresses:
+                    item["s3_uri"] = addresses[name]
+                    item["folder"] = addresses[name][5:].split("/", 1)[1].rsplit("/", 1)[0]
                 # Where the file came from BEFORE it was copied into the
                 # assembled folder. The assembled path is an artefact of
                 # the copy; this is the folder a person actually chose.
@@ -5741,6 +5744,12 @@ def write_file_rows(audit_id: str, role: str, names: list, folder: str = "",
                 parts = name.split("/")
                 if len(parts) >= 2 and parts[0] in ("images", "labels"):
                     item["split"] = parts[1]
+                elif addresses and name in addresses:
+                    for marker in ("images", "labels"):
+                        if marker in parts:
+                            position = len(parts) - 1 - parts[::-1].index(marker)
+                            if position + 1 < len(parts) - 1:
+                                item["split"] = parts[position + 1]
                 item["file_name"] = parts[-1]
                 batch.put_item(Item=item)
                 written += 1
@@ -6241,6 +6250,7 @@ def _composed_audit_block(entries: list, *, uri: str, multi_bucket: bool,
     instead, and records `uri` exactly as the job received it.
     """
     names, label_names, sources_seen = [], [], []
+    addresses = {}
     for entry in entries:
         bucket, key = BUCKET, entry.strip("/")
         if multi_bucket and "/" in key:
@@ -6249,18 +6259,22 @@ def _composed_audit_block(entries: list, *, uri: str, multi_bucket: bool,
             for obj in _list_all(bucket, key + "/"):
                 k = obj["Key"]
                 if k.lower().endswith(_AUDIT_IMAGE_EXTS):
-                    names.append(k if bucket == BUCKET else f"{bucket}/{k}")
+                    name = k if bucket == BUCKET else f"{bucket}/{k}"
+                    names.append(name)
+                    addresses[name] = f"s3://{bucket}/{k}"
             parts = key.split("/")
             if "images" in parts:
                 i = len(parts) - 1 - parts[::-1].index("images")
                 lab = "/".join(parts[:i] + ["labels"] + parts[i + 1:])
                 for obj in _list_all(bucket, lab + "/"):
                     if obj["Key"].endswith(".txt"):
-                        label_names.append(obj["Key"] if bucket == BUCKET else f"{bucket}/{obj['Key']}")
+                        name = obj["Key"] if bucket == BUCKET else f"{bucket}/{obj['Key']}"
+                        label_names.append(name)
+                        addresses[name] = f"s3://{bucket}/{obj['Key']}"
         except Exception as exc:                                   # noqa: BLE001
             print(f"Audit could not list {bucket}/{key}: {exc}")
         sources_seen.append(entry)
-    rows = (write_file_rows(audit_id, role, names + label_names, "", {})
+    rows = (write_file_rows(audit_id, role, names + label_names, "", {}, addresses=addresses)
             if (audit_id and role) else 0)
     return {
         "folder": ", ".join(entries),
@@ -6316,12 +6330,23 @@ def _version_audit_fields(data_yaml_uri: str, *, train_data_uris: str, eval_uri:
     bucket, _, key = data_yaml_uri.removeprefix("s3://").partition("/")
     folder = key.rsplit("/", 1)[0]
     manifest = json.loads(s3.get_object(Bucket=bucket, Key=f"{folder}/manifest.json")["Body"].read())
+    from ..audit_files import version_file_rows
+    file_rows = version_file_rows(audit_id, manifest, BUCKET)
+    written = {"train": 0, "eval": 0}
+    if audit_id:
+        try:
+            with training_files_table().batch_writer() as batch:
+                for item in file_rows:
+                    batch.put_item(Item=item)
+                    written[item["role"]] += 1
+        except Exception as exc:
+            print(f"Could not write version file rows for {audit_id}: {exc}")
 
     def block(names: list, uri: str, role: str) -> dict:
         shown = [n.split("/", 1)[1] if n.split("/", 1)[0] == BUCKET else n for n in names]
-        rows = write_file_rows(audit_id, role, shown, "", {}) if (audit_id and role) else 0
+        rows = written[role]
         return {"folder": f"{folder} (dataset version)", "s3_uri": uri,
-                "file_count": len(shown), "label_count": 0,
+                "file_count": len(shown), "label_count": len(shown),
                 "file_names": shown[:AUDIT_MAX_FILE_NAMES],
                 "source_folders": list(manifest.get("sources") or [])[:8],
                 "truncated": len(shown) > AUDIT_MAX_FILE_NAMES, "file_rows": rows,

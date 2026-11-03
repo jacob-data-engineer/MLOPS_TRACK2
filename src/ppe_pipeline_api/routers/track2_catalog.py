@@ -96,12 +96,18 @@ def version_files_csv(version_id: str, session=Depends(require_session)) -> Plai
 class ExportRequest(BaseModel):
     kind: str          # "run" or "version"
     id: str
+    destination: str = "local"
+    bucket: str = ""
+    prefix: str = ""
+    format: str | None = None
 
 
 @router.post("/exports")
 def start_export(payload: ExportRequest, session=Depends(require_session)) -> dict:
     """Build a zip of a run or a dataset version, in the background."""
-    return _guard(lambda: catalog_view.start_export(payload.kind, payload.id))
+    return _guard(lambda: catalog_view.start_export(
+        payload.kind, payload.id, destination=payload.destination,
+        bucket=payload.bucket, prefix=payload.prefix, format=payload.format))
 
 
 @router.get("/exports")

@@ -21,9 +21,11 @@ import datetime as _dt
 import hashlib
 import io
 import json
+import re
 import threading
 import uuid
 import zipfile
+from botocore.exceptions import ClientError
 from concurrent.futures import ThreadPoolExecutor
 
 from .. import pull_control as pc
@@ -59,6 +61,15 @@ def _iso(rows: list[dict]) -> list[dict]:
 
 
 # --- browsing ---------------------------------------------------------------
+
+def run_numbers(run_ids: list[str]) -> dict[str, int]:
+    """Stable catalog numbers for history entries, independent of display order."""
+    if not run_ids or not catalog.configured():
+        return {}
+    placeholders = ", ".join(["%s"] * len(run_ids))
+    return {row["run_id"]: row["run_number"] for row in _rows(
+        f"SELECT run_id, run_number FROM training_runs WHERE run_id IN ({placeholders})",
+        tuple(run_ids))}
 
 def runs(limit: int = PAGE, offset: int = 0) -> dict:
     total = _rows("SELECT count(*) AS n FROM training_runs")[0]["n"]
@@ -196,8 +207,10 @@ def _fetch(uri: str) -> bytes | None:
     bucket, key = _split_uri(uri)
     try:
         return storage.s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-    except Exception:                                              # noqa: BLE001
-        return None
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "NotFound", "404"):
+            return None
+        raise
 
 
 def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | None, str]:
@@ -232,6 +245,8 @@ def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | No
             names = got[0]["class_names"] if got else None
         for f in _rows("SELECT s3_uri, role, split, kind FROM run_files WHERE run_id = %s"
                        " ORDER BY file_key", (ident,)):
+            if not str(f["s3_uri"] or "").startswith("s3://"):
+                raise ValueError("This run has incomplete file addresses. Repair its audit records before exporting.")
             leaf = f["s3_uri"].rsplit("/", 1)[-1]
             side = "eval/" if f["role"] == "eval" else ""
             sub = "images" if f["kind"] == "image" else "labels"
@@ -289,12 +304,54 @@ def _export_bucket() -> tuple[str, str]:
     return bucket, f"{folder}/_exports" if folder else "_exports"
 
 
-def _build(export_id: str, kind: str, ident: str, label: str, entries: list, names) -> None:
+class _ObjectWriter:
+    """Write actual files into a unique S3 export folder, in the ZIP layout."""
+
+    def __init__(self, bucket: str, prefix: str):
+        self.bucket, self.prefix, self.size = bucket, prefix, 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def writestr(self, path, body):
+        if isinstance(path, zipfile.ZipInfo):
+            path = path.filename
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        storage.s3.put_object(Bucket=self.bucket, Key=f"{self.prefix}/{path}", Body=body)
+        self.size += len(body)
+
+
+def _destination(destination: str, bucket: str, prefix: str) -> tuple[str, str]:
+    if destination not in ("local", "s3"):
+        raise ValueError("Choose local PC or S3 as the export destination.")
+    if destination == "local":
+        return _export_bucket()
+    bucket, prefix = bucket.strip(), prefix.strip().strip("/")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
+        raise ValueError("Enter an S3 bucket name, without s3:// or a folder path.")
+    if any(part in (".", "..") for part in prefix.split("/")) or "\\" in prefix or any(ord(c) < 32 for c in prefix):
+        raise ValueError("Enter a valid S3 folder prefix, without dot segments or backslashes.")
+    return bucket, prefix
+
+
+def _build(export_id: str, kind: str, ident: str, label: str, entries: list, names,
+           destination: str = "local", bucket: str = "", prefix: str = "", format: str | None = None) -> None:
     sink = None
     try:
-        bucket, prefix = _export_bucket()
-        key = f"{prefix}/{export_id}/{label}.zip"
-        sink = _MultipartSink(bucket, key)
+        if not bucket:
+            bucket, prefix = _export_bucket()
+        folder = "/".join(p for p in (prefix, f"{label}-{export_id}") if p)
+        key = f"{folder}/{label}.zip"
+        format = format or ("zip" if destination == "local" else "folder")
+        if format == "zip":
+            sink = _MultipartSink(bucket, key)
+            output = zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True)
+        else:
+            output = _ObjectWriter(bucket, folder)
         manifest = io.StringIO()
         writer = csv.DictWriter(manifest, fieldnames=["path", "source", "role", "split",
                                                       "included", "reason", "decay_weight",
@@ -302,7 +359,7 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                                 extrasaction="ignore")
         writer.writeheader()
         packed, missing = 0, 0
-        with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+        with output as zf:
             wanted = [e for e in entries if e[0]]
             with ThreadPoolExecutor(max_workers=FETCHERS) as pool:
                 for start in range(0, len(wanted), FETCHERS * 4):
@@ -321,13 +378,18 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
             numbered = _numbered(names)
             if numbered:
                 lines = "\n".join(f"  {k}: {v}" for k, v in sorted(numbered.items()))
-                zf.writestr("data.yaml", "path: .\ntrain: images/train\nval: images/val\n"
+                val_path = "eval/images/val" if any(p.startswith("eval/images/val/") for p, _, _ in entries) else "images/val"
+                zf.writestr("data.yaml", f"path: .\ntrain: images/train\nval: {val_path}\n"
                                          f"names:\n{lines}\n")
             zf.writestr("manifest.csv", manifest.getvalue())
-        sink.finish()
-        _finish(export_id, "UPDATE exports SET state = 'ready', finished_at = now(), zip_uri = %s,"
-                           " bytes = %s, files = %s, missing = %s WHERE id = %s",
-                (f"s3://{bucket}/{key}", sink.size, packed, missing, export_id))
+        if sink:
+            sink.finish()
+        state = "partial" if missing else "ready"
+        _finish(export_id, "UPDATE exports SET state = %s, finished_at = now(), zip_uri = %s,"
+                           " bytes = %s, files = %s, missing = %s, destination_uri = %s WHERE id = %s",
+                (state, f"s3://{bucket}/{key}" if sink else None,
+                 sink.size if sink else output.size, packed, missing,
+                 f"s3://{bucket}/{key}" if sink else f"s3://{bucket}/{folder}/", export_id))
     except Exception as exc:                                       # noqa: BLE001
         if sink:
             sink.abort()
@@ -355,11 +417,16 @@ def _finish(export_id: str, sql: str, params: tuple) -> None:
                 print(f"Export {export_id}: could not record its result: {exc}")
 
 
-def start_export(kind: str, ident: str) -> dict:
+def start_export(kind: str, ident: str, *, destination: str = "local",
+                 bucket: str = "", prefix: str = "", format: str | None = None) -> dict:
     """Start building a zip of a run or a dataset version. Returns at once;
     `exports()` shows its progress."""
     if kind not in ("run", "version"):
         raise ValueError("Export a run or a dataset version.")
+    bucket, prefix = _destination(destination, bucket, prefix)
+    format = format or ("zip" if destination == "local" else "folder")
+    if format not in ("zip", "folder") or (destination == "local" and format != "zip"):
+        raise ValueError("Choose ZIP for a local download, or ZIP / folder for S3.")
     entries, names, label = _plan(kind, ident)
     if not any(path for path, _, _ in entries):
         raise ValueError("Nothing to export: no files are recorded for it.")
@@ -370,31 +437,32 @@ def start_export(kind: str, ident: str) -> dict:
         conn = catalog.connect()
         try:
             conn.cursor().execute(
-                "INSERT INTO exports (id, version_id, run_id, label, state, files)"
-                " VALUES (%s, %s, %s, %s, 'building', %s)",
+                "INSERT INTO exports (id, version_id, run_id, label, state, files, destination, destination_uri, format)"
+                " VALUES (%s, %s, %s, %s, 'building', %s, %s, %s, %s)",
                 (export_id, ident if kind == "version" else None,
                  ident if kind == "run" else None, label,
-                 sum(1 for path, _, _ in entries if path)))
+                 sum(1 for path, _, _ in entries if path), destination,
+                 f"s3://{bucket}/" + "/".join(p for p in (prefix, f"{label}-{export_id}") if p) + "/", format))
             conn.commit()
         finally:
             conn.close()
     except Exception:
         _building.release()
         raise
-    threading.Thread(target=_build, args=(export_id, kind, ident, label, entries, names),
+    threading.Thread(target=_build, args=(export_id, kind, ident, label, entries, names, destination, bucket, prefix, format),
                      name=f"export-{export_id}", daemon=True).start()
     return {"id": export_id, "label": label, "state": "building"}
 
 
 def exports(limit: int = 50) -> list[dict]:
     return _iso(_rows("SELECT id, label, version_id, run_id, state, created_at, finished_at,"
-                      " bytes, files, missing, error FROM exports"
+                      " bytes, files, missing, error, destination, destination_uri, format FROM exports"
                       " ORDER BY created_at DESC LIMIT %s", (min(int(limit), 200),)))
 
 
 def download_url(export_id: str) -> str:
     rows = _rows("SELECT zip_uri, label, state FROM exports WHERE id = %s", (export_id,))
-    if not rows or rows[0]["state"] != "ready" or not rows[0]["zip_uri"]:
+    if not rows or rows[0]["state"] not in ("ready", "partial") or not rows[0]["zip_uri"]:
         raise ValueError("That export is not ready.")
     bucket, key = _split_uri(rows[0]["zip_uri"])
     return storage.s3.generate_presigned_url(

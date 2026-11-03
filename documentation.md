@@ -197,14 +197,27 @@ it. A version marked *deleted* was removed in the app but is kept here.
 **Click a run or version** to see its files: filter by split (and for runs,
 training or evaluation), *Show thumbnails*, page through 100 at a time.
 
-- **Download file list (CSV)** — every file's S3 path and split.
-- **Export as zip** — the files themselves, built in the background into the
-  central data store. Watch it on the **Exports** tab; press **Download**
-  when it says *ready* (link valid one hour). The zip has `images/`,
-  `labels/`, `data.yaml` and `manifest.csv`.
+- **File paths only (CSV)** — an inventory of paths and splits, not the files.
+- **Local PC (download ZIP)** — press **Prepare ZIP for PC** to package the
+  actual images, labels, and metadata in the background. On **Exports**, press
+  **Download ZIP** when ready (link valid one hour). Your browser controls the
+  local save location.
+- **S3 bucket** — select an available bucket and browse its folders.
+  Choose an existing folder, or enter a new name and press **Create & use**.
+  Choose **ZIP archive** or **Folder (individual images and labels)**, then
+  press **Export ZIP to S3** or **Copy files to S3 folder**. New folders are
+  created as files are written. Exports are stored
+  under a new `<run-or-version>-<export-id>/` subfolder; its address appears in
+  the Exports table. The app's AWS role needs read access to the sources and
+  write access to the destination; choosing a bucket does not grant access.
+- Both destinations preserve `images/`, `labels/`, `manifest.csv`, and
+  `data.yaml` when class names are known. The Exports tab also lets you export
+  an existing entry again to either destination.
 
-If an export shows *(N missing)*, those files were moved or deleted from
-their folders after the version was frozen; `manifest.csv` names them.
+An export with missing source files is marked **Incomplete**; `manifest.csv`
+names them. Its available files can still be downloaded or inspected in S3.
+Permission or transfer errors mark the export **failed**. An interrupted S3
+copy can leave some files in its unique subfolder; retrying uses a new folder.
 
 ---
 

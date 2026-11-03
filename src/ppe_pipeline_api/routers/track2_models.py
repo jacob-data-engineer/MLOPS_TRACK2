@@ -10,6 +10,7 @@ router is mostly just parameter parsing + response shaping."""
 from __future__ import annotations
 
 import uuid
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
@@ -19,6 +20,7 @@ from .. import dataset_yaml as dy
 from .. import hyperparams as hp
 from .. import track2_shared as t2
 from ..auth import require_session
+from ..data import catalog_view
 
 router = APIRouter()
 
@@ -142,7 +144,13 @@ def training_audit(limit: int = 50, session=Depends(require_session)) -> dict:
     """Full record of every submitted run: the exact folders and file names
     on both sides, every parameter, the notes, which model version came out
     of it, and when it started and ended."""
-    return {"audits": t2.scan_training_audits(limit=min(max(limit, 1), 200))}
+    audits = t2.scan_training_audits(limit=min(max(limit, 1), 200))
+    try:
+        numbers = catalog_view.run_numbers([a["id"] for a in audits])
+    except Exception:
+        logging.getLogger(__name__).warning("Could not load catalog run numbers", exc_info=True)
+        numbers = {}
+    return {"audits": [{**a, "run_number": numbers.get(a["id"])} for a in audits]}
 
 
 @router.get("/audit/{audit_id}/export.csv")

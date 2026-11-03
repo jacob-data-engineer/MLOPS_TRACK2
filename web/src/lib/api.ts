@@ -468,6 +468,7 @@ export interface Track2TrainingAuditDataset {
 
 export interface Track2TrainingAudit {
   id: string;
+  run_number?: number | null;
   /** Which Class the run was for. The registry group implies it, but
    * only to somebody who knows how those names are built -- and a run
    * that never reached registration has no group at all. */
@@ -3812,7 +3813,10 @@ export interface Track2CatalogExport {
   label: string;
   version_id: string | null;
   run_id: string | null;
-  state: "building" | "ready" | "failed";
+  state: "building" | "ready" | "partial" | "failed";
+  destination: "local" | "s3";
+  destination_uri: string | null;
+  format: "zip" | "folder";
   created_at: string;
   finished_at: string | null;
   bytes: number | null;
@@ -3870,10 +3874,18 @@ export async function downloadTrack2CatalogCsv(kind: "run" | "version", id: stri
 }
 
 /** Start building a zip of a run or a dataset version, in the background. */
-export function startTrack2CatalogExport(kind: "run" | "version", id: string): Promise<{
+export interface CatalogExportDestination {
+  destination: "local" | "s3";
+  bucket: string;
+  prefix: string;
+  format: "zip" | "folder";
+}
+
+export function startTrack2CatalogExport(kind: "run" | "version", id: string,
+  options?: CatalogExportDestination): Promise<{
   id: string; label: string; state: string;
 }> {
-  return apiPost("/track2/catalog/exports", { kind, id });
+  return apiPost("/track2/catalog/exports", { kind, id, ...options });
 }
 
 export function getTrack2CatalogExports(): Promise<{ exports: Track2CatalogExport[] }> {
