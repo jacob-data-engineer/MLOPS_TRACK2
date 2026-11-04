@@ -449,3 +449,20 @@ def test_the_start_button_sits_under_the_stopped_database():
     page = (ROOT / "web" / "src" / "routes" / "Track2SqlPage.tsx").read_text(encoding="utf-8")
     assert 'onClick={() => switchPower(true)}' in page
     assert "runId.current += 1;      // abandon a search against the old one" in page
+
+
+def test_switching_to_a_stopped_database_never_queries_it():
+    """UAT-02 (2026-11-04): after switching from a running database to a
+    stopped one, the old database's class list was still in hand for one
+    render, so a frame query went to the stopped host and spun until it
+    timed out (HTTP 400)."""
+    page = (ROOT / "web" / "src" / "routes" / "Track2SqlPage.tsx").read_text(encoding="utf-8")
+    # the class list is tied to the database it came from ...
+    assert "const pickedClass = classesFor === database && chosen?.available" in page
+    # ... a late answer for the previous database is dropped ...
+    assert "return () => { current = false; };" in page
+    # ... and nothing runs against a database that is not available
+    assert "if (!settingsRead || !database || !chosen?.available || !pickedClass) return;" in page
+    assert "[settingsRead, database, chosen?.available, pickedClass?.name, presetScope]" in page
+    # switching still abandons whatever was running against the old one
+    assert "runId.current += 1;      // abandon a search against the old one" in page

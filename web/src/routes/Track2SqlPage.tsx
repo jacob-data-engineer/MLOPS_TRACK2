@@ -176,15 +176,26 @@ export function Track2SqlPage() {
       .finally(() => setPower(""));
   }
 
+  // The class list belongs to ONE database. Without this, the render in
+  // which the database changes still holds the old database's classes, and
+  // the effect below would run a query against the new -- possibly stopped
+  // -- database (UAT-02, 2026-11-04).
+  const [classesFor, setClassesFor] = useState("");
   useEffect(() => {
     setClasses(null);
+    setClassesFor("");
     if (!database || !chosen?.available) return;
+    let current = true;
     getTrack2SqlClasses(database)
-      .then((res) => setClasses(res.classes))
-      .catch(() => setClasses([]));
+      .then((res) => { if (current) { setClasses(res.classes); setClassesFor(database); } })
+      .catch(() => { if (current) { setClasses([]); setClassesFor(database); } });
+    // A late answer for a database no longer chosen is dropped.
+    return () => { current = false; };
   }, [database, chosen?.available]);
 
-  const pickedClass = classes?.find((c) => c.name === presetClass);
+  const pickedClass = classesFor === database && chosen?.available
+    ? classes?.find((c) => c.name === presetClass)
+    : undefined;
   const scopeAllowed = (scope: Track2SqlPresetScope) =>
     scope === "resolved" || !pickedClass || pickedClass.has_boxes;
 
@@ -192,14 +203,15 @@ export function Track2SqlPage() {
   // button -- the drop-downs are the whole control. Waits for the class
   // list so a saved class is only run once the database has confirmed it.
   useEffect(() => {
-    if (!settingsRead || !database || !pickedClass) return;
+    // Never query a database that is not running: it can only time out.
+    if (!settingsRead || !database || !chosen?.available || !pickedClass) return;
     const scope = scopeAllowed(presetScope) ? presetScope : "resolved";
     if (scope !== presetScope) {
       setPresetScope(scope);
       return;
     }
     void showClass(pickedClass.name, scope);
-  }, [settingsRead, database, pickedClass?.name, presetScope]);
+  }, [settingsRead, database, chosen?.available, pickedClass?.name, presetScope]);
 
   async function showClass(name: string, scope: Track2SqlPresetScope) {
     const mine = ++runId.current;
