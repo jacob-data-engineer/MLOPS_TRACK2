@@ -73,6 +73,19 @@ Fix direction: trace concurrent configuration writes and make updates atomic or 
 
 **Next action:** fix and retest R1–R4 before treating the preservation feature and durable settings cleanup as fully accepted. No application fixes or Git commits were made during this independent verification.
 
+### Remediation of R1–R4 (4 November 2026, 19:40–20:10 SGT)
+
+Each fixed on branch `export`, deployed to development (8090) only, retested live, then committed and pushed one per commit. Development now runs **`20261104-120224`**. Automated suite: **2,572 passed, 0 failed**. Production was not touched.
+
+| Issue | Commit | Fix | Live retest (development) | Result |
+|---|---|---|---|---|
+| R1 | `1cca9e4` | Exports read the copy kept at freeze first; the original is used only if that copy is gone **and** the original still has the frozen ETag, otherwise it is listed as missing with the reason in `manifest.csv`. Behavioural tests for an overwritten image and label | Build `20261104-114123`: froze **Version 84** from scratch data, overwrote one image and its label after freeze, exported → ready, 6 files, 0 missing, zip holds the frozen bytes, not the overwrite | **PASS** |
+| R2 | `2f133e8` | Run exports match each run file to its version member by original address and use that member's kept copy; the run's role/split layout is kept; non-members (eval set) are read from where they were | Build `20261104-115210`: runs 56–58 match 100% of their training files to their version members (15,992/15,992, 13,524/13,524). No run has yet trained on a preserved version, so the deleted-original case is covered by a behavioural test, not live | **PASS (code path); live end-to-end awaits a run on a preserved version** |
+| R3 | `4f7c202` | `preserved.json` records images kept/missing, labels expected/kept/missing, failed copies and `complete`; `preserve_missing` includes missing labels; only a 404 counts as absent, and a copy error leaves the version un-preserved so the tick retries it | Build `20261104-115210`: froze **Version 85** from scratch data with one label left out → labels_missing 1, preserve_missing 1, complete false, failed 0 | **PASS** |
+| R4 | `4b73bca` | Settings writes are conditional on a per-write revision, retried with jitter and re-merged from a fresh read; deleting a file decides what to clear on each fresh read | Build `20261104-120224`: 5 rounds of a delete racing 36 concurrent card-state saves → name cleared every time, 0 save errors, card state unchanged, baseline `settings_file_dp` restored | **PASS** |
+
+Not covered: the stable container (8501) and the router Lambda still run the older unconditional write until they are promoted. A newer writer never overwrites their writes, but one of their writes can still overwrite a newer one. Test data retained: Versions 84 and 85 (scratch originals deleted), their kept objects, and export `0a6c6586e2b2`.
+
 
 ## Remediation (4 November 2026, 18:30–19:20 SGT)
 
