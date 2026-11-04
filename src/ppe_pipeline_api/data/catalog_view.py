@@ -267,11 +267,24 @@ def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | No
         run = _rows("SELECT run_number, version_id FROM training_runs WHERE run_id = %s", (ident,))
         if not run:
             raise ValueError(f"No run {ident}.")
-        names = None
+        names, stored = None, {}
         if run[0]["version_id"]:
             got = _rows("SELECT class_names FROM dataset_versions WHERE id = %s",
                         (run[0]["version_id"],))
             names = got[0]["class_names"] if got else None
+            # The copies kept when the run's version was frozen, by original
+            # address (R2, independent UAT 2026-11-04): a run export read
+            # only the originals, so a run on a preserved version still lost
+            # every file whose original had gone. A run file that is not a
+            # member of the version (its evaluation set, say) has no copy and
+            # is read from where it was, as before.
+            catalog.ensure_schema_once()
+            for m in _rows("SELECT image_uri, label_uri, stored_image_uri, stored_label_uri"
+                           " FROM dataset_members WHERE version_id = %s", (run[0]["version_id"],)):
+                if m["stored_image_uri"]:
+                    stored[m["image_uri"]] = m["stored_image_uri"]
+                if m["label_uri"] and m["stored_label_uri"]:
+                    stored[m["label_uri"]] = m["stored_label_uri"]
         for f in _rows("SELECT s3_uri, role, split, kind FROM run_files WHERE run_id = %s"
                        " ORDER BY file_key", (ident,)):
             if not str(f["s3_uri"] or "").startswith("s3://"):
@@ -281,7 +294,8 @@ def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | No
             sub = "images" if f["kind"] == "image" else "labels"
             path = unique(f"{side}{sub}/{f['split'] or 'train'}/{leaf}", f["s3_uri"])
             entries.append((path, f["s3_uri"], {"path": path, "source": f["s3_uri"],
-                                                "role": f["role"], "split": f["split"]}))
+                                                "role": f["role"], "split": f["split"],
+                                                "stored": stored.get(f["s3_uri"], "")}))
         return entries, names, f"run-{run[0]['run_number']}"
 
     version = _rows("SELECT version_number, class_names FROM dataset_versions WHERE id = %s",

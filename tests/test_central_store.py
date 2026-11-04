@@ -142,3 +142,51 @@ def test_a_changed_original_is_reported_not_packed_when_the_copy_is_gone(monkeyp
     assert files["labels/train/a.txt"] == b"ORIGINAL-LBL"   # unchanged original is still good
     assert params[0] == "partial" and params[3:5] == (1, 1)
     assert b"original changed since freeze" in files["manifest.csv"]
+
+
+# --- R2 (independent UAT, 2026-11-04): a run export uses the copies kept for
+# the run's version, keeping the run's own role/split layout.
+
+def test_a_run_export_reads_the_kept_copy_of_a_gone_original(monkeypatch):
+    from ppe_pipeline_api.data import catalog, catalog_view as cv
+    monkeypatch.setattr(catalog, "ensure_schema_once", lambda: None)
+
+    def rows(sql, params=()):
+        if "FROM training_runs" in sql:
+            return [{"run_number": 7, "version_id": "dv-1"}]
+        if "class_names FROM dataset_versions" in sql:
+            return [{"class_names": ["helmet"]}]
+        if "FROM dataset_members" in sql:
+            return [{"image_uri": "s3://src/images/a.jpg", "label_uri": "s3://src/labels/a.txt",
+                     "stored_image_uri": "s3://home/store/objects/tag-ORIGINAL-IMG.jpg",
+                     "stored_label_uri": "s3://home/store/objects/tag-ORIGINAL-LBL.txt"}]
+        if "FROM run_files" in sql:
+            return [{"s3_uri": "s3://src/images/a.jpg", "role": "train", "split": "val", "kind": "image"},
+                    {"s3_uri": "s3://src/labels/a.txt", "role": "train", "split": "val", "kind": "label"},
+                    {"s3_uri": "s3://src/eval/e.jpg", "role": "eval", "split": "val", "kind": "image"}]
+        return [{"state": "building"}]
+
+    monkeypatch.setattr(cv, "_rows", rows)
+    entries, names, label = cv._plan("run", "r-1")
+    assert label == "run-7" and names == ["helmet"]
+    by_path = {p: row for p, _, row in entries}
+    assert by_path["images/val/a.jpg"]["stored"].endswith("tag-ORIGINAL-IMG.jpg")
+    assert by_path["labels/val/a.txt"]["stored"].endswith("tag-ORIGINAL-LBL.txt")
+    assert by_path["eval/images/val/e.jpg"]["stored"] == ""    # not a member: no copy assumed
+
+    import threading
+    s3 = _ExportS3({("home", "store/objects/tag-ORIGINAL-IMG.jpg"): b"ORIGINAL-IMG",
+                    ("home", "store/objects/tag-ORIGINAL-LBL.txt"): b"ORIGINAL-LBL",
+                    ("src", "eval/e.jpg"): b"EVAL"})                     # originals of a.* gone
+    monkeypatch.setattr(cv.storage, "s3", s3)
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(cv, "_building", slots)
+    finished = []
+    monkeypatch.setattr(cv, "_finish", lambda *a: finished.append(a))
+    cv._build("y", "run", "r-1", label, entries, names, "s3", "out", "exp", "folder")
+    files = {k.split("run-7-y/", 1)[1]: v[0] for (b, k), v in s3.objects.items() if b == "out"}
+    assert files["images/val/a.jpg"] == b"ORIGINAL-IMG"
+    assert files["labels/val/a.txt"] == b"ORIGINAL-LBL"
+    assert files["eval/images/val/e.jpg"] == b"EVAL"
+    assert finished[-1][2][0] == "ready" and finished[-1][2][3:5] == (3, 0)
