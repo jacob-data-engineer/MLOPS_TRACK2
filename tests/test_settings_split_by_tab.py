@@ -199,3 +199,32 @@ def test_legacy_training_file_preserves_pull_schedule(live):
     pc.load_settings_file(name="legacy_AT", scope="at")
     assert pc.read_config()["mode"] == "schedule"
     assert not live
+
+
+# --- UAT-03 (2026-11-04): a loaded file puts this tab's cards back -------------
+
+def test_a_card_left_at_its_default_returns_to_it_on_load(live):
+    """Saved with Assemble open BY DEFAULT (no key recorded), closed later,
+    loaded: Assemble must open again -- the closed toggle may not survive."""
+    pc.write_config({"card_state": {"training_advanced": True}})   # Assemble untouched
+    pc.save_settings_file(name="uat03", scope="dp")
+    pc.write_config({"card_state": {"assemble": False, "training_advanced": True}})
+    pc.load_settings_file(name="uat03_DP", scope="dp")
+    cards = pc.read_config()["card_state"]
+    assert "assemble" not in cards                    # back to its default (open)
+    assert cards["training_advanced"] is True         # the other tab untouched
+
+
+def test_explicit_card_states_round_trip_in_both_tabs(live):
+    pc.write_config({"card_state": {"golden_set": True, "pull_control": False,
+                                    "training_advanced": False}})
+    pc.save_settings_file(name="r", scope="dp")
+    pc.save_settings_file(name="r", scope="at")
+    pc.write_config({"card_state": {"golden_set": False, "pull_control": True,
+                                    "training_advanced": True}})
+    pc.load_settings_file(name="r_DP", scope="dp")
+    assert pc.read_config()["card_state"] == {"golden_set": True, "pull_control": False,
+                                              "training_advanced": True}
+    pc.load_settings_file(name="r_AT", scope="at")
+    assert pc.read_config()["card_state"] == {"golden_set": True, "pull_control": False,
+                                              "training_advanced": False}

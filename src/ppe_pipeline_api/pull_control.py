@@ -3417,10 +3417,15 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True,
             recipe = config["training_data_preparation"].get("config") or {}
             update.update({key: recipe[key] for key in TRAINING_DATA_KEYS if key in recipe})
         if scope:
-            # Merged, not replaced: the record also holds the other tab's
-            # cards, and `write_config` replaces a top-level key whole.
-            update["card_state"] = {**(live.get("card_state") or {}),
-                                    **(config.get("card_state") or {})}
+            # The OTHER tab's cards are kept; THIS tab's are replaced by the
+            # file's. A card left at its default is never written to a file
+            # (only toggles are), so merging on top let a later toggle
+            # survive the load -- save with Assemble open, close it, load,
+            # and it stayed closed (UAT-03, 2026-11-04). Cleared, a card the
+            # file does not mention falls back to its own default.
+            other = {k: v for k, v in (live.get("card_state") or {}).items()
+                     if (k in DP_CARDS) != (scope == "dp")}
+            update["card_state"] = {**other, **(config.get("card_state") or {})}
             update[f"settings_file_{scope}"] = name
         else:
             # The file's own name wins over any `settings_file` inside it: a
