@@ -326,6 +326,15 @@ def create(*, home: str, yaml_text: str, prefixes: list,
         "state": "created",
     }
     _row_put(version)
+    # Keep every file it uses, so the version can always be rebuilt even
+    # after its source folders change (UAT-01). In the background: queueing
+    # a run must not wait for the copies.
+    try:
+        from . import central_store
+        central_store.preserve_in_background(version)
+    except Exception as exc:                                        # noqa: BLE001
+        print(json.dumps({"dataset_version": "preserve_not_started", "id": vid,
+                          "error": str(exc)}))
     return version
 
 

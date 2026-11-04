@@ -50,7 +50,7 @@ CA_BUNDLE = pathlib.Path(__file__).with_name("rds-ca-bundle.pem")
 
 #: The schema's version: SCHEMA is version 1, and each entry in MIGRATIONS
 #: takes it one step further. Recorded in `schema_version`.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS schema_version (
@@ -214,6 +214,18 @@ MIGRATIONS = {
         "ALTER TABLE exports ADD COLUMN IF NOT EXISTS format text NOT NULL DEFAULT 'zip'",
         "UPDATE exports SET format = 'folder' WHERE destination = 's3' AND zip_uri IS NULL",
     ],
+    # Version 8 (2026-11-04, UAT-01): every file a version uses is copied
+    # into the central data store at freeze; the copy is recorded per file,
+    # and whether (and when) the version was preserved, on the version.
+    8: [
+        "ALTER TABLE dataset_members ADD COLUMN IF NOT EXISTS stored_image_uri text",
+        "ALTER TABLE dataset_members ADD COLUMN IF NOT EXISTS stored_label_uri text",
+        "ALTER TABLE dataset_members ADD COLUMN IF NOT EXISTS image_etag text",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS preserved_at timestamptz",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS preserved_files integer",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS preserve_missing integer",
+        "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS preserve_error text",
+    ],
 }
 
 TABLES = ("files", "file_sources", "labels", "dataset_versions",
@@ -257,6 +269,19 @@ def connect(timeout=15):
     cur.execute("SELECT set_config('search_path', %s, false)", (schema,))
     conn.commit()
     return conn
+
+
+_schema_ensured = False
+
+
+def ensure_schema_once() -> None:
+    """Apply any new schema step once per container. With the PostgreSQL
+    record backend the schema is otherwise only migrated at cutover, so a
+    step added later would never reach a running catalog."""
+    global _schema_ensured
+    if not _schema_ensured and configured():
+        ensure_schema(report=False)
+        _schema_ensured = True
 
 
 def ensure_schema(report: bool = True) -> dict:

@@ -260,10 +260,13 @@ def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | No
                     (ident,))
     if not version:
         raise ValueError(f"No dataset version {ident}.")
-    for m in _rows("SELECT image_uri, label_uri, split, included, reason, decay_weight, week"
+    catalog.ensure_schema_once()
+    for m in _rows("SELECT image_uri, label_uri, split, included, reason, decay_weight, week,"
+                   " stored_image_uri, stored_label_uri"
                    " FROM dataset_members WHERE version_id = %s ORDER BY image_uri", (ident,)):
         row = {"split": m["split"], "included": m["included"], "reason": m["reason"],
-               "decay_weight": m["decay_weight"], "week": m["week"]}
+               "decay_weight": m["decay_weight"], "week": m["week"],
+               "stored": m["stored_image_uri"] or ""}
         if not m["included"]:
             # Recorded in the manifest, not packed: it was not trained on.
             entries.append(("", m["image_uri"], {**row, "path": "", "source": m["image_uri"]}))
@@ -274,7 +277,8 @@ def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | No
         if m["label_uri"]:
             label_path = path.replace("images/", "labels/", 1).rsplit(".", 1)[0] + ".txt"
             entries.append((label_path, m["label_uri"],
-                            {**row, "path": label_path, "source": m["label_uri"]}))
+                            {**row, "path": label_path, "source": m["label_uri"],
+                             "stored": m["stored_label_uri"] or ""}))
     return entries, version[0]["class_names"], f"version-{version[0]['version_number']}"
 
 
@@ -388,7 +392,12 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
     def fetch(entry):
         if event.is_set():
             raise _ExportStopped()
-        return _fetch(entry[1])
+        # The original first; the copy kept in the central store at freeze
+        # when the original has gone (UAT-01).
+        body = _fetch(entry[1])
+        if body is None and entry[2].get("stored"):
+            body = _fetch(entry[2]["stored"])
+        return body
 
     try:
         check(True)

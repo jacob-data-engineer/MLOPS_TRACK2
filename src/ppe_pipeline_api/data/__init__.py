@@ -32,6 +32,8 @@ __all__ = [
     "read_selection",
     # the catalog: records copied from DynamoDB into SQL on the tick
     "catalog_configured", "start_catalog_sync", "catalog_sync_slot",
+    # the central data store: files of frozen versions, kept for good
+    "preserve_catch_up",
 ]
 
 scan_weeks = _through(__name__, "dataset_yaml", "scan_root")
@@ -60,6 +62,7 @@ read_selection = _through(__name__, "selection", "read_selection")
 catalog_configured = _through(__name__, "catalog", "configured")
 start_catalog_sync = _through(__name__, "catalog_sync", "start_background")
 catalog_sync_slot = _through(__name__, "catalog_sync", "due")
+preserve_catch_up = _through(__name__, "central_store", "catch_up")
 
 _CONSTANTS = {
     "RETAINED_FOLDER": ("retained_lists", "FOLDER"),

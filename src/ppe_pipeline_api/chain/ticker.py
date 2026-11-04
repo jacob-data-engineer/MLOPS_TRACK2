@@ -77,6 +77,16 @@ async def queue_poll_loop() -> None:
                 _data.start_catalog_sync()
         except Exception as exc:
             print(f"Catalog sync tick failed: {exc}")
+        # Finish keeping the files of any version whose copying was cut
+        # short (a container restart mid-copy), one container per slot.
+        try:
+            from .. import data as _data
+            from .. import pull_control as _pcc
+            if _data.catalog_configured() and await asyncio.to_thread(
+                    _pcc.claim_once, "central_store_catch_up", _data.catalog_sync_slot(), days=1):
+                await asyncio.to_thread(_data.preserve_catch_up)
+        except Exception as exc:
+            print(f"Central store catch-up failed: {exc}")
         # ...and start a retrain if its OWN clock says one is due.
         #
         # On this tick rather than a schedule of its own in AWS: the
