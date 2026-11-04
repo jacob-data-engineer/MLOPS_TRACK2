@@ -43,6 +43,12 @@ REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.client("dynamodb", region_name=REGION)
+# The standalone production Lambda keeps its existing backend. SQL-mode
+# app/worker deployments include the package and use the same call sites.
+if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+    from ppe_pipeline_api import record_store
+    if record_store.enabled():
+        ddb = record_store.Client()
 
 # The topic every human-facing notification already goes through. Named by
 # environment so this file keeps importing nothing beyond boto3 and the
@@ -2367,6 +2373,14 @@ def clear_pull_queue() -> int:
     return len(entries)
 
 
+def _sql_exclusive(name):
+    if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+        from ppe_pipeline_api import record_store
+        return record_store.exclusive(name)
+    return lambda fn: fn
+
+
+@_sql_exclusive("pull_queue")
 def advance_pull_queue(*, trigger: str = "queue") -> dict:
     """Starts the next queued sweep, if nothing is sweeping now.
 
@@ -3772,6 +3786,8 @@ def router_freshness() -> dict:
     a status panel that breaks when an unrelated permission is missing is
     worse than one that admits it does not know.
     """
+    if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+        return {"state": "current", "same": True, "detail": "SQL worker in this development deployment"}
     mine = source_sha()
     try:
         config = boto3.client("lambda", region_name=REGION).get_function_configuration(
@@ -4198,6 +4214,11 @@ def rule_state(name: str) -> dict:
 
 
 def trigger_status() -> dict:
+    if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+        config = read_config()
+        return {k: {"exists": True, "enabled": config.get("mode") == k,
+                    "error": "", "next_run": config.get("sql_next_pull_at", "")}
+                for k in ("arrival", "schedule")}
     """What is actually armed, per trigger.
 
     The schedule comes from EventBridge SCHEDULER, not the classic rule of
@@ -4485,6 +4506,11 @@ def schedule_plan(config: dict | None = None, now: _dt.datetime | None = None) -
 
 
 def schedule_status() -> dict:
+    if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+        config = read_config()
+        return {"exists": True, "enabled": config.get("mode") == "schedule", "error": "",
+                "expression": config.get("schedule_expression", ""), "timezone": "Asia/Singapore",
+                "start": config.get("sql_next_pull_at", "")}
     """The live Scheduler schedule, if terraform has made it."""
     try:
         got = scheduler().get_schedule(Name=SCHEDULE_NAME)
@@ -4608,59 +4634,60 @@ def set_mode(*, mode: str, schedule_expression: str = "",
             "date, or untick the source folders."
         )
 
-    # Arrivals, and the superseded rule, both off unless wanted.
-    for name, wanted in ((ARRIVAL_RULE, mode == "arrival"), (SCHEDULE_RULE, False)):
-        if wanted:
-            continue
+    if os.environ.get("TRACK2_RECORD_BACKEND") != "postgres":
+        # Arrivals, and the superseded rule, both off unless wanted.
+        for name, wanted in ((ARRIVAL_RULE, mode == "arrival"), (SCHEDULE_RULE, False)):
+            if wanted:
+                continue
+            try:
+                events().disable_rule(Name=name)
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") != "ResourceNotFoundException":
+                    problems.append(f"{name}: {exc}")
+
+        if mode == "arrival":
+            try:
+                events().enable_rule(Name=ARRIVAL_RULE)
+            except ClientError as exc:
+                problems.append(f"{ARRIVAL_RULE}: {exc}")
+
+        # The schedule is updated whether or not it is the live mode, so the
+        # times shown on the card are the times that are armed the moment it
+        # is switched on.
         try:
-            events().disable_rule(Name=name)
+            existing = scheduler().get_schedule(Name=SCHEDULE_NAME)
         except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") != "ResourceNotFoundException":
-                problems.append(f"{name}: {exc}")
+            existing = None
+            code = exc.response.get("Error", {}).get("Code", "")
+            if mode == "schedule":
+                problems.append(
+                    f"{SCHEDULE_NAME}: {code or exc} -- apply terraform/app to create it"
+                )
 
-    if mode == "arrival":
-        try:
-            events().enable_rule(Name=ARRIVAL_RULE)
-        except ClientError as exc:
-            problems.append(f"{ARRIVAL_RULE}: {exc}")
+        if existing is not None:
+            kwargs = {
+                "Name": SCHEDULE_NAME,
+                "ScheduleExpression": expression,
+                "ScheduleExpressionTimezone": existing.get(
+                    "ScheduleExpressionTimezone", "Asia/Singapore"),
+                "FlexibleTimeWindow": existing["FlexibleTimeWindow"],
+                "Target": existing["Target"],
+                "State": "ENABLED" if mode == "schedule" else "DISABLED",
+            }
+            if existing.get("GroupName"):
+                kwargs["GroupName"] = existing["GroupName"]
 
-    # The schedule is updated whether or not it is the live mode, so the
-    # times shown on the card are the times that are armed the moment it
-    # is switched on.
-    try:
-        existing = scheduler().get_schedule(Name=SCHEDULE_NAME)
-    except ClientError as exc:
-        existing = None
-        code = exc.response.get("Error", {}).get("Code", "")
-        if mode == "schedule":
-            problems.append(
-                f"{SCHEDULE_NAME}: {code or exc} -- apply terraform/app to create it"
-            )
+            # Scheduler rejects a start date in the past, and it would be a
+            # lie anyway -- the first pull is the next one due, not one that
+            # has been missed. next_pull_times does that rolling forward.
+            upcoming = next_pull_times(merged, count=1)
+            if upcoming:
+                kwargs["StartDate"] = _parse_time(upcoming[0])
 
-    if existing is not None:
-        kwargs = {
-            "Name": SCHEDULE_NAME,
-            "ScheduleExpression": expression,
-            "ScheduleExpressionTimezone": existing.get(
-                "ScheduleExpressionTimezone", "Asia/Singapore"),
-            "FlexibleTimeWindow": existing["FlexibleTimeWindow"],
-            "Target": existing["Target"],
-            "State": "ENABLED" if mode == "schedule" else "DISABLED",
-        }
-        if existing.get("GroupName"):
-            kwargs["GroupName"] = existing["GroupName"]
-
-        # Scheduler rejects a start date in the past, and it would be a
-        # lie anyway -- the first pull is the next one due, not one that
-        # has been missed. next_pull_times does that rolling forward.
-        upcoming = next_pull_times(merged, count=1)
-        if upcoming:
-            kwargs["StartDate"] = _parse_time(upcoming[0])
-
-        try:
-            scheduler().update_schedule(**kwargs)
-        except ClientError as exc:
-            problems.append(f"{SCHEDULE_NAME}: {exc}")
+            try:
+                scheduler().update_schedule(**kwargs)
+            except ClientError as exc:
+                problems.append(f"{SCHEDULE_NAME}: {exc}")
 
     # ONE schedule row, both clocks.
     #
@@ -4699,6 +4726,9 @@ def set_mode(*, mode: str, schedule_expression: str = "",
     retrain = _rs.with_anchor(before, retrain)
     patch["retrain_schedule"] = retrain
 
+    if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+        upcoming = next_pull_times(merged, count=1)
+        patch["sql_next_pull_at"] = upcoming[0] if mode == "schedule" and upcoming else ""
     write_config(patch)
 
     # Arming is not running. The fresh anchor already puts the first slot

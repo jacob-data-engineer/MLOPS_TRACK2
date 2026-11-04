@@ -33,6 +33,11 @@ async def queue_poll_loop() -> None:
     while True:
         await asyncio.sleep(25)
         try:
+            from . import sql_worker
+            await asyncio.to_thread(sql_worker.tick)
+        except Exception as exc:
+            print(f"SQL schedule tick failed: {exc}")
+        try:
             # OFF the event loop. `try_advance_queue` is synchronous boto3
             # -- SageMaker, DynamoDB -- and calling it inline stalled every
             # request handler in this single-worker process for the length

@@ -3752,6 +3752,7 @@ export function getTrack2SqlClasses(database: string): Promise<{ classes: Track2
 
 /** The central data catalog: reachable, and how much is in each table. */
 export interface Track2CatalogStatus {
+  record_backend?: "dynamodb" | "postgres";
   configured: boolean;
   reachable: boolean;
   schema_version?: number | null;

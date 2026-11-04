@@ -326,6 +326,9 @@ def sync() -> dict:
     """One full pass. Returns what it copied. Raises only if the catalog
     cannot be reached at all; anything after that is recorded in
     `sync_runs`."""
+    from .. import record_store
+    if record_store.enabled():
+        return {"started": False, "reason": "SQL records update the catalog directly."}
     if not _running.acquire(blocking=False):
         return {"started": False, "reason": "A sync is already running."}
     try:

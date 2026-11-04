@@ -128,7 +128,10 @@ export function Track2CatalogPage() {
         Every training run and every dataset version, with the files each used. Pick one to see
         its files, download the list, or export the files themselves as a zip.
       </p>
-      {status?.last_sync?.finished_at && (
+      {status?.record_backend === "postgres" && (
+        <p className="mb-4 text-xs text-ink-muted">Records stored in PostgreSQL. Changes are recorded directly.</p>
+      )}
+      {status?.record_backend !== "postgres" && status?.last_sync?.finished_at && (
         <p className="mb-4 text-xs text-ink-muted">
           Records last copied from DynamoDB {when(status.last_sync.finished_at)}. They copy across
           every 5 minutes.

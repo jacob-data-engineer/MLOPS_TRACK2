@@ -86,8 +86,9 @@ YOLO_GENERATIONS = tuple(GENERATION_SIZES)
 
 # The one shared, always-on endpoint hosting all four sizes as separate
 # Inference Components -- see model_training/src/deploy_inference_component.py.
-MULTI_SIZE_ENDPOINT_NAME = os.environ.get("MULTI_SIZE_ENDPOINT_NAME", "track2-yolo-multi-size-endpoint")
-MULTI_SIZE_ENDPOINT_CONFIG_NAME = os.environ.get("MULTI_SIZE_ENDPOINT_CONFIG_NAME", "track2-yolo-multi-size-config")
+_SQL_DEV_SUFFIX = "-dev" if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres" else ""
+MULTI_SIZE_ENDPOINT_NAME = os.environ.get("MULTI_SIZE_ENDPOINT_NAME", "track2-yolo-multi-size-endpoint" + _SQL_DEV_SUFFIX)
+MULTI_SIZE_ENDPOINT_CONFIG_NAME = os.environ.get("MULTI_SIZE_ENDPOINT_CONFIG_NAME", "track2-yolo-multi-size-config" + _SQL_DEV_SUFFIX)
 MULTI_SIZE_VARIANT_NAME = os.environ.get("MULTI_SIZE_VARIANT_NAME", "AllSizes")
 # Matches model_training/src/config.py's multi_size_instance_type -- the
 # endpoint is CPU-only by design (GPU_INSTANCE_TYPE below is for training
@@ -123,6 +124,7 @@ DAY_LABELS = {"SUN": "Sunday", "MON": "Monday", "TUE": "Tuesday", "WED": "Wednes
 # boto3 clients are documented thread-safe -- created once and shared
 # across every request.
 from ..storage import s3  # noqa: E402 -- one client, shared with the data side
+from .. import record_store
 codebuild = boto3.client("codebuild", region_name=REGION)
 events = boto3.client("events", region_name=REGION)
 # Adaptive retries, not the default.
@@ -171,6 +173,9 @@ _thread_local = threading.local()
 
 
 def _dynamodb():
+    from .. import record_store
+    if record_store.enabled():
+        return record_store.Resource()
     if not hasattr(_thread_local, "dynamodb"):
         _thread_local.dynamodb = boto3.resource("dynamodb", region_name=REGION)
     return _thread_local.dynamodb
@@ -2227,7 +2232,7 @@ def _create_model_tagged(model_name: str, primary_container: dict, source_desc: 
         )
 
 
-ACTIVE_INFERENCE_COMPONENT_NAME = "track2-yolo-active"
+ACTIVE_INFERENCE_COMPONENT_NAME = "track2-yolo-active" + _SQL_DEV_SUFFIX
 
 
 # --- endpoint lifecycle -------------------------------------------------
@@ -4667,6 +4672,11 @@ def start_training_run(generation, size, epochs, dataset_folder, base_model_fold
         env_overrides.append({"name": "BASE_MODEL_S3_URI", "value": base_model_s3_uri, "type": "PLAINTEXT"})
     if notes:
         env_overrides.append({"name": "TRAIN_NOTES", "value": notes, "type": "PLAINTEXT"})
+    if record_store.enabled():
+        env_overrides.extend([
+            {"name": "TRACK2_RECORD_BACKEND", "value": "postgres", "type": "PLAINTEXT"},
+            {"name": "CATALOG_SCHEMA", "value": os.environ["CATALOG_SCHEMA"], "type": "PLAINTEXT"},
+        ])
     response = codebuild.start_build(
         projectName=RUN_PIPELINE_CODEBUILD_PROJECT,
         environmentVariablesOverride=env_overrides,
@@ -5453,6 +5463,7 @@ def queue_stop() -> None:
     _persist_queue_started(False)
 
 
+@record_store.exclusive("training_queue")
 def try_advance_queue() -> None:
     """Called both by the background poll loop (every ~25s) and
     immediately after "Start Queue", so the first run doesn't have to wait

@@ -59,8 +59,7 @@ def handler(event, context):
     now = datetime.now(timezone.utc).isoformat()
     for violation in violations:
         review_id = uuid.uuid4().hex[:12]
-        table.put_item(
-            Item={
+        item = {
                 "review_id": review_id,
                 "status": "pending",
                 "image_s3_uri": violation.get("example_image_s3_uri", ""),
@@ -68,7 +67,14 @@ def handler(event, context):
                 "drift": str(body.get("drift", "")),
                 "created_at": now,
             }
-        )
+        if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+            namespace = os.environ["CATALOG_SCHEMA"]
+            if not namespace.startswith("track2_dev"):
+                raise ValueError("Development SQL namespace required")
+            s3.put_object(Bucket=BUCKET, Key=f"sql-outbox/{namespace}/review_queue/{review_id}.json",
+                          Body=json.dumps(item).encode(), ContentType="application/json")
+        else:
+            table.put_item(Item=item)
         queued.append(review_id)
 
     sns.publish(

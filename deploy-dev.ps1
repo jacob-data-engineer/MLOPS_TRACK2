@@ -28,6 +28,9 @@ if ($LASTEXITCODE -ne 0) {
 $env:PORT = '8090'
 $env:CONTAINER = 'track2-app-dev'
 $env:APP_ROLE = 'dev'
+$env:TRACK2_RECORD_BACKEND = 'postgres'
+$env:CATALOG_SCHEMA = 'track2_dev'
+$env:SKIP_LAMBDA = '1'
 Push-Location $PSScriptRoot
 try {
     & $bashPath ./deploy.sh

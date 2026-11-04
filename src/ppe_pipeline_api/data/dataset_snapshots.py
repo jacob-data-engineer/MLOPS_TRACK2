@@ -54,6 +54,9 @@ MAX_ROWS = 200
 
 
 def _table():
+    from .. import record_store
+    if record_store.enabled():
+        return record_store.Table(TABLE_NAME)
     import boto3
 
     return boto3.resource(

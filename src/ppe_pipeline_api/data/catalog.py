@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 
 import boto3
 
@@ -229,7 +230,7 @@ def _password() -> tuple[str, str]:
     return body["username"], body["password"]
 
 
-def connect():
+def connect(timeout=15):
     """A new connection. The caller closes it."""
     if not configured():
         raise ValueError("The catalog is not set up on this container "
@@ -245,8 +246,16 @@ def connect():
     # The read-only query Lambdas skip the check; this is the database the
     # app WRITES to, so it does not.
     context = ssl.create_default_context(cafile=str(CA_BUNDLE))
-    return pg8000.dbapi.connect(host=HOST, port=5432, database=DATABASE, user=user,
-                                password=password, ssl_context=context, timeout=15)
+    conn = pg8000.dbapi.connect(host=HOST, port=5432, database=DATABASE, user=user,
+                                password=password, ssl_context=context, timeout=timeout)
+    schema = os.environ.get("CATALOG_SCHEMA", "public")
+    if not re.fullmatch(r"public|track2_dev(?:_[a-z0-9_]+)?", schema):
+        conn.close()
+        raise ValueError("Invalid catalog schema")
+    cur = conn.cursor()
+    cur.execute("SELECT set_config('search_path', %s, false)", (schema,))
+    conn.commit()
+    return conn
 
 
 def ensure_schema(report: bool = True) -> dict:
@@ -306,7 +315,8 @@ def status() -> dict:
                         "finished_at": row[1].isoformat() if row[1] else None,
                         "ok": row[2], "counts": row[3], "error": row[4]}
         return {"configured": True, "reachable": True, "schema_version": version,
-                "tables": counts, "last_sync": last}
+                "tables": counts, "last_sync": last,
+                "record_backend": os.environ.get("TRACK2_RECORD_BACKEND", "dynamodb")}
     except Exception as exc:                                       # noqa: BLE001
         return {"configured": True, "reachable": True,
                 "error": f"{type(exc).__name__}: {exc}", "tables": {}}

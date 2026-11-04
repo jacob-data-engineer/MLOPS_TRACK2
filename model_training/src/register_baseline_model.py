@@ -27,6 +27,8 @@ future use without being deployable or trainable-via-the-form yet.
 """
 
 import argparse
+import os
+import json
 import tarfile
 from datetime import datetime, timezone
 
@@ -78,7 +80,14 @@ def _write_baseline_lineage(generation: str, size: str, checkpoint: str, model_d
         "model_data_url": model_data_url,
         "approved_immediately": approved,
     }
-    dynamodb.Table(DYNAMODB_LINEAGE_TABLE).put_item(Item=item)
+    if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+        namespace = os.environ["CATALOG_SCHEMA"]
+        if not namespace.startswith("track2_dev"):
+            raise ValueError("Development SQL namespace required")
+        s3.put_object(Bucket=CONFIG.pipeline_bucket, Key=f"sql-outbox/{namespace}/training_lineage/{item['id']}.json",
+                      Body=json.dumps(item).encode(), ContentType="application/json")
+    else:
+        dynamodb.Table(DYNAMODB_LINEAGE_TABLE).put_item(Item=item)
     return lineage_id
 
 

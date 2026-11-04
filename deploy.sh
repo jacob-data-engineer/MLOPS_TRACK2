@@ -26,6 +26,22 @@ APP_ROLE="${APP_ROLE:-stable}"
 # "off" for a container that must only show pages: no startup recovery and
 # no queue poll loop (see main.background_enabled). The refactor slot.
 APP_BACKGROUND="${APP_BACKGROUND:-on}"
+if [ "$APP_ROLE" = "dev" ] && [ "$PORT" = "8090" ]; then
+  TRACK2_RECORD_BACKEND="${TRACK2_RECORD_BACKEND:-postgres}"
+  CATALOG_SCHEMA="${CATALOG_SCHEMA:-track2_dev}"
+else
+  TRACK2_RECORD_BACKEND="${TRACK2_RECORD_BACKEND:-dynamodb}"
+  CATALOG_SCHEMA="${CATALOG_SCHEMA:-public}"
+fi
+ENDPOINT_NAME="track2-yolo-multi-size-endpoint"
+if [ "$TRACK2_RECORD_BACKEND" = "postgres" ]; then
+  if [ "$APP_ROLE" != "dev" ] || [ "$PORT" != "8090" ]; then
+    echo >&2 "SQL cutover is authorized for development on 8090 only."
+    exit 1
+  fi
+  SKIP_LAMBDA=1
+  ENDPOINT_NAME="track2-yolo-multi-size-endpoint-dev"
+fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # This folder's own stack -- nothing here reads the jurong-port state.
 # terraform/app is this app's own stack (ECR, CodeBuild, the audit table).
@@ -256,6 +272,8 @@ docker run -d --name $CONTAINER --restart unless-stopped -p $PORT:8501 \\
   -e APP_BUILD_TAG='$TAG' \\
   -e APP_ROLE='$APP_ROLE' \\
   -e APP_BACKGROUND='$APP_BACKGROUND' \\
+  -e TRACK2_RECORD_BACKEND='$TRACK2_RECORD_BACKEND' \\
+  -e CATALOG_SCHEMA='$CATALOG_SCHEMA' \\
   -e APP_PORT='$PORT' \\
   -e AWS_REGION='$REGION' \\
   -e REVIEW_QUEUE_TABLE='track2-yolo-review-queue' \\
@@ -264,7 +282,7 @@ docker run -d --name $CONTAINER --restart unless-stopped -p $PORT:8501 \\
   -e CATALOG_SECRET_ARN='$CATALOG_SECRET_ARN' \\
   -e RETRAIN_RULE_NAME='track2-yolo-weekly-retrain-schedule' \\
   -e TRAINING_PIPELINE_NAME='track2-yolo-training-pipeline' \\
-  -e MULTI_SIZE_ENDPOINT_NAME='track2-yolo-multi-size-endpoint' \\
+  -e MULTI_SIZE_ENDPOINT_NAME='$ENDPOINT_NAME' \\
   -e MULTI_SIZE_VARIANT_NAME='AllSizes' \\
   -e SAGEMAKER_EXECUTION_ROLE_ARN='$SAGEMAKER_ROLE_ARN' \\
   -e SERVING_IMAGE_URI='$SERVING_IMAGE:serve-latest' \\

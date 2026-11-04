@@ -234,6 +234,17 @@ def _write_run_metadata(
     )
     print(f"Wrote run metadata -> {s3_uri}")
 
+    if os.environ.get("TRACK2_RECORD_BACKEND") == "postgres":
+        namespace = os.environ["CATALOG_SCHEMA"]
+        if not namespace.startswith("track2_dev"):
+            raise ValueError("Development SQL namespace required")
+        # An outbox avoids exposing private RDS to training builds. The SQL
+        # worker imports each immutable record exactly once by object ETag.
+        boto3.client("s3", region_name=region).put_object(
+            Bucket=bucket, Key=f"sql-outbox/{namespace}/training_lineage/{run_id}.json",
+            Body=json.dumps({**record, "id": run_id, "record_type": "training_run"}).encode(),
+            ContentType="application/json")
+        return s3_uri, run_id
     dynamodb = boto3.resource("dynamodb", region_name=region)
     # "id" is the table's actual (pre-existing) hash key -- "run_id" is
     # kept too, as the same human-readable field name the S3 copy uses.

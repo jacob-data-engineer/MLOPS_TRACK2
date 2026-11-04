@@ -60,6 +60,8 @@ def background_enabled() -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from . import record_store
+    await asyncio.to_thread(record_store.verify_ready)
     if not background_enabled():
         print("APP_BACKGROUND=off: no startup recovery, no queue poll loop.")
     # Any inference/eval job still marked in-flight belongs to a process
@@ -167,6 +169,7 @@ def build() -> dict:
         "tag": _os.environ.get("APP_BUILD_TAG", ""),
         "role": _os.environ.get("APP_ROLE", ""),
         "port": _os.environ.get("APP_PORT", ""),
+        "record_backend": _os.environ.get("TRACK2_RECORD_BACKEND", "dynamodb"),
     }
 
 

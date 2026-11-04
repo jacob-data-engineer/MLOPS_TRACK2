@@ -18,7 +18,7 @@ def test_build_reports_the_tag_and_role(monkeypatch):
     monkeypatch.setenv("APP_PORT", "8090")
     got = TestClient(app).get("/build")
     assert got.status_code == 200
-    assert got.json() == {"tag": "20260924-034612", "role": "dev", "port": "8090"}
+    assert got.json() == {"tag": "20260924-034612", "role": "dev", "port": "8090", "record_backend": "dynamodb"}
 
 
 def test_build_needs_no_session():
@@ -38,4 +38,4 @@ def test_build_is_empty_rather_than_absent_when_unset(monkeypatch):
     """
     for name in ("APP_BUILD_TAG", "APP_ROLE", "APP_PORT"):
         monkeypatch.delenv(name, raising=False)
-    assert TestClient(app).get("/build").json() == {"tag": "", "role": "", "port": ""}
+    assert TestClient(app).get("/build").json() == {"tag": "", "role": "", "port": "", "record_backend": "dynamodb"}
