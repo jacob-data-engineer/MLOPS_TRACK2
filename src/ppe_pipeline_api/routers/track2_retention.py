@@ -1174,6 +1174,11 @@ def scheduled_for_files(names: list, *, days: int = 42,
     """
     live_config = pc.read_config()
     live_name = str(live_config.get("settings_file_at") or "")
+    # A file that no longer exists is not loaded, whatever the record still
+    # names: show the live settings honestly as unsaved (UAT-05).
+    if live_name and live_name not in {f.get("name") for f in
+                                       (pc.list_settings_files().get("files") or [])}:
+        live_name = ""
     live_config = {**live_config, "settings_file": live_name}
     out = scheduled_events(live_config, days=days, now=now)
     blocks = [{"name": live_name or "(Multi-Auto Training live settings)", "live": True, "error": "",

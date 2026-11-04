@@ -3761,7 +3761,21 @@ def delete_settings_file(*, name: str) -> dict:
     if not os.path.exists(path):
         raise ValueError(f"No settings file called {name}.")
     os.remove(path)
-    return {"name": name, "deleted": True}
+    # A deleted file is not loaded any more. Clear ONLY the matching
+    # "loaded from" names; the settings themselves, and the schedules,
+    # stay exactly as they are (UAT-05, 2026-11-04: the Scheduled page
+    # went on saying "uat_AT -- loaded" after uat_AT was deleted).
+    cleared = []
+    try:
+        live = read_config()
+        stale = {key: "" for key in ("settings_file", "settings_file_dp", "settings_file_at")
+                 if live.get(key) == name}
+        if stale:
+            write_config(stale)
+            cleared = sorted(stale)
+    except Exception:                                          # noqa: BLE001
+        pass                     # the file is gone either way; the name is cosmetic
+    return {"name": name, "deleted": True, "cleared": cleared}
 
 
 

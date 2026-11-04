@@ -228,3 +228,33 @@ def test_explicit_card_states_round_trip_in_both_tabs(live):
     pc.load_settings_file(name="r_AT", scope="at")
     assert pc.read_config()["card_state"] == {"golden_set": True, "pull_control": False,
                                               "training_advanced": False}
+
+
+# --- UAT-05 (2026-11-04): a deleted file is not "loaded" any more ----------------
+
+def test_deleting_the_loaded_file_clears_only_its_name(live):
+    pc.save_settings_file(name="gone", scope="at")
+    pc.save_settings_file(name="kept", scope="dp")
+    before = pc.read_config()
+    assert before["settings_file_at"] == "gone_AT" and before["settings_file_dp"] == "kept_DP"
+    out = pc.delete_settings_file(name="gone_AT")
+    after = pc.read_config()
+    assert out["cleared"] == ["settings_file_at"]
+    assert after["settings_file_at"] == "" and after["settings_file_dp"] == "kept_DP"
+    # nothing else moved -- settings and schedules stay as they were
+    for key in ("mode", "retrain_schedule", "default_detector", "root"):
+        assert after.get(key) == before.get(key)
+
+
+def test_deleting_a_file_that_is_not_loaded_changes_nothing(live):
+    pc.save_settings_file(name="other", scope="dp")
+    pc.save_settings_file(name="live", scope="dp")             # now the loaded one
+    pc.delete_settings_file(name="other_DP")
+    assert pc.read_config()["settings_file_dp"] == "live_DP"
+
+
+def test_scheduled_does_not_call_a_missing_file_loaded():
+    import inspect
+    from ppe_pipeline_api.routers import track2_retention as tr
+    src = inspect.getsource(tr)
+    assert "if live_name and live_name not in {f.get(\"name\") for f in" in src
