@@ -14,10 +14,15 @@ class _S3:
     def __init__(self, objects):
         self.objects = dict(objects)            # (bucket, key) -> bytes
         self.copies = []
+        self.fail = set()                       # (bucket, key) whose HEAD errors
 
     def head_object(self, Bucket, Key):
+        if (Bucket, Key) in self.fail:
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "SlowDown"}}, "HeadObject")
         if (Bucket, Key) not in self.objects:
-            raise Exception("404")
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
         return {"ETag": '"%s"' % abs(hash(self.objects[(Bucket, Key)]))}
 
     def copy_object(self, Bucket, Key, CopySource):
@@ -50,7 +55,8 @@ VERSION = {"version_id": "dv-1", "manifest_uri": "s3://home/_datasets/dv-1/manif
 
 def test_every_file_is_copied_server_side_and_recorded_beside_the_version(store):
     out = cs.preserve(VERSION)
-    assert out["files"] == 3 and out["kept"] == 2 and out["missing"] == 1
+    # a.jpg + label kept; b.jpg kept but its label is absent; gone.jpg absent
+    assert out["files"] == 3 and out["kept"] == 2 and out["missing"] == 2
     kept = [k for (b, k) in store.objects if b == "home" and k.startswith("store/objects/")]
     assert len(kept) == 3                         # two images + one label
     record = json.loads(store.objects[("home", "_datasets/dv-1/preserved.json")])
@@ -190,3 +196,54 @@ def test_a_run_export_reads_the_kept_copy_of_a_gone_original(monkeypatch):
     assert files["labels/val/a.txt"] == b"ORIGINAL-LBL"
     assert files["eval/images/val/e.jpg"] == b"EVAL"
     assert finished[-1][2][0] == "ready" and finished[-1][2][3:5] == (3, 0)
+
+
+# --- R3 (independent UAT, 2026-11-04): labels count, and a failed copy is
+# retried rather than recorded as done.
+
+def test_a_label_absent_at_freeze_is_counted_not_hidden(store):
+    out = cs.preserve(VERSION)
+    assert out["images_kept"] == 2 and out["images_missing"] == 1
+    assert out["labels_expected"] == 2 and out["labels_kept"] == 1 and out["labels_missing"] == 1
+    assert out["failed"] == 0 and out["complete"] is False
+
+
+def test_a_copy_that_errors_is_failed_not_missing(store):
+    store.fail.add(("src", "set/images/val/b.jpg"))
+    out = cs.preserve(VERSION)
+    assert out["failed"] == 1 and out["images_missing"] == 1     # gone.jpg only
+    record = json.loads(store.objects[("home", "_datasets/dv-1/preserved.json")])
+    b = next(m for m in record["members"] if m["image"].endswith("b.jpg"))
+    assert "SlowDown" in b["error"]
+
+
+def test_a_version_with_failed_copies_stays_pending(monkeypatch, store):
+    from ppe_pipeline_api.data import catalog
+    executed = []
+
+    class Cur:
+        def execute(self, sql, params=()):
+            executed.append((sql, params))
+
+    class Conn:
+        def cursor(self):
+            return Cur()
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(catalog, "configured", lambda: True)
+    monkeypatch.setattr(catalog, "ensure_schema_once", lambda: None)
+    monkeypatch.setattr(catalog, "connect", lambda: Conn())
+    store.fail.add(("src", "set/images/val/b.jpg"))
+    cs.preserve(VERSION)
+    version_updates = [s for s, _ in executed if "UPDATE dataset_versions" in s]
+    assert version_updates and all("preserved_at" not in s for s in version_updates)
+    store.fail.clear()
+    executed.clear()
+    cs.preserve(VERSION)                                         # the retry
+    assert any("preserved_at = now()" in s for s, _ in executed)
+    assert "preserved_at IS NULL" in __import__("inspect").getsource(cs.pending)

@@ -33,6 +33,8 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+from botocore.exceptions import ClientError
+
 from .. import pull_control as pc
 from .. import storage
 
@@ -59,10 +61,15 @@ def _split(uri: str) -> tuple[str, str]:
 
 
 def _etag(bucket: str, key: str) -> str | None:
+    """The object's ETag; None only when it is not there. Any other failure
+    (throttling, a denied read) raises: it is a copy to retry, not a file
+    that is gone (R3)."""
     try:
         return storage.s3.head_object(Bucket=bucket, Key=key)["ETag"].strip('"')
-    except Exception:                                              # noqa: BLE001
-        return None
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+            return None
+        raise
 
 
 def _keep(uri: str, bucket: str, folder: str) -> tuple[str | None, str | None]:
@@ -95,19 +102,40 @@ def preserve(version: dict) -> dict:
 
     def one(member):
         image, label, split, _ = member
-        stored_image, etag = _keep(image, bucket, folder)
-        stored_label = _keep(label, bucket, folder)[0] if label else None
-        return {"image": image, "label": label or "", "split": split, "etag": etag or "",
-                "stored_image": stored_image or "", "stored_label": stored_label or ""}
+        row = {"image": image, "label": label or "", "split": split, "etag": "",
+               "stored_image": "", "stored_label": "", "error": ""}
+        try:
+            stored_image, etag = _keep(image, bucket, folder)
+            row.update(stored_image=stored_image or "", etag=etag or "")
+            if label:
+                row["stored_label"] = _keep(label, bucket, folder)[0] or ""
+        except Exception as exc:                                   # noqa: BLE001
+            row["error"] = f"{type(exc).__name__}: {exc}"[:200]
+        return row
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         rows = list(pool.map(one, members))
 
-    kept = sum(1 for r in rows if r["stored_image"])
-    missing = len(rows) - kept
+    # Images AND labels (R3, independent UAT 2026-11-04): counting images
+    # only reported "missing: 0" for a version whose label was never kept.
+    #   images_missing / labels_missing -- not there at freeze; recorded,
+    #     nothing to retry. A label absent at freeze means the image was
+    #     trained as unlabeled (background), which is what the export says.
+    #   failed -- a copy that errored; the version stays un-preserved so
+    #     the tick's backstop (`pending`) tries it again.
+    done = [r for r in rows if not r["error"]]
+    kept = sum(1 for r in done if r["stored_image"])
+    labels_expected = sum(1 for r in done if r["label"] and r["stored_image"])
+    labels_kept = sum(1 for r in done if r["label"] and r["stored_image"] and r["stored_label"])
+    counts = {"images_kept": kept, "images_missing": len(done) - kept,
+              "labels_expected": labels_expected, "labels_kept": labels_kept,
+              "labels_missing": labels_expected - labels_kept,
+              "failed": len(rows) - len(done)}
+    missing = counts["images_missing"] + counts["labels_missing"]
     record = {"version_id": vid, "store": f"s3://{bucket}/{folder}/objects/",
               "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
-              "files": len(rows), "kept": kept, "missing": missing, "members": rows}
+              "files": len(rows), "kept": kept, "missing": missing, **counts,
+              "complete": not missing and not counts["failed"], "members": rows}
 
     # Beside the version, so the record outlives any database.
     manifest_uri = str(version.get("manifest_uri") or "")
@@ -121,15 +149,22 @@ def preserve(version: dict) -> dict:
         conn = catalog.connect()
         try:
             cur = conn.cursor()
-            for r in rows:
+            for r in done:
                 cur.execute(
                     "UPDATE dataset_members SET stored_image_uri = %s, stored_label_uri = %s,"
                     " image_etag = %s WHERE version_id = %s AND image_uri = %s",
                     (r["stored_image"] or None, r["stored_label"] or None, r["etag"] or None,
                      vid, r["image"]))
-            cur.execute("UPDATE dataset_versions SET preserved_at = now(), preserved_files = %s,"
-                        " preserve_missing = %s, preserve_error = NULL WHERE id = %s",
-                        (kept, missing, vid))
+            if counts["failed"]:
+                # Not preserved yet: `pending` picks it up again.
+                cur.execute("UPDATE dataset_versions SET preserve_error = %s WHERE id = %s",
+                            (f"{counts['failed']} of {len(rows)} copies failed; retried on the"
+                             f" next tick. First: {next(r['error'] for r in rows if r['error'])}"[:500],
+                             vid))
+            else:
+                cur.execute("UPDATE dataset_versions SET preserved_at = now(), preserved_files = %s,"
+                            " preserve_missing = %s, preserve_error = NULL WHERE id = %s",
+                            (kept, missing, vid))
             conn.commit()
         finally:
             conn.close()
