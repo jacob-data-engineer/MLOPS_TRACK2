@@ -10,6 +10,85 @@ Of the 29 original cases: **23 PASS, 6 FAIL, 0 BLOCKED**. One additional schedul
 
 Screens were used for user actions. Authenticated API reads, S3 object inspection and ZIP inspection corroborated the browser results. Source inspection supports proposed fixes; it is not counted as live execution. No application code was changed, deployed or committed.
 
+## Independent verification — 4 November 2026, 19:25–19:36 SGT
+
+**Verdict: the fixes are deployed, but not all defects can be closed.** This section is the latest independent result. The Remediation section below records the implementer's earlier claims; the original FAIL table is historical evidence, not the current retest outcome.
+
+Verified live development build **`20261104-111726`**, PostgreSQL backend, port **8090**, before and after testing. Local source HEAD was `43b6169`. No production access, training, schedule Apply, database start, new dataset freeze, or deletion of source images was performed. The independent test reused the already-created smallest nonempty dataset, Version 83. Application code was not changed.
+
+| Defect | Independent result | Evidence |
+|---|---|---|
+| UAT-02: stopped database query | **PASS for original reproduction** | Loaded no helmet from the running database, switched to stopped preview, observed 25 seconds: zero SQL requests after switching, no spinner, no HTTP errors or console errors, Start button shown. [Recorded result](uat-evidence/2026-11-04/independent-retest/04-stopped-db.json), [screen](uat-evidence/2026-11-04/independent-retest/04-stopped-db.png). |
+| UAT-03: saved card restoration | **PASS** | Saved default-open Assemble as `uat_independent_DP`, clicked Hide, loaded saved file: Assemble reopened. Final operational configuration matches the baseline. [Restored screen](uat-evidence/2026-11-04/independent-retest/03-card-restored.png), [load state](uat-evidence/2026-11-04/independent-retest/03-after-load.json). |
+| UAT-04: PostgreSQL status/refresh | **PASS in PostgreSQL mode** | Card says records are written straight to PostgreSQL. Refresh returned 200 and showed `Counts read 04 Nov 19:28 SGT.` No obsolete DynamoDB message on this card. [Screen](uat-evidence/2026-11-04/independent-retest/02-central-refresh.png), [text](uat-evidence/2026-11-04/independent-retest/02-dp-refreshed.txt). DynamoDB-mode polling was not live-tested. |
+| UAT-05: deleted file remains loaded | **PARTIAL — UI reproduction fixed; durability needs investigation** | DP and AT deletion responses returned the matching cleared reference. Scheduled showed no deleted name. However, a later configuration read again contained `settings_file_dp: uat_independent_DP` although the file was absent. A second controlled save/delete cleared it and final checks passed. [First deletion](uat-evidence/2026-11-04/independent-retest/03-dp-deleted.json), [AT deletion](uat-evidence/2026-11-04/independent-retest/05-at-deleted.json), [stale reference after deletion](uat-evidence/2026-11-04/independent-retest/09-cleanup.json), [final cleanup](uat-evidence/2026-11-04/independent-retest/10-final-cleanup.json). |
+| UAT-01: preserved-file exports | **PARTIAL — deleted-original version export passes; reproducibility gaps remain** | Fresh Version 83 export `cba96aff0145`: ready, 144 files, zero missing. ZIP contains 72 valid images, 72 matching labels, 144 manifest rows, data.yaml, matching SHA-256 values. Scratch originals are absent and sampled preserved objects exist. Overwritten originals, run exports, and label completeness still fail isolated checks below. |
+
+### Successful export evidence
+
+- [Fresh export record](uat-evidence/2026-11-04/independent-retest/06-exports.json), [browser screen](uat-evidence/2026-11-04/independent-retest/06-export-ready.png).
+- [Downloaded ZIP validation](uat-evidence/2026-11-04/independent-retest/08-zip-validation.json): all 72 images decoded, every image/label pair matched, no missing entries.
+- [Read-only source verification](uat-evidence/2026-11-04/independent-retest/07-source-verification.json): scratch prefix has zero objects; sampled original image and label HEAD return 404; corresponding preserved image and label exist.
+- Retained artifact: `s3://track2-s3/label-curation/validate_v1/export/_exports/version-83-cba96aff0145/version-83.zip`.
+- Historical Version 46 is still incomplete; this was explicitly excluded from repair and is not a regression in the new preservation feature.
+
+### Remaining issues found by independent verification
+
+**R1 — P1: overwritten originals silently change a frozen export.**
+
+Reproduced entirely in memory using the actual export builder with mocked S3/database access: original address contains `CHANGED-AFTER-FREEZE`; preserved address contains `ORIGINAL-AT-FREEZE`. Export returned **ready** and contained **CHANGED-AFTER-FREEZE**. No live source was overwritten.
+
+Cause: `src/ppe_pipeline_api/data/catalog_view.py:392` fetches the original first and consults the stored copy only if the original is absent. This protects deletion but not overwriting, so the claim that frozen versions remain reproducible is too broad.
+
+Fix direction: prefer the frozen stored object when available; if an original must be used, verify it against the recorded frozen identity and report mismatch. Add a behavioral regression test for an overwritten image and an overwritten label, not merely a source-string assertion. [Reproduction result](uat-evidence/2026-11-04/independent-retest/preservation-edge-cases.json).
+
+**R2 — P1: run-based exports do not use preserved copies.**
+
+An isolated run linked to a preserved version was exported with its original missing and preserved bytes present. Actual result: **partial, zero files, one missing**. The `_plan('run', ...)` query reads run_files and uses the version only for class names; it never attaches the stored mapping that version exports receive. This affects the user's Files in Run export path even when its dataset version has been preserved.
+
+Fix direction: resolve each audited run file to the matching preserved member using the linked version and original URI; preserve the audited role/split/layout. Do not assume that every run file exists in the version. Test version-vs-run exports with deleted and changed originals. [Isolated reproduction and executed queries](uat-evidence/2026-11-04/independent-retest/08-run-preservation-gap.json). This is a code-level behavioral reproduction, not a destructive live run test.
+
+**R3 — P2: preservation summary ignores missing labels.**
+
+With an image present and its expected label absent, the actual preservation routine returned `files: 1, kept: 1, missing: 0` while `stored_label` was empty. `central_store.py:106–107` counts preserved images only. `pending()` at line 195 only selects versions with `preserved_at IS NULL`, so completed-but-incomplete preservation is not selected by that retry condition.
+
+Fix direction: distinguish image counts, expected labels, missing labels, and intentionally unlabeled data; record partial preservation explicitly and retry recoverable incomplete copies. This finding concerns preservation bookkeeping; it does **not** claim the ZIP exporter reports a missing label as successfully included. [Reproduction result](uat-evidence/2026-11-04/independent-retest/preservation-edge-cases.json).
+
+**R4 — P2: deleted DP reference reappeared after a successful clearing response.**
+
+The first DP delete returned `cleared: ["settings_file_dp"]`, but a later authenticated read showed the deleted `uat_independent_DP` again while the file list contained no such file. This was observed live. The exact interleaving is not established: a stale concurrent configuration write is a hypothesis, not a proven cause. `pull_control.write_config()` at line 442 performs read/merge/write of the entire configuration without an atomic patch across that sequence, which merits investigation.
+
+Fix direction: trace concurrent configuration writes and make updates atomic or revision-checked; test delete racing with card autosave/background writes. Keep the Scheduled missing-file guard. Recreating only the same UAT file and deleting it again cleared the reference; final baseline comparison has **zero differences**. Do not mark durable reference cleanup fully accepted from the response alone.
+
+### Tests, cleanup and limits
+
+- Focused existing regression suite: **121 passed**, one dependency deprecation warning. Command: `.venv/Scripts/python.exe -m pytest tests/test_central_store.py tests/test_settings_split_by_tab.py tests/test_catalog.py tests/test_sql_explorer.py -q`.
+- New isolated edge checks above deliberately exercise cases missing from that passing suite. They use in-memory S3/database doubles and do not modify live objects or application source.
+- UI help correction for Assemble and PostgreSQL status was observed live. Broader wording/documentation changes are present in source; this retest does not claim every caption or every guide paragraph was independently exercised.
+- `uat_independent_DP` and `uat_independent_AT` were removed. The DP name was recreated once solely to recheck/clear the stale reference, then deleted again.
+- Final server configuration matches the newly captured baseline exactly, including schedules, model/data settings, card states and loaded-file references. [Final verification](uat-evidence/2026-11-04/independent-retest/10-final-cleanup.json).
+- One later read encountered a connection reset; a read-only retry succeeded on the same build. This did not prove an additional application defect. Temporary browser authentication state was removed at completion.
+- Fresh Version 83 export and local evidence are retained. No source images, labels, historical records, or pre-existing settings files were deleted.
+- This was a targeted defect retest, not another full 29-case run. Production, actual training, schedules firing, database-start permission, large exports, model/PT metadata compatibility and stop/cancel remain outside this verification.
+
+**Next action:** fix and retest R1–R4 before treating the preservation feature and durable settings cleanup as fully accepted. No application fixes or Git commits were made during this independent verification.
+
+
+## Remediation (4 November 2026, 18:30–19:20 SGT)
+
+Every defect and confusing-text item below was fixed on branch `export`, deployed to development (8090), **retested live before commit**, and committed and pushed one fix per commit. Production (8501, `20261026-124922`) was not touched. Development now runs **`20261104-111726`** (record backend `postgres`, schema `track2_dev`, shared Lambdas skipped, as `deploy-dev.ps1` sets). Automated suite: **2,563 passed, 0 failed**.
+
+| Defect | Commit | Fix | Live retest (development) | Result |
+|---|---|---|---|---|
+| UAT-02 (E2/G2) | `f49bcb4` | Class list tied to the database it came from; late answers for a previous database dropped; no query while the chosen database is not available | Build `20261104-103413`: 60 thumbnails shown from violation-review, switched to stopped preview, watched 25 s — no class/preset/query request, no HTTP ≥400, no console errors, no spinner; stopped status and Start button shown | **PASS** |
+| UAT-03 (B3) | `ca1c5bc` | On load, the loaded tab's card states are cleared before the file's are applied, so an unsaved default returns; other tab's cards kept | Build `20261104-105113`: Assemble open at default → saved `uat03_DP` → Hide → closed → load → **open**; training settings unchanged; file deleted, card states restored | **PASS** |
+| UAT-04 (D2/D3) | `f41f49a` | PostgreSQL mode: card says records are written straight to PostgreSQL with **Refresh** ("Counts read … SGT"); `/sync` answers `started:false, direct:true` instead of "Copying"; DynamoDB mode watches the copy until done (5 s × up to 5 min) and reports failure; status carries `checked_at` | Build `20261104-105844`: `/sync` → direct; no DynamoDB wording or Sync now on the card; Refresh → "Counts read 04 Nov 19:02 SGT" | **PASS** |
+| UAT-05 (H1) | `ae16a6b` | Deleting a file clears only matching `settings_file` / `_dp` / `_at`; Scheduled treats a missing file as unsaved live settings | Build `20261104-110319`: Scheduled already showed live settings for stale `uat_AT`; saved+deleted `uat05_AT` and `uat05_DP` → each loaded name cleared; settings/schedules unchanged; Scheduled names no deleted file. Stale `uat_AT` and `uat03_DP` references cleared | **PASS** |
+| Confusing text + `documentation.md` | `9a15a5b` | Pull control links to Multi-Auto Training for the schedule; Assemble caption says nothing is copied; SQL explains approximate split and what Test-grade does not promise; user guide updated to this baseline; `uat-evidence/` excluded from deploy, Docker and git | Build `20261104-111157`: new caption shown, old gone; shipped bundle has the link and both explanations; no `uat-evidence` in the image | **PASS** |
+| UAT-01 (F5) | `43b6169` | At freeze, every image + label is copied server-side into the central data store (`objects/<etag><ext>`, stored once, never deleted), recorded in `_datasets/<id>/preserved.json` and the catalog (schema step 8); exports fall back to the stored copy; tick backstop for interrupted copies. Versions frozen before 2026-11-04 are **not** back-filled | Build `20261104-111726`: froze **Version 83** from a scratch copy of the UAT pull; 72/72 preserved; **deleted all 144 scratch originals**; export → ready, 144 files, **0 missing**, valid zip (72 images + 72 labels) | **PASS** |
+
+Retests were run with an isolated headless Chromium (Playwright) and authenticated API/in-container checks. They cover the failed cases only; the cases this report already left untested (training execution, schedules firing/Apply, Start permission, production, large exports, model/metadata export, stop/cancel) remain untested.
+
 ## Baseline and safety
 
 The supplied checklist predates the user's accepted changes. Tests use these current requirements:
@@ -63,6 +142,8 @@ Evidence links are relative to this report. Counts describe observations at test
 
 ### UAT-01 — P1 for dataset reproducibility: missing export source objects (F5)
 
+**Status: FIXED for versions frozen from 2026-11-04 — commit `43b6169`.** Version 46 itself is not repaired (historical repair out of scope); its export still reports the 80 missing entries truthfully.
+
 **Reproduce:** Catalog → Dataset versions → Version 46 → dataset ZIP → prepare → download incomplete ZIP.
 
 **Expected:** All 100 recorded images and corresponding labels can be reconstructed. **Actual:** 60 images + 60 labels present; 80 of 200 manifest entries marked missing. All 60 present images decoded and every present image had a label. This is not evidence that the ZIP writer corrupts files.
@@ -76,6 +157,8 @@ Evidence: [source check](uat-evidence/2026-11-04/22-source-check.json), [manifes
 
 ### UAT-02 — P2: switching to a stopped SQL database launches a query (E2/G2)
 
+**Status: FIXED — commit `f49bcb4`.**
+
 **Reproduce:** On SQL, load a class from violation-review; switch database to stopped preview.
 
 **Expected:** Cancel old request/state, show stopped/start information, no frame query until available. **Actual:** spinner and HTTP 400, with:
@@ -86,6 +169,8 @@ Likely code path: `web/src/routes/Track2SqlPage.tsx`, class/preset effects aroun
 
 ### UAT-03 — P2: saved DP file does not restore default-open card state (B3)
 
+**Status: FIXED — commit `ca1c5bc`.**
+
 **Reproduce:** Save with Assemble open by default; close Assemble; load the saved DP file.
 
 **Expected:** Assemble opens as saved, without changing AT settings. **Actual:** Assemble stays closed. Saved recipe omits `assemble`; live record has `assemble: false`. AT isolation check passed.
@@ -93,6 +178,8 @@ Likely code path: `web/src/routes/Track2SqlPage.tsx`, class/preset effects aroun
 Likely cause: `web/src/lib/cardState.ts` records explicit toggles, while `src/ppe_pipeline_api/pull_control.py` (`scope_slice`, `load_settings_file`, around lines 3057 and 3422) merges saved card keys onto live keys. An omitted default cannot overwrite a later toggle. **Fix:** save effective scoped defaults or replace/reset only the loaded scope's card keys before merging saved values. Preserve other-tab keys. Regression: default-open and explicit-open/closed round trips in both scopes, while proving other-tab settings unchanged.
 
 ### UAT-04 — P2: PostgreSQL Central Data Store presents obsolete DynamoDB sync (D2/D3)
+
+**Status: FIXED — commit `f41f49a`.**
 
 **Reproduce:** Development DP → Central data store → Sync now; revisit after more than a minute.
 
@@ -102,6 +189,8 @@ Likely cause: `web/src/lib/cardState.ts` records explicit toggles, while `src/pp
 
 ### UAT-05 — P2: deleted settings file remains the loaded schedule identity (H1)
 
+**Status: FIXED — commit `ae16a6b`.**
+
 **Reproduce:** Save AT settings as `uat_AT`; delete with confirmation; reload training and Scheduled Prototype.
 
 **Expected:** No page claims a deleted file is loaded; live settings remain unchanged. **Actual:** file list excludes `uat_AT`, training toolbar says `Loaded: no file loaded`, but Scheduled says `uat_AT — loaded`. Final config still contains `settings_file_at: uat_AT` (baseline empty).
@@ -109,6 +198,8 @@ Likely cause: `web/src/lib/cardState.ts` records explicit toggles, while `src/pp
 **Fix:** in `src/ppe_pipeline_api/pull_control.py:3753`, deleting a file should conditionally clear matching loaded-file references while preserving configuration and schedules. Scheduled should also tolerate a reference to a nonexistent file and label live unsaved settings honestly. Test deleting the loaded AT/DP file and a nonloaded file; ensure no schedule changes. This report leaves the stale reference visible as evidence rather than invoking a full settings reset to hide it.
 
 ## Confusing text and coverage limits
+
+**Status: the four wording items and the documentation item are FIXED — commit `9a15a5b`.** The coverage limits below are unchanged.
 
 - DP Pull Control still directs users to the Pull row in the toolbar at the top of that page, although the schedule moved to Multi-Auto Training. Link to the correct page.
 - Assemble introduction says it copies into images/labels layout, while later instructions say nothing is copied and existing folders are used. Explain the actual operation consistently.
@@ -133,9 +224,15 @@ Likely cause: `web/src/lib/cardState.ts` records explicit toggles, while `src/pp
 | Display/SQL/export settings | Four preference fields changed during UAT | Restored to captured baseline: card_state, sql_explorer, catalog_export, catalog_export_destination. |
 | Models/data/schedules | Compared final config to baseline | All checked values unchanged; only remaining config difference is `settings_file_at`. No database started. |
 
+| Remediation test data | `s3://track2-s3/uat/uat01-scratch/` copied from the UAT pull, used to freeze Version 83 (`dv-20261104T111932-f5850b0d`) | Scratch originals **deleted** on purpose to prove preservation (0 left). Version 83, its 72 preserved objects under `s3://track2-s3/label-curation/validate_v1/export/objects/` and export `5b081abbe386` are retained as evidence. |
+| Remediation settings files | `uat03_DP`, `uat05_AT`, `uat05_DP` | Each deleted within its test; loaded-name references cleared. |
+| ECR image | A deploy at ~19:09 packaged `uat-evidence/`; stopping its CodeBuild run was blocked | One image containing the evidence remains in the private `track2-app` ECR repository, not running. Development was redeployed clean (`20261104-111157` onward). Deleting that image is the operator's decision. |
+
 [Final verification](uat-evidence/2026-11-04/28-final-verification.json) records the exact comparison. Schedule, training and data fields were not included in the cleanup write. The stale AT reference was not cleared by resetting settings because that could affect schedules outside UAT authorization.
 
 ## Fix order and retest
+
+**Status:** items 1–4 done (see Remediation). Item 5 — an independent re-run of the failed cases and a wider G1 matrix on the next build — is still to do.
 
 1. Treat missing sources as a blocker for claiming full reproducibility; implement future source-retention/validation safeguards. Historical repair stays out of scope.
 2. Fix stopped-database query gating and scoped card restoration.
