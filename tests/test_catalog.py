@@ -510,3 +510,38 @@ def test_complete_bundle_contains_enriched_model_and_checksums(monkeypatch):
             if row['included']=='False': continue
             assert hashlib.sha256(files[row['path']]).hexdigest()==row['sha256']
         assert results[-1][2][0]=='ready'
+
+
+# --- UAT-04 (2026-11-04): the Central data store card and the record backend --------
+
+def test_sync_with_the_postgres_backend_says_there_is_nothing_to_copy(monkeypatch):
+    from fastapi.testclient import TestClient
+    from ppe_pipeline_api import record_store
+    from ppe_pipeline_api.auth import require_session
+    from ppe_pipeline_api.main import app
+    monkeypatch.setattr(catalog, "configured", lambda: True)
+    monkeypatch.setattr(record_store, "enabled", lambda: True)
+    started = []
+    monkeypatch.setattr(cs, "start_background", lambda: started.append(1) or True)
+    app.dependency_overrides[require_session] = lambda: {"user": "t"}
+    try:
+        body = TestClient(app).post("/track2/catalog/sync").json()
+    finally:
+        app.dependency_overrides.pop(require_session, None)
+    assert body["started"] is False and body["direct"] is True
+    assert "nothing to copy" in body["detail"] and not started
+
+
+def test_the_card_says_what_is_true_for_each_backend():
+    card = (ROOT / "web" / "src" / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
+    assert 'const direct = catalog?.record_backend === "postgres";' in card
+    assert "Records are written straight to PostgreSQL as they happen" in card
+    assert "onClick={refresh}" in card
+    # the DynamoDB copy is watched until it finishes, not re-read once after 5 s
+    assert "for (let i = 0; i < 60; i += 1)" in card
+    assert "window.setTimeout(() => {\n        getTrack2CatalogStatus()" not in card
+
+
+def test_the_status_says_when_it_was_read():
+    import inspect
+    assert '"checked_at": _dt.datetime.now(_dt.timezone.utc)' in inspect.getsource(catalog.status)

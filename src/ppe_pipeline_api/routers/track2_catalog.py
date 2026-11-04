@@ -38,6 +38,13 @@ def sync(session=Depends(require_session)) -> dict:
     and for not waiting."""
     if not catalog.configured():
         raise HTTPException(status_code=400, detail="The catalog is not set up on this container.")
+    # With the PostgreSQL record backend there is nothing to copy: every
+    # record is written straight to the catalog. Say so, instead of
+    # starting a thread that quits at once and answering "Copying" (UAT-04).
+    from .. import record_store
+    if record_store.enabled():
+        return {"started": False, "direct": True,
+                "detail": "Records are written straight to PostgreSQL; there is nothing to copy."}
     started = catalog_sync.start_background()
     return {"started": started,
             "detail": "Copying in the background." if started else "A sync is already running."}

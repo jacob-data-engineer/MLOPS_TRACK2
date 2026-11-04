@@ -3758,7 +3758,10 @@ export interface Track2CatalogStatus {
   schema_version?: number | null;
   tables: Record<string, number>;
   error?: string;
-  /** The last copy of records from DynamoDB (every 5 minutes). */
+  /** When these counts were read (server time, ISO). */
+  checked_at?: string;
+  /** The last copy of records from DynamoDB (every 5 minutes). Only
+   * meaningful with the DynamoDB record backend. */
   last_sync?: {
     started_at: string | null; finished_at: string | null; ok: boolean | null;
     counts: Record<string, unknown>; error: string | null;

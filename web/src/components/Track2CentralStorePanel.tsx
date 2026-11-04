@@ -41,14 +41,46 @@ export function Track2CentralStorePanel() {
     getTrack2CatalogStatus().then(setCatalog).catch(() => setCatalog(null));
   }, []);
 
+  // PostgreSQL record backend: records are written straight to the
+  // catalog, so there is nothing to copy -- only a re-read (UAT-04).
+  const direct = catalog?.record_backend === "postgres";
+  const [refreshed, setRefreshed] = useState("");
+
+  function refresh() {
+    setCatalogBusy(true);
+    setCatalogError("");
+    getTrack2CatalogStatus()
+      .then((s) => { setCatalog(s); setRefreshed(s.checked_at ?? new Date().toISOString()); })
+      .catch((err) => setCatalogError(err instanceof ApiError ? err.detail : "Could not read the catalog."))
+      .finally(() => setCatalogBusy(false));
+  }
+
+  /** DynamoDB backend only: start a copy, then watch it until it has
+   * finished -- every 5 s for up to 5 minutes -- and say how it ended.
+   * One fixed re-read after 5 s used to come back before any copy was done
+   * and leave the old timestamp on screen. */
   function syncNow() {
     setCatalogBusy(true);
     setCatalogError("");
+    const before = catalog?.last_sync?.started_at ?? "";
     syncTrack2Catalog()
-      .then((res) => setCatalogError(res.started ? "" : res.detail))
-      .then(() => window.setTimeout(() => {
-        getTrack2CatalogStatus().then(setCatalog).catch(() => undefined);
-      }, 5000))
+      .then(async (res) => {
+        if (!res.started) {
+          setCatalogError(res.detail);
+          return;
+        }
+        for (let i = 0; i < 60; i += 1) {
+          await new Promise((r) => window.setTimeout(r, 5000));
+          const s = await getTrack2CatalogStatus();
+          setCatalog(s);
+          const last = s.last_sync;
+          if (last && last.started_at !== before && last.finished_at) {
+            if (!last.ok) setCatalogError(`The copy failed: ${last.error ?? "no reason given"}`);
+            return;
+          }
+        }
+        setCatalogError("Still copying after 5 minutes; the time above updates when it finishes.");
+      })
       .catch((err) => setCatalogError(err instanceof ApiError ? err.detail : "Could not start it."))
       .finally(() => setCatalogBusy(false));
   }
@@ -158,21 +190,38 @@ export function Track2CentralStorePanel() {
                 </span>
               ))}
             </p>
-            {/* Records copy across from DynamoDB every 5 minutes; this
-                says when that last happened, and how it went. */}
+            {/* How records reach the catalog depends on the backend: written
+                directly (PostgreSQL), or copied from DynamoDB every 5
+                minutes. Each says what is true for it. */}
             <div className="mt-1 flex flex-wrap items-center gap-3 text-ink-muted">
-              <span>
-                {catalog.last_sync
-                  ? catalog.last_sync.finished_at
-                    ? `Last copied from DynamoDB ${formatDayTime(catalog.last_sync.finished_at)}`
-                      + (catalog.last_sync.ok ? "" : ` -- failed: ${catalog.last_sync.error}`)
-                    : "Copying from DynamoDB now..."
-                  : "Not copied from DynamoDB yet."}
-              </span>
-              <button type="button" onClick={syncNow} disabled={catalogBusy}
-                      className="underline disabled:opacity-40">
-                {catalogBusy ? "Starting..." : "Sync now"}
-              </button>
+              {direct ? (
+                <>
+                  <span>
+                    Records are written straight to PostgreSQL as they happen; there is
+                    nothing to copy.
+                    {refreshed && ` Counts read ${formatDayTime(refreshed)}.`}
+                  </span>
+                  <button type="button" onClick={refresh} disabled={catalogBusy}
+                          className="underline disabled:opacity-40">
+                    {catalogBusy ? "Refreshing..." : "Refresh"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>
+                    {catalog.last_sync
+                      ? catalog.last_sync.finished_at
+                        ? `Last copied from DynamoDB ${formatDayTime(catalog.last_sync.finished_at)}`
+                          + (catalog.last_sync.ok ? "" : ` -- failed: ${catalog.last_sync.error}`)
+                        : "Copying from DynamoDB now..."
+                      : "Not copied from DynamoDB yet."}
+                  </span>
+                  <button type="button" onClick={syncNow} disabled={catalogBusy}
+                          className="underline disabled:opacity-40">
+                    {catalogBusy ? "Copying..." : "Sync now"}
+                  </button>
+                </>
+              )}
               <Link to="/track2/catalog" className="font-medium text-accent underline">
                 View runs, versions and files
               </Link>

@@ -31,6 +31,7 @@ rotates it, so it is never cached across a failed login).
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import pathlib
@@ -316,7 +317,9 @@ def status() -> dict:
                         "ok": row[2], "counts": row[3], "error": row[4]}
         return {"configured": True, "reachable": True, "schema_version": version,
                 "tables": counts, "last_sync": last,
-                "record_backend": os.environ.get("TRACK2_RECORD_BACKEND", "dynamodb")}
+                "record_backend": os.environ.get("TRACK2_RECORD_BACKEND", "dynamodb"),
+                # When these counts were read, so a Refresh can say it is done.
+                "checked_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
     except Exception as exc:                                       # noqa: BLE001
         return {"configured": True, "reachable": True,
                 "error": f"{type(exc).__name__}: {exc}", "tables": {}}
