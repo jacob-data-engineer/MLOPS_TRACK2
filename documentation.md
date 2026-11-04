@@ -41,10 +41,10 @@ are looking at: coloured means it is *not* production.
 | Tab | Use it to | Status |
 |---|---|---|
 | Track2 SQL Database Query | Pick human-verified frames from the review database, preview them, pull them into a training folder | new |
-| Track2 Data Preparation | Choose and prepare the training data; the pull schedule | ready (green) |
+| Track2 Data Preparation | Choose and prepare the training data, and its settings file | ready (green) |
+| Track2 Multi-Auto Training | Choose the model, start or queue training; **both schedules** (pull and training) | ready (green) |
 | Track2 Data Catalog | See every run and dataset version, their files; export them | new |
-| Track2 Multi-Auto Training | Choose the model, start or queue training; the training schedule | ready (green) |
-| Track2 Scheduled | See what the clocks will start, and when (read only) | prototype (yellow) |
+| Track2 Scheduled | See what Multi-Auto Training's clocks will start, and when (read only; `_AT` files only) | prototype (yellow) |
 | Track2 Review & Metrics | Compare trained models | prototype (yellow) |
 | Track2 Notifications | Who is emailed about what | — |
 | Track2 Help | Built-in help | — |
@@ -58,29 +58,36 @@ settings file.
 
 | Tab | Saves as | Holds |
 |---|---|---|
-| Data Preparation | `<name>_DP` | folders, weeks, retention, golden set, Assemble, the pull schedule, the SQL tab's choices, the central data store |
-| Multi-Auto Training | `<name>_AT` | the model and classes, how a run is shaped, which version it continues from, the training schedule |
+| Data Preparation | `<name>_DP` | folders, weeks, retention, golden set, Assemble, the SQL tab's choices, the central data store |
+| Multi-Auto Training | `<name>_AT` | the model and classes, how a run is shaped, which version it continues from, **the pull schedule and the training schedule** |
 
 - **Save**: type a name (e.g. `helmet`) and press *Save as* — the ending
-  `_DP` or `_AT` is added for you. Leave the name blank to save over the file
-  you are in.
+  `_DP` or `_AT` is added for you, once: `helmet` and `helmet_dp` both save as
+  `helmet_DP`. Leave the name blank to save over the file you are in.
+- **Card open/closed state** is saved too: loading a file puts that tab's
+  cards back open or closed as they were saved.
 - **Load**: pick a file and press *Load*. Only that tab's settings change;
   the other tab is untouched. The page reloads to show them.
 - **New**: puts *this tab's* settings back to defaults. The other tab is
   untouched. Saved files are never touched by New.
-- **Delete**: removes the file; asks first.
+- **Delete**: removes the file; asks first. If it was the loaded file, the
+  tab then says *no file loaded* — your settings and schedules stay as they
+  are.
 
 A file saves what is **in force**. A card with an *Apply* button must be
 applied before its change is in the file — the toolbar tells you if one was
 not.
 
-## 5. Schedules — one per tab
+## 5. Schedules — both on Multi-Auto Training
 
-**Pull schedule** (Data Preparation toolbar) — when new images are collected:
-*Off*, *When files arrive*, or *On a schedule* (every N days at a time, SGT).
-Press **Apply** after changing it.
+Both clocks live in the toolbar at the top of **Multi-Auto Training**. Data
+Preparation has no schedule of its own.
 
-**Training schedule** (Multi-Auto Training toolbar) — when a model is trained:
+**Pull schedule** — when new images are collected: *Off*, *When files
+arrive*, or *On a schedule* (every N days at a time, SGT). Press **Apply**
+after changing it.
+
+**Training schedule** — when a model is trained:
 
 | Choice | What happens |
 |---|---|
@@ -100,15 +107,9 @@ Work top to bottom.
 
 ### Assemble a dataset
 Point at image and label folders anywhere in S3; the card checks they pair up
-and shows the `data.yaml` it will build. Tick **Use these folders** to include
-them.
-
-**Run: Manual / Scheduled**
-- *Manual* — built when you ask.
-- *Scheduled* — rebuilt and frozen by itself after each **scheduled** pull
-  (the PULL SCHEDULE above must be *On a schedule*). Nothing is trained. If
-  the training schedule is *After each data pull*, that chain does the build
-  instead, so this stands down.
+and shows the `data.yaml` it will build. **Nothing is copied** — the run's
+`data.yaml` names the folders where they already are. Tick **Use these
+folders** to include them.
 
 ### Pick Golden Set / Edge Cases
 A hand-picked set split into train and val. **Its val side is the fixed test
@@ -117,19 +118,19 @@ be compared, and never train on it.
 
 ### Pull control
 Collects new files from the source folders into **week folders**
-(`week_1`, `week_2` …), dated by when each frame was captured.
+(`week_1`, `week_2` …), dated by when each frame was captured. Its schedule
+is set on Multi-Auto Training.
 
 ### Auto Training (with Retention inside)
 The week folders and how much of each older week a run takes (the decay
 curve).
 
-### Pull queue
-Pulls waiting their turn, so two never run at once.
-
 ### Central data store
 The one bucket and folder where all data is meant to be kept. Below it, the
-**Catalog** line shows what is recorded (copied from DynamoDB every 5
-minutes), a **Sync now** button, and a link to the Data Catalog.
+**Catalog** line shows what is recorded. Records are written straight to the
+PostgreSQL catalog as they happen, so there is nothing to copy; **Refresh**
+re-reads the counts and says when ("Counts read … SGT"). A link opens the
+Data Catalog.
 
 ---
 
@@ -239,5 +240,10 @@ copy can leave some files in its unique subfolder; retrying uses a new folder.
   not yet traced.
 - Older dataset versions may export with **missing files** until images are
   copied into the central store (planned).
-- The app still **reads** records from DynamoDB; the catalog is a copy until
-  production is promoted.
+- Development records straight to PostgreSQL; production (8501) still uses
+  DynamoDB until it is promoted.
+- In the SQL tab, *Test-grade only* means a person drew the boxes that exist,
+  not that every helmet has one: frames with a helmet box missing are left out
+  of a labelled pull, so fewer may be pulled than are shown.
+- *% to train* is approximate on a small set: each frame's side is fixed by its
+  address (80% of 72 frames came out 54 / 18).

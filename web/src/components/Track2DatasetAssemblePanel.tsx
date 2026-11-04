@@ -103,7 +103,8 @@ interface AssembleSource {
  * image path. Labels anywhere else are invisible to it: the run trains on
  * unannotated images and reports a confident zero. So rather than teach
  * the trainer about other layouts -- its image is digest-pinned anyway --
- * the chosen folders are copied into the one shape it accepts.
+ * the chosen folders are named, where they are, in the data.yaml the run
+ * reads -- nothing is copied.
  *
  * In `multiSource` mode a split can be SEVERAL folder pairs, merged into
  * one dataset. Stems that collide between them are suffixed rather than
@@ -1016,7 +1017,7 @@ export function Track2DatasetAssemblePanel({
     <Card
       title="Assemble a dataset"
       collapsible={false}
-      caption="Point at your images and labels wherever they live; this copies them into the images/ + labels/ layout the trainer requires."
+      caption="Point at your images and labels wherever they live. Nothing is copied: the run's data.yaml names these folders where they already are."
       titleAside={onOnlyChange ? (
         // THIS card's own source, and only this one. The other two are
         // ticked on the cards they belong to -- Pick Golden Set / Edge

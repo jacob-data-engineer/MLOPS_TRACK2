@@ -12,3 +12,6 @@ eval_runs/
 reports/
 model_training/
 platform/
+
+# UAT screenshots, dataset images and export zips -- local evidence only.
+uat-evidence/

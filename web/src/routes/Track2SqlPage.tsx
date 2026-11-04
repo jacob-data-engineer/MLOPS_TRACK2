@@ -592,7 +592,18 @@ export function Track2SqlPage() {
                   </div>
                   <p className="mt-1 text-xs text-ink-muted">
                     The rest go to val. Each frame&rsquo;s side is fixed by its address, so pulling
-                    again never moves one from val into train. Keep your test set out of this folder.
+                    again never moves one from val into train &mdash; which also means the split is
+                    approximate on a small set (80% of 72 frames came out 54 / 18). Keep your test
+                    set out of this folder.
+                    {hasLabels && incompleteCount > 0 && withLabels && (
+                      <span className="mt-1 block text-ink-secondary">
+                        With labels included, the {incompleteCount.toLocaleString()} frame
+                        {incompleteCount === 1 ? "" : "s"} marked &ldquo;helmet box missing&rdquo;
+                        {" "}{incompleteCount === 1 ? "is" : "are"} left out, so fewer frames are pulled
+                        than shown. Test-grade means a person drew the boxes that exist, not that
+                        every helmet has one.
+                      </span>
+                    )}
                   </p>
                   <label className="mt-3 flex items-start gap-1.5 text-xs text-ink">
                     <input type="checkbox" className="mt-0.5" checked={withLabels}

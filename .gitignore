@@ -32,3 +32,6 @@ web/dist/
 !.env.example
 .DS_Store
 *.log
+
+# UAT evidence holds real site images and dataset exports; the repo is public.
+uat-evidence/

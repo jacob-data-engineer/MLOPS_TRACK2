@@ -864,8 +864,11 @@ export function Track2PullControlPanel({
             <strong>Manually:</strong> pick the source folders, set the cut-off
             date (the card saves as you go), then press <em>Pull now</em>.
             <br />
-            <strong>Automatically:</strong> in the <em>Pull</em> row of the
-            toolbar pinned at the top of this page, choose{" "}
+            <strong>Automatically:</strong> the pull schedule is set on{" "}
+            <a href="/track2/multi-auto-training" className="font-medium text-accent underline">
+              Multi-Auto Training
+            </a>
+            , in the toolbar at the top of that page: choose{" "}
             <em>When files arrive</em> or <em>On a schedule</em>. A scheduled
             pull runs whether or not anything changed, and the card below
             shows it happening.
