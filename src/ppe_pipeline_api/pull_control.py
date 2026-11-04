@@ -31,7 +31,9 @@ import hashlib
 import itertools
 import json
 import os
+import random
 import re
+import time
 import uuid
 
 import boto3
@@ -415,13 +417,8 @@ def _plain(item: dict) -> dict:
     return out
 
 
-def read_config() -> dict:
-    """The saved settings, with every default filled in.
-
-    Merged over the defaults rather than returned raw: a setting added
-    after a config was written would otherwise come back missing, and the
-    first caller to read it would be the one that crashed.
-    """
+def _read_config_item() -> tuple[dict, str | None]:
+    """(settings with defaults, the stored revision; None when none)."""
     config = dict(DEFAULTS)
     try:
         got = ddb.get_item(
@@ -436,25 +433,76 @@ def read_config() -> dict:
             config.update(json.loads(got["body"]["S"]))
         except (ValueError, KeyError):
             pass
-    return config
+    return config, ((got or {}).get("rev") or {}).get("S")
+
+
+def read_config() -> dict:
+    """The saved settings, with every default filled in.
+
+    Merged over the defaults rather than returned raw: a setting added
+    after a config was written would otherwise come back missing, and the
+    first caller to read it would be the one that crashed.
+    """
+    return _read_config_item()[0]
+
+
+#: Times a write re-reads and re-merges after losing a race. Live, six
+#: threads saving at once while a delete ran needed more than eight.
+WRITE_ATTEMPTS = 30
 
 
 def write_config(config: dict) -> dict:
     """Saves the settings, keeping anything the caller did not mention."""
-    merged = read_config()
-    merged.update(config or {})
-    # Whole thing as one JSON blob: it is a single small document that is
-    # always read and written together, and a blob cannot half-apply.
-    ddb.put_item(
-        TableName=TABLE_NAME,
-        Item={
-            "kind": {"S": "config"},
-            "sort": {"S": CONFIG_SORT},
-            "body": {"S": json.dumps(merged)},
-            "updated_at": {"S": _now().isoformat()},
-        },
-    )
-    return merged
+    return update_config(lambda merged: merged.update(config or {}))
+
+
+def update_config(change) -> dict:
+    """Apply `change(settings)` -- which edits the dict in place -- and save.
+
+    `change` runs again on every fresh read, so a decision that depends on
+    the current value ("clear this name if it is still the loaded one") is
+    made against what is actually stored, never a stale copy.
+
+    Read, change, then put ONLY IF nobody wrote in between (R4, independent
+    UAT 2026-11-04): the put is conditional on the revision that was read,
+    a fresh uuid per write -- not the timestamp, which two writes on one
+    clock tick share. An unconditional put let a writer holding an older read put back
+    a value another write had just cleared -- a deleted settings file came
+    back as "loaded" after its delete had answered `cleared`. On losing
+    the race, re-read and merge again, so neither write is lost.
+
+    A writer without this check (an older build: the stable container, the
+    router Lambda) puts the item with no `rev`; the next write here then
+    finds `rev` gone, fails its condition and re-reads, so it never
+    overwrites what that writer put.
+    """
+    for attempt in range(WRITE_ATTEMPTS):
+        merged, seen = _read_config_item()
+        change(merged)
+        # Whole thing as one JSON blob: it is a single small document that is
+        # always read and written together, and a blob cannot half-apply.
+        guard = ({"ConditionExpression": "rev = :seen",
+                  "ExpressionAttributeValues": {":seen": {"S": seen}}} if seen else
+                 {"ConditionExpression": "attribute_not_exists(rev)"})
+        try:
+            ddb.put_item(
+                TableName=TABLE_NAME,
+                Item={
+                    "kind": {"S": "config"},
+                    "sort": {"S": CONFIG_SORT},
+                    "body": {"S": json.dumps(merged)},
+                    "updated_at": {"S": _now().isoformat()},
+                    "rev": {"S": uuid.uuid4().hex},
+                },
+                **guard,
+            )
+            return merged
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                raise
+            # Jittered, so writers that collided do not collide again.
+            time.sleep(random.uniform(0, min(0.5, 0.03 * (attempt + 1))))
+    raise RuntimeError("The settings changed under this save repeatedly; try again.")
 
 
 def _now() -> _dt.datetime:
@@ -3765,16 +3813,17 @@ def delete_settings_file(*, name: str) -> dict:
     # "loaded from" names; the settings themselves, and the schedules,
     # stay exactly as they are (UAT-05, 2026-11-04: the Scheduled page
     # went on saying "uat_AT -- loaded" after uat_AT was deleted).
-    cleared = []
-    try:
-        live = read_config()
-        stale = {key: "" for key in ("settings_file", "settings_file_dp", "settings_file_at")
-                 if live.get(key) == name}
-        if stale:
-            write_config(stale)
-            cleared = sorted(stale)
-    except Exception:                                          # noqa: BLE001
-        pass                     # the file is gone either way; the name is cosmetic
+    #
+    # Decided on each fresh read (R4): a save racing this delete can
+    # neither put the name back nor have a name loaded since then cleared.
+    cleared: list = []
+
+    def clear(live: dict) -> None:
+        cleared[:] = sorted(key for key in ("settings_file", "settings_file_dp", "settings_file_at")
+                            if live.get(key) == name)
+        live.update({key: "" for key in cleared})
+
+    update_config(clear)
     return {"name": name, "deleted": True, "cleared": cleared}
 
 

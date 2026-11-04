@@ -258,3 +258,62 @@ def test_scheduled_does_not_call_a_missing_file_loaded():
     from ppe_pipeline_api.routers import track2_retention as tr
     src = inspect.getsource(tr)
     assert "if live_name and live_name not in {f.get(\"name\") for f in" in src
+
+
+# --- R4 (independent UAT, 2026-11-04): a delete is not undone by a save that
+# read the settings before it ---------------------------------------------------
+
+def test_a_save_that_read_before_a_delete_does_not_bring_the_name_back(live, monkeypatch):
+    pc.save_settings_file(name="race", scope="dp")
+    assert pc.read_config()["settings_file_dp"] == "race_DP"
+    real_read = pc._read_config_item
+    state = {"interleaved": False}
+
+    def read_then_delete():
+        got = real_read()
+        if not state["interleaved"]:
+            # The card's autosave has read; the delete lands before it writes.
+            state["interleaved"] = True
+            monkeypatch.setattr(pc, "_read_config_item", real_read)
+            assert pc.delete_settings_file(name="race_DP")["cleared"] == ["settings_file_dp"]
+            monkeypatch.setattr(pc, "_read_config_item", read_then_delete)
+        return got
+
+    monkeypatch.setattr(pc, "_read_config_item", read_then_delete)
+    pc.write_config({"card_state": {"assemble": True}})          # the stale autosave
+    after = pc.read_config()
+    assert state["interleaved"]
+    assert after["settings_file_dp"] == ""                       # the delete stands
+    assert after["card_state"] == {"assemble": True}             # and so does the save
+
+
+def test_a_write_that_keeps_losing_says_so_instead_of_overwriting(live, monkeypatch):
+    from botocore.exceptions import ClientError
+
+    def always_conflicts(**kw):
+        raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
+
+    monkeypatch.setattr(pc.ddb, "put_item", always_conflicts)
+    monkeypatch.setattr(pc.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError):
+        pc.write_config({"mode": "manual"})
+
+
+def test_a_delete_never_clears_a_file_loaded_while_it_ran(live, monkeypatch):
+    pc.save_settings_file(name="old", scope="dp")
+    real_read = pc._read_config_item
+    state = {"interleaved": False}
+
+    def read_then_load_another():
+        got = real_read()
+        if not state["interleaved"]:
+            state["interleaved"] = True
+            monkeypatch.setattr(pc, "_read_config_item", real_read)
+            pc.write_config({"settings_file_dp": "new_DP"})       # loaded meanwhile
+            monkeypatch.setattr(pc, "_read_config_item", read_then_load_another)
+        return got
+
+    monkeypatch.setattr(pc, "_read_config_item", read_then_load_another)
+    out = pc.delete_settings_file(name="old_DP")
+    assert state["interleaved"] and out["cleared"] == []
+    assert pc.read_config()["settings_file_dp"] == "new_DP"

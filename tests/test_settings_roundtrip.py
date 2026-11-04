@@ -33,8 +33,14 @@ class FakeDynamo:
         item = self.items.get(self._key(Key))
         return {"Item": item} if item else {}
 
-    def put_item(self, TableName, Item):
-        self.items[(Item["kind"]["S"], Item["sort"]["S"])] = Item
+    def put_item(self, TableName, Item, ConditionExpression=None, ExpressionAttributeValues=None):
+        key = (Item["kind"]["S"], Item["sort"]["S"])
+        # The two conditions `write_config` uses, applied as DynamoDB would.
+        now = (self.items.get(key) or {}).get("rev", {}).get("S")
+        if ConditionExpression == "attribute_not_exists(rev)" and now is not None or                 ConditionExpression == "rev = :seen" and now != ExpressionAttributeValues[":seen"]["S"]:
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
+        self.items[key] = Item
 
 
 @pytest.fixture
