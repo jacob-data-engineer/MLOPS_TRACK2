@@ -72,7 +72,6 @@ def test_freezing_starts_preservation_and_export_falls_back_to_the_copy():
     from ppe_pipeline_api.data import catalog_view, dataset_versions
     assert "central_store.preserve_in_background(version)" in inspect.getsource(dataset_versions.create)
     src = inspect.getsource(catalog_view)
-    assert 'body = _fetch(entry[2]["stored"])' in src
     assert "stored_image_uri, stored_label_uri" in src
 
 
@@ -85,3 +84,61 @@ def test_the_schema_step_adds_and_drops_nothing():
     text = " ".join(catalog.MIGRATIONS[8]).upper()
     assert "STORED_IMAGE_URI" in text and "PRESERVED_AT" in text
     assert "DROP" not in text and "DELETE" not in text
+
+
+# --- R1 (independent UAT, 2026-11-04): an overwritten original must not
+# change what a frozen version exports. Driven through the real builder.
+
+class _ExportS3:
+    """get/put with ETags: an object's ETag is fixed when it is written."""
+    def __init__(self, objects):
+        self.objects = {k: (v, f"tag-{v.decode()}") for k, v in objects.items()}
+
+    def get_object(self, Bucket, Key):
+        from botocore.exceptions import ClientError
+        if (Bucket, Key) not in self.objects:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        body, tag = self.objects[(Bucket, Key)]
+        return {"Body": io.BytesIO(body), "ETag": f'"{tag}"'}
+
+    def put_object(self, Bucket, Key, Body, **_):
+        self.objects[(Bucket, Key)] = (Body if isinstance(Body, bytes) else Body.encode(), "")
+
+
+def _export(monkeypatch, objects):
+    import threading
+    from ppe_pipeline_api.data import catalog_view as cv
+    s3 = _ExportS3(objects)
+    monkeypatch.setattr(cv.storage, "s3", s3)
+    monkeypatch.setattr(cv, "_rows", lambda *a: [{"state": "building"}])
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(cv, "_building", slots)
+    finished = []
+    monkeypatch.setattr(cv, "_finish", lambda *a: finished.append(a))
+    entries = [("images/train/a.jpg", "s3://src/images/a.jpg",
+                {"path": "images/train/a.jpg", "stored": "s3://home/store/objects/tag-ORIGINAL-IMG.jpg"}),
+               ("labels/train/a.txt", "s3://src/labels/a.txt",
+                {"path": "labels/train/a.txt", "stored": "s3://home/store/objects/tag-ORIGINAL-LBL.txt"})]
+    cv._build("x", "version", "dv-1", "version-1", entries, ["helmet"], "s3", "out", "exp", "folder")
+    files = {k.split("version-1-x/", 1)[1]: v[0] for (b, k), v in s3.objects.items() if b == "out"}
+    return files, finished[-1][2]
+
+
+def test_an_overwritten_original_does_not_change_a_frozen_export(monkeypatch):
+    files, params = _export(monkeypatch, {
+        ("src", "images/a.jpg"): b"CHANGED-IMG", ("src", "labels/a.txt"): b"CHANGED-LBL",
+        ("home", "store/objects/tag-ORIGINAL-IMG.jpg"): b"ORIGINAL-IMG",
+        ("home", "store/objects/tag-ORIGINAL-LBL.txt"): b"ORIGINAL-LBL"})
+    assert files["images/train/a.jpg"] == b"ORIGINAL-IMG"
+    assert files["labels/train/a.txt"] == b"ORIGINAL-LBL"
+    assert params[0] == "ready"
+
+
+def test_a_changed_original_is_reported_not_packed_when_the_copy_is_gone(monkeypatch):
+    files, params = _export(monkeypatch, {
+        ("src", "images/a.jpg"): b"CHANGED-IMG", ("src", "labels/a.txt"): b"ORIGINAL-LBL"})
+    assert "images/train/a.jpg" not in files
+    assert files["labels/train/a.txt"] == b"ORIGINAL-LBL"   # unchanged original is still good
+    assert params[0] == "partial" and params[3:5] == (1, 1)
+    assert b"original changed since freeze" in files["manifest.csv"]

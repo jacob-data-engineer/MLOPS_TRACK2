@@ -203,15 +203,43 @@ def _split_uri(uri: str) -> tuple[str, str]:
 
 
 def _fetch(uri: str) -> bytes | None:
+    got = _fetch_tagged(uri)
+    return got[0] if got else None
+
+
+def _fetch_tagged(uri: str) -> tuple[bytes, str] | None:
+    """(bytes, ETag) of one object, or None when it is not there."""
     if not uri or not uri.startswith("s3://"):
         return None
     bucket, key = _split_uri(uri)
     try:
-        return storage.s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+        got = storage.s3.get_object(Bucket=bucket, Key=key)
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "NotFound", "404"):
             return None
         raise
+    return got["Body"].read(), str(got.get("ETag") or "").strip('"')
+
+
+def _frozen(stored: str, original: str) -> tuple[bytes | None, str]:
+    """The bytes a version was frozen with, and a note when they cannot be had.
+
+    The stored copy FIRST (R1, independent UAT 2026-11-04): it is named by
+    the ETag the file had at freeze, so it cannot change. Reading the
+    original first protected a deleted file but not an overwritten one --
+    an export of a frozen version came back "ready" holding the new bytes.
+    The original is used only if the stored copy has itself gone AND the
+    original still carries the frozen ETag."""
+    body = _fetch(stored)
+    if body is not None:
+        return body, ""
+    frozen_etag = stored.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    got = _fetch_tagged(original)
+    if got is None:
+        return None, "stored copy and original both missing"
+    if got[1] != frozen_etag:
+        return None, "original changed since freeze; stored copy missing"
+    return got[0], ""
 
 
 def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | None, str]:
@@ -392,12 +420,11 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
     def fetch(entry):
         if event.is_set():
             raise _ExportStopped()
-        # The original first; the copy kept in the central store at freeze
-        # when the original has gone (UAT-01).
-        body = _fetch(entry[1])
-        if body is None and entry[2].get("stored"):
-            body = _fetch(entry[2]["stored"])
-        return body
+        # A file kept in the central store at freeze is read from there
+        # (UAT-01, R1); one frozen before that existed, from where it was.
+        if entry[2].get("stored"):
+            return _frozen(entry[2]["stored"], entry[1])
+        return _fetch(entry[1]), ""
 
     try:
         check(True)
@@ -414,7 +441,7 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
         manifest = io.StringIO()
         writer = csv.DictWriter(manifest, fieldnames=["path", "source", "role", "split",
                                                       "included", "reason", "decay_weight",
-                                                      "week", "missing", "bytes", "sha256"],
+                                                      "week", "missing", "bytes", "sha256", "note"],
                                 extrasaction="ignore")
         writer.writeheader()
         # Include unselected/excluded inventory before enriching the checkpoint.
@@ -428,11 +455,11 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                 for start in range(0, len(wanted), FETCHERS * 4):
                     check()
                     chunk = wanted[start:start + FETCHERS * 4]
-                    for (path, uri, row), body in zip(chunk, pool.map(fetch, chunk)):
+                    for (path, uri, row), (body, note) in zip(chunk, pool.map(fetch, chunk)):
                         check()
                         if body is None:
                             missing += 1
-                            writer.writerow({**row, "missing": True})
+                            writer.writerow({**row, "missing": True, "note": note})
                             continue
                         if metadata and path == f"models/{label}.pt":
                             check(True)
