@@ -105,6 +105,8 @@ class ConfigRequest(BaseModel):
     golden_set: dict | None = None
     # The SQL tab's database, bucket, folder and query.
     sql_explorer: dict | None = None
+    # The SQL tab's Readiness flow card: which class it shows (2026-11-05).
+    readiness_flow: dict | None = None
     # The central data store's bucket and folder (2026-10-29).
     central_store: dict | None = None
     catalog_export: dict | None = None

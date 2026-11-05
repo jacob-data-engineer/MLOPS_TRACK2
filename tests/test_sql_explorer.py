@@ -466,3 +466,50 @@ def test_switching_to_a_stopped_database_never_queries_it():
     assert "[settingsRead, database, chosen?.available, pickedClass?.name, presetScope]" in page
     # switching still abandons whatever was running against the old one
     assert "runId.current += 1;      // abandon a search against the old one" in page
+
+
+# --- the Readiness flow card (2026-11-05) ----------------------------------------
+
+def test_the_flow_is_built_per_class_and_for_all_from_one_query(monkeypatch):
+    rows = [
+        ["no_helmet", "Inference found people", "Settled by VLM", "Audited (independent)",
+         "Fully resolved", "Box: human", 7],
+        ["no_helmet", "Inference found people", "Escalated by VLM", "Pending escalation", None, None, 3],
+        ["worker_on_edge", "No person / skipped", None, None, None, None, 2],
+        # a skipped frame a person audited anyway carries on
+        ["worker_on_edge", "No person / skipped", None, "Audited (independent)", "Fully resolved", None, 1],
+    ]
+    calls = []
+    monkeypatch.setattr(sx, "_invoke", lambda key, payload: calls.append(payload) or {"rows": rows})
+    out = sx.readiness("violation-review")
+    assert len(calls) == 1 and calls[0]["action"] == "query"
+    assert out["frames"] == {"all": 13, "no_helmet": 10, "worker_on_edge": 3}
+    nh = {(l["source"], l["target"]): l["value"] for l in out["links"]["no_helmet"]}
+    assert nh[("Frames received", "Inference found people")] == 10
+    assert nh[("Fully resolved", "Box: human")] == 7
+    assert nh[("Escalated by VLM", "Pending escalation")] == 3
+    every = {(l["source"], l["target"]): l["value"] for l in out["links"]["all"]}
+    assert every[("Frames received", "No person / skipped")] == 3
+    assert every[("No person / skipped", "Audited (independent)")] == 1
+    assert every[("Audited (independent)", "Fully resolved")] == 8
+    assert set(out["steps"]) >= {s for pair in every for s in pair}
+
+
+def test_the_flow_query_reads_only_and_keeps_the_human_only_rule():
+    sql = sx.readiness_sql()
+    for word in ("INSERT", "UPDATE ", "DELETE", "DROP", "ALTER"):
+        assert word not in sql.upper()
+    # the same rule as the class drop-down: pre-filled and auto-settled
+    # answers are not human, and "resolved" is the preset's condition
+    assert "similarity_prefill" in sql and "auto_settled" in sql
+    assert "s.answered = s.kept" in sql and "fv.verdict = 'violation' AND s.kept = 1" in sql
+    assert "array_agg(DISTINCT a.candidate_id) AS people" in sql
+
+
+def test_the_flow_has_a_real_route_and_its_class_is_saved_with_data_preparation():
+    from ppe_pipeline_api import pull_control as pc
+    from ppe_pipeline_api.main import app
+    from ppe_pipeline_api.routers.track2_pull_control import ConfigRequest
+    assert "/track2/sql/readiness" in app.openapi()["paths"]
+    assert "readiness_flow" in pc.DEFAULTS and "readiness_flow" in ConfigRequest.model_fields
+    assert "readiness_flow" in pc.SCOPES["dp"] and "readiness flow" in pc.DP_CARDS

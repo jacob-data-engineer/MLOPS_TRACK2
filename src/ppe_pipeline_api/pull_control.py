@@ -173,6 +173,10 @@ DEFAULTS = {
     # folder, sql}`. A setting like any other card's, so a settings file
     # brings the query back with everything else.
     "sql_explorer": {},
+    # The SQL tab's Readiness flow card (2026-11-05): which class it shows,
+    # `{hazard}`. A choice, so it is saved; the flow itself is a result
+    # and is read live every time, never saved.
+    "readiness_flow": {},
     # The CENTRAL DATA STORE (2026-10-29): the one bucket and folder where
     # all the data and images are meant to be kept. `{bucket, folder}`.
     # Chosen on its own card on Data Preparation, below the Pull queue,
@@ -3046,7 +3050,7 @@ SCOPES = {
         "auto_create_weeks", "first_week_takes_all", "week_by",
         "image_extensions", "label_extensions", "overwrite",
         "retention", "golden_set", "dataset_assemble", "auto_training",
-        "sql_explorer", "central_store", "catalog_export", "catalog_pt_metadata", "catalog_export_destination",
+        "sql_explorer", "readiness_flow", "central_store", "catalog_export", "catalog_pt_metadata", "catalog_export_destination",
     ),
     "at": (
         "mode", "schedule_expression", "schedule_every_days", "schedule_from",
@@ -3068,6 +3072,8 @@ DP_CARDS = frozenset({
     "assemble", "golden_set", "pull_control", "retention",
     "assemble a dataset", "pick golden set / edge cases", "pull control",
     "auto training", "pull queue", "central data store",
+    # The SQL tab saves with Data Preparation (`sql_explorer` is a DP key).
+    "readiness flow",
 })
 
 

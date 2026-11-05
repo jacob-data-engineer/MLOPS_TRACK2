@@ -2176,6 +2176,8 @@ export interface Track2PullConfig {
     show_labels?: boolean;
     with_labels?: boolean;
   };
+  /** The SQL tab's Readiness flow card: which class it shows. */
+  readiness_flow?: { hazard?: string };
   golden_set?: {
     bucket?: string;
     source?: string;
@@ -3962,6 +3964,24 @@ export function getTrack2SqlPreviews(uris: string[]): Promise<{
 }
 
 /** The human-verified query for one class, built server-side. */
+/** One step a frame can reach on its way to retraining, by what it means:
+ * a pipeline step, a human decision, recoverable by a reviewer, ready,
+ * or out with nothing to do. */
+export type Track2ReadinessRole = "flow" | "human" | "fix" | "ready" | "out";
+
+/** Where every judged frame stops, per class and for "all" -- read live. */
+export interface Track2Readiness {
+  measured_at: string;
+  steps: Record<string, Track2ReadinessRole>;
+  box_class: string;
+  frames: Record<string, number>;
+  links: Record<string, { source: string; target: string; value: number }[]>;
+}
+
+export function getTrack2SqlReadiness(database: string): Promise<Track2Readiness> {
+  return apiPost("/track2/sql/readiness", { database });
+}
+
 export function getTrack2SqlPreset(
   hazard: string, scope: Track2SqlPresetScope,
 ): Promise<{ sql: string }> {

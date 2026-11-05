@@ -4,6 +4,7 @@ import {
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Card } from "../components/Card";
 import { S3FolderField } from "../components/S3FolderField";
+import { Track2ReadinessFlowPanel } from "../components/Track2ReadinessFlowPanel";
 import {
   ApiError,
   getTrack2Buckets,
@@ -678,6 +679,12 @@ export function Track2SqlPage() {
             )}
           </Card>
         )}
+
+        <Track2ReadinessFlowPanel
+          database={database}
+          available={!!chosen?.available}
+          databaseLabel={chosen?.label ?? ""}
+        />
 
         {/* ---- ADVANCED: write your own SQL ---- Folded away, because the
              drop-downs are the normal way in; kept, for anything they do

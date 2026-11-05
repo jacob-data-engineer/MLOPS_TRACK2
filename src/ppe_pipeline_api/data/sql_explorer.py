@@ -510,6 +510,211 @@ WHERE j.kept_people > 0
 ORDER BY helmet_box, case_key"""
 
 
+# --- where frames drop out before retraining (2026-11-05) --------------------
+#
+# Every judged frame, followed from receipt to "ready for retraining" or to
+# the step where it stops, for the Readiness flow card. The same human-only
+# rule as `preset_sql` -- the answers, struck-out people and frame verdicts
+# below are its CTEs, unchanged -- so "Fully resolved" here is exactly the
+# frames the class drop-down lists, and the two box nodes are exactly its
+# "ready" / "test" scopes. A frame belongs to ONE class (checked
+# 2026-11-05: no case_key has two hazard types), so the classes add up.
+#
+# Which human step a frame is filed under, first match wins:
+#   Crop Similarity  corrections.similarity_human_crop_ids / provenance, or
+#                    a review with review_origin = human_crop_pool
+#   Audit page       a corrections row: decision_origin human_assisted is
+#                    "with suggestion", anything else "independent"
+#   Escalations      a human review with a verdict or crop verdicts, or a
+#                    human crop verdict in the escalation lane
+#   (Audit page)     a human crop verdict in the audit lane
+#   Box only         a review that fixed the helmet box and gave no verdict
+#   nobody           Pending escalation / Not audited (VLM only)
+#
+# A frame the detector skipped ("no person") stops there -- unless a person
+# audited it anyway and answered its people, as `preset_sql` counts it.
+# Those carry on from "No person / skipped" to their human step, so the
+# two agree frame for frame.
+
+READINESS_STEPS = {
+    # name -> role: flow | human | fix | ready | out. The page colours by it.
+    "Frames received": "flow", "Inference found people": "flow",
+    "No person / skipped": "out", "Escalated by VLM": "flow", "Settled by VLM": "flow",
+    "Answered in Crop Similarity": "human", "Audited (independent)": "human",
+    "Audited (with suggestion)": "human", "Reviewed on Escalations": "human",
+    "Box fixed, verdict still VLM": "fix", "Pending escalation": "fix",
+    "Not audited (VLM only)": "fix", "Fully resolved": "human",
+    "Violation, but who? (multi-person)": "fix", "Person unanswered": "fix",
+    "Cannot determine": "fix", "All people struck out": "out",
+    "Box: human": "ready", "Box: detector >= 0.5": "ready", "Box missing": "fix",
+}
+_HUMAN_STEPS = ("Answered in Crop Similarity", "Audited (independent)",
+                "Audited (with suggestion)", "Reviewed on Escalations")
+
+
+def readiness_sql() -> str:
+    """One row per (class, path through the steps), with a frame count."""
+    human_review = ("coalesce(r.data->>'review_origin', 'human') <> 'similarity_prefill' "
+                    "AND coalesce(r.data->>'auto_settled', 'false') <> 'true'")
+    no_person = ("(a.data->>'outcome' = 'SKIP' OR a.data->>'reason_code' IN "
+                 "('no_person_detected', 'no_person_present'))")
+    human = ", ".join(f"'{s}'" for s in _HUMAN_STEPS)
+    return f"""WITH frames AS (
+  SELECT a.case_key, min(a.data->>'hazard_type') AS hazard,
+         bool_or(a.data->>'outcome' IN ('ESCALATE', 'AUDIT_REQUIRED')) AS escalated,
+         bool_and({no_person}) AS skipped,
+         array_agg(DISTINCT a.candidate_id) AS people     -- as preset_sql, exactly
+  FROM audit_rows a WHERE a.data->>'hazard_type' IS NOT NULL
+  GROUP BY a.case_key
+),
+detector_box AS (
+  SELECT case_key, candidate_id AS person, max((data->>'helmet_box_confidence')::float) AS confidence
+  FROM audit_rows GROUP BY case_key, candidate_id
+),
+head AS (
+  SELECT h.case_key, h.candidate_id AS person, e.current_verdict AS verdict, e.review_lane AS lane
+  FROM crop_verdict_heads h JOIN crop_verdict_events e ON e.event_id = h.current_event_id
+  WHERE e.actor_subject IS NOT NULL
+),
+answers AS (
+  SELECT DISTINCT ON (case_key, person) case_key, person, verdict
+  FROM (
+    SELECT case_key, person, verdict, 0 AS rank FROM head
+    UNION ALL
+    SELECT c.case_key, v.key, v.value, 1
+    FROM corrections c, jsonb_each_text(coalesce(c.data->'crop_verdicts', '{{}}')) v
+    UNION ALL
+    SELECT r.case_key, v.key, v.value, 2
+    FROM reviews r, jsonb_each_text(coalesce(r.data->'crop_verdicts', '{{}}')) v
+    WHERE {human_review}
+  ) x
+  ORDER BY case_key, person, rank
+),
+struck AS (
+  SELECT c.case_key, e AS person
+  FROM corrections c, jsonb_array_elements_text(coalesce(c.data->'excluded_people', '[]')) e
+  UNION
+  SELECT case_key, person FROM answers WHERE verdict IN ('not_person', 'not_cargo', 'invalid_crop')
+),
+frame_verdict AS (
+  SELECT case_key, coalesce(data->>'corrected_verdict', data->>'audited_verdict') AS verdict
+  FROM corrections
+  UNION ALL
+  SELECT r.case_key, r.data->>'verdict' FROM reviews r WHERE {human_review}
+),
+human_box AS (
+  SELECT DISTINCT case_key FROM reviews WHERE data->>'helmet_box_status' IN ('drawn', 'accepted_cv')
+),
+audit AS (
+  SELECT case_key,
+         bool_or(jsonb_array_length(coalesce(data->'similarity_human_crop_ids', '[]')) > 0
+                 OR data ? 'similarity_decision_provenance') AS similarity,
+         bool_or(data->>'decision_origin' = 'human_assisted') AS assisted
+  FROM corrections GROUP BY case_key
+),
+review AS (
+  SELECT r.case_key,
+         bool_or(r.data->>'review_origin' = 'human_crop_pool') AS similarity,
+         bool_or({human_review} AND (r.data ? 'verdict' OR r.data ? 'crop_verdicts')) AS answered,
+         bool_or(r.data ? 'helmet_box_status' OR r.data ? 'helmet_box') AS boxed
+  FROM reviews r GROUP BY r.case_key
+),
+lanes AS (
+  SELECT case_key, bool_or(lane = 'escalation') AS escalation FROM head GROUP BY case_key
+),
+judged AS (
+  SELECT f.case_key,
+         count(*) AS kept_people,
+         count(*) FILTER (WHERE coalesce(an.verdict, 'no_violation') = 'no_violation') AS wearing,
+         count(*) FILTER (WHERE coalesce(an.verdict, 'no_violation') = 'no_violation'
+                            AND db.confidence >= 0.5) AS wearing_boxed,
+         count(*) FILTER (WHERE an.verdict IN ('violation', 'no_violation')) AS answered,
+         count(*) FILTER (WHERE an.verdict = 'violation') AS violations,
+         count(*) FILTER (WHERE an.verdict = 'cannot_determine') AS undecided
+  FROM frames f
+  CROSS JOIN LATERAL unnest(f.people) AS p(person)
+  LEFT JOIN answers an ON an.case_key = f.case_key AND an.person = p.person
+  LEFT JOIN detector_box db ON db.case_key = f.case_key AND db.person = p.person
+  WHERE NOT EXISTS (SELECT 1 FROM struck s WHERE s.case_key = f.case_key AND s.person = p.person)
+  GROUP BY f.case_key
+),
+stepped AS (
+  SELECT f.case_key, f.hazard, f.skipped, f.escalated,
+         CASE WHEN au.similarity OR rv.similarity THEN 'Answered in Crop Similarity'
+              WHEN au.case_key IS NOT NULL AND au.assisted THEN 'Audited (with suggestion)'
+              WHEN au.case_key IS NOT NULL THEN 'Audited (independent)'
+              WHEN rv.answered OR ln.escalation THEN 'Reviewed on Escalations'
+              WHEN ln.case_key IS NOT NULL THEN 'Audited (independent)'
+              WHEN rv.boxed THEN 'Box fixed, verdict still VLM'
+              WHEN f.escalated THEN 'Pending escalation'
+              ELSE 'Not audited (VLM only)' END AS human_step,
+         coalesce(j.kept_people, 0) AS kept, j.answered, j.violations, j.undecided,
+         j.wearing, j.wearing_boxed, hb.case_key IS NOT NULL AS human_boxed
+  FROM frames f
+  LEFT JOIN audit au ON au.case_key = f.case_key
+  LEFT JOIN review rv ON rv.case_key = f.case_key
+  LEFT JOIN lanes ln ON ln.case_key = f.case_key
+  LEFT JOIN judged j ON j.case_key = f.case_key
+  LEFT JOIN human_box hb ON hb.case_key = f.case_key
+),
+resolved AS (
+  SELECT s.*,
+         CASE WHEN s.human_step NOT IN ({human}) THEN NULL
+              WHEN s.kept = 0 THEN 'All people struck out'
+              WHEN s.answered = s.kept
+                OR (s.undecided = 0 AND EXISTS (
+                      SELECT 1 FROM frame_verdict fv WHERE fv.case_key = s.case_key
+                        AND ((fv.verdict = 'no_violation' AND s.violations = 0)
+                             OR (fv.verdict = 'violation' AND s.kept = 1)))) THEN 'Fully resolved'
+              WHEN s.undecided > 0 THEN 'Cannot determine'
+              WHEN s.kept > 1 AND EXISTS (SELECT 1 FROM frame_verdict fv WHERE fv.case_key = s.case_key
+                                            AND fv.verdict = 'violation')
+                THEN 'Violation, but who? (multi-person)'
+              ELSE 'Person unanswered' END AS outcome
+  FROM stepped s
+)
+SELECT hazard,
+       CASE WHEN skipped THEN 'No person / skipped' ELSE 'Inference found people' END AS found,
+       CASE WHEN skipped THEN NULL WHEN escalated THEN 'Escalated by VLM' ELSE 'Settled by VLM' END AS vlm,
+       CASE WHEN skipped AND outcome IS NULL THEN NULL ELSE human_step END AS human_step,
+       outcome,
+       CASE WHEN outcome IS DISTINCT FROM 'Fully resolved' OR hazard <> '{BOX_CLASS}' THEN NULL
+            WHEN human_boxed AND wearing <= 1 THEN 'Box: human'
+            WHEN wearing_boxed = wearing THEN 'Box: detector >= 0.5'
+            ELSE 'Box missing' END AS box,
+       count(*) AS frames
+FROM resolved
+GROUP BY 1, 2, 3, 4, 5, 6
+ORDER BY 1, 7 DESC"""
+
+
+def readiness(key: str) -> dict:
+    """The flow for every class and for all of them together:
+    `{measured_at, steps, frames: {class: n}, links: {class: [{source, target, value}]}}`.
+    Read live; nothing is cached, so the numbers are as of the request."""
+    out = _invoke(key, {"action": "query", "sql": readiness_sql()})
+    links: dict[str, dict[tuple, int]] = {"all": {}}
+    frames: dict[str, int] = {"all": 0}
+    for hazard, *steps, count in out["rows"]:
+        hazard, count = str(hazard), int(count or 0)
+        path = ["Frames received"] + [s for s in steps if s]
+        frames[hazard] = frames.get(hazard, 0) + count
+        frames["all"] += count
+        for name in (hazard, "all"):
+            bucket = links.setdefault(name, {})
+            for source, target in zip(path, path[1:]):
+                bucket[(source, target)] = bucket.get((source, target), 0) + count
+    return {
+        "measured_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "steps": READINESS_STEPS,
+        "box_class": BOX_CLASS,
+        "frames": frames,
+        "links": {name: [{"source": s, "target": t, "value": v}
+                         for (s, t), v in sorted(pairs.items(), key=lambda kv: -kv[1])]
+                  for name, pairs in links.items()},
+    }
+
+
 # --- pulling the images a query names into a training folder (2026-10-29) ---
 
 #: Most images one pull copies. Each is a server-side S3 copy, done in

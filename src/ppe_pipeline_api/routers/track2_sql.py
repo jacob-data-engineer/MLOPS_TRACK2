@@ -70,6 +70,16 @@ def preset(payload: PresetRequest, session=Depends(require_session)) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.post("/readiness")
+def readiness(payload: SchemaRequest, session=Depends(require_session)) -> dict:
+    """Where every judged frame stops on its way to retraining, per class,
+    read live -- for the Readiness flow card. One read-only query."""
+    try:
+        return sx.readiness(payload.database)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/databases")
 def databases(session=Depends(require_session)) -> dict:
     return {"databases": sx.databases()}
