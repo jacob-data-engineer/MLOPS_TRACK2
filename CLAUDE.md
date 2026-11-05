@@ -19,18 +19,17 @@ Facts for when you ARE asked (not prompts to raise it): the GitHub repo is
 do not assume private). Push only when asked, and never commit Terraform
 state -- `.gitignore` keeps `*.tfstate*` out on purpose.
 
-**One main branch, short-lived feature branches** (decided 2026-10-29):
+**Everything goes on `export`** (decided 2026-11-05, replacing the
+feature-branch rule of 2026-10-29):
 
-- `ml_ops_track2` is the main branch -- the user chose to keep that name
-  rather than `main`. It holds what has been tested; production (8501) is
-  promoted from it.
-- New work starts on its own branch off `ml_ops_track2`, named for the
-  work (`sql-tab-setup`, `retention-fix`). Create it quietly when the work
-  starts; it is not a question to ask. That branch is what goes to dev
-  (8090).
-- When it works, merge it into `ml_ops_track2` and delete the branch,
-  locally and on GitHub. Commits, pushes and merges still happen only when
-  the user asks.
+- All work is committed on the `export` branch and pushed there. Do not
+  create a new branch for a piece of work -- not quietly, not as a
+  question. If you find yourself on another branch, move the work to
+  `export`.
+- `ml_ops_track2` is still GitHub's default branch. Leave it alone:
+  merging `export` into it is the user's call, made when they ask.
+- Commits and pushes still happen only when the user asks, with the
+  user's own comment as the commit message.
 
 `README.md` describes the layout. `CONTINUE.md` is the running handover —
 current state, what changed, what is outstanding. **Read `CONTINUE.md`
