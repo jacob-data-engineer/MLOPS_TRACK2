@@ -1,6 +1,53 @@
 # UAT testing — Track2 Retraining Platform
 
-## Outcome
+## Latest independent verification — 4 November 2026, approximately 20:25–20:33 SGT
+
+**The original R1–R4 reproductions now pass within the tested scope.** Development build **`20261104-120224`** was verified before and after testing (`dev`, port 8090, PostgreSQL). Source HEAD: `32e84c3`. This is a targeted verification of the latest fixes, not production approval or a repeat of all 29 original cases. The earlier failures below are retained as historical evidence.
+
+| Issue | Current verification | Evidence and limits |
+|---|---|---|
+| **R1: overwritten original changes frozen export** | **PASS — isolated reproduction plus live artifact validation** | Re-ran the independently written failing example against the fixed code: export now contains `ORIGINAL-AT-FREEZE`, not `CHANGED-AFTER-FREEZE`, and is ready. Downloaded existing Version 84 ZIP through the browser: all three images and three labels exactly match their preserved S3 copies and manifest hashes. This retest did not overwrite any live source. [Reproduction](uat-evidence/2026-11-04/independent-retest-2/preservation-edge-cases.json), [byte validation](uat-evidence/2026-11-04/independent-retest-2/06-zip-byte-verification.json). |
+| **R2: run exports ignore preserved copies** | **PASS in isolated behavioral test; live run end-to-end remains unverified** | Independently exercised the actual run planner and ZIP builder with absent original image/label and available preserved copies. Result: ready, two files, zero missing; exported bytes equal the preserved image and label. Both mappings are now attached by the planner. No real training run was started or fabricated. [Plan and result](uat-evidence/2026-11-04/independent-retest-2/03-run-export-reproduction.json). |
+| **R3: missing label not counted / failed copy not retried** | **PASS for tested bookkeeping, export and retry behavior** | Original one-image/missing-label reproduction now returns `labels_missing: 1`, `missing: 1`, `complete: false`. Existing live Version 85 manifest agrees. Fresh browser export of Version 85 correctly reports Incomplete: three files, one missing. ZIP includes two readable images and one label; missing label is explicitly recorded and not included. Focused tests also passed transient-copy failure classification and retry completion. [Reproduction](uat-evidence/2026-11-04/independent-retest-2/preservation-edge-cases.json), [live preservation record](uat-evidence/2026-11-04/independent-retest-2/04-preserved-85.json), [export](uat-evidence/2026-11-04/independent-retest-2/05-exports.json). |
+| **R4: deleted loaded-file name reappears** | **PASS for development writers tested** | Three live rounds: save a unique UAT DP file, confirm deletion while 18 same-value card-state saves run through six concurrent workers, then check the stored name. All 54 saves succeeded; all three deletes cleared the name; card state stayed unchanged. Name remained empty after delayed read/reload, and Scheduled displayed no deleted UAT name. Conditional-write regression tests passed. [Race results](uat-evidence/2026-11-04/independent-retest-2/02-delete-races.json), [Scheduled](uat-evidence/2026-11-04/independent-retest-2/02-scheduled.png), [final state](uat-evidence/2026-11-04/independent-retest-2/07-final-cleanup.json). |
+
+### Automated checks independently run
+
+**165 tests passed, zero failed**, across these two commands:
+
+```text
+.venv/Scripts/python.exe -m pytest tests/test_central_store.py tests/test_settings_split_by_tab.py tests/test_catalog.py tests/test_sql_explorer.py -q
+# 130 passed; one Starlette/httpx dependency deprecation warning
+
+.venv/Scripts/python.exe -m pytest tests/test_settings_roundtrip.py tests/test_sql_record_store.py -q
+# 35 passed
+```
+
+The focused suite includes changed-original image/label behavior, matching-original fallback when a copy is absent, changed-original rejection, preserved run layout, failed-copy retry, and stale settings-write interleavings. This is not an independent rerun of the implementer's reported 2,572-test full suite.
+
+### Live export observations
+
+The smallest nonempty dataset is now **Version 85 (two images)**, so it was the only newly exported version. Export ID **`46db64c87382`** correctly ended partial/Incomplete because the test dataset intentionally lacks one label. This is a passing negative test, not a recurrence of the reporting bug.
+
+- [Export screen](uat-evidence/2026-11-04/independent-retest-2/05-exports.png).
+- [Exact byte and hash checks for Versions 84 and 85](uat-evidence/2026-11-04/independent-retest-2/06-zip-byte-verification.json). All five downloaded images decoded successfully; all nine present image/label files matched their preserved copies and manifest hashes.
+- Version 84 was downloaded from the existing export `0a6c6586e2b2`; it was not newly exported or re-frozen during this retest.
+- New retained artifact: `s3://track2-s3/label-curation/validate_v1/export/_exports/version-85-46db64c87382/version-85.zip`.
+
+### Cleanup and acceptance boundary
+
+All three temporary files (`uat_verify2_0_DP`, `uat_verify2_1_DP`, `uat_verify2_2_DP`) were deleted. Temporary export preferences were restored. **Final configuration has zero differences from the captured baseline**, including card states, loaded-file references, model/data settings and schedules. [Cleanup verification](uat-evidence/2026-11-04/independent-retest-2/07-final-cleanup.json). Temporary browser session state was removed after testing.
+
+No source images/labels, existing settings, or historical records were deleted or overwritten. No training, schedule Apply, new freeze, database start, production access, application-code changes, deployment, or Git commit was performed. The new ZIP and local evidence are retained.
+
+Initial page loading reported browser `ERR_NETWORK_CHANGED` messages; subsequent race, export and cleanup browser sessions recorded no console/HTTP errors. These initial transport messages were not treated as proof of an application regression.
+
+**Remaining limits:** a real run on a preserved dataset is still needed to close R2's live end-to-end acceptance. A bounded race test cannot prove all concurrency schedules. The reported older production/Lambda writers were not inspected or promoted here, so R4 acceptance applies to the tested development writers. Historical missing files remain intentionally unrepaired. Production, actual training, schedules firing, large exports, model/PT compatibility and stop/cancel are outside this retest.
+
+**Conclusion:** the previously observed R1–R4 failures did not recur in the repeated checks. No new failure was found in this targeted retest; retain the live-run and environment limitations above before broader release sign-off.
+
+
+## Original UAT outcome
 
 **UAT executed on development; not accepted for unrestricted release.** Authentication was completed after the operator supplied the password. This report supersedes the earlier login-blocked draft.
 
@@ -12,7 +59,7 @@ Screens were used for user actions. Authenticated API reads, S3 object inspectio
 
 ## Independent verification — 4 November 2026, 19:25–19:36 SGT
 
-**Verdict: the fixes are deployed, but not all defects can be closed.** This section is the latest independent result. The Remediation section below records the implementer's earlier claims; the original FAIL table is historical evidence, not the current retest outcome.
+**Verdict: the fixes are deployed, but not all defects can be closed.** This section records the first independent result; the latest verification is at the top of this report. The Remediation section below records the implementer's earlier claims; the original FAIL table is historical evidence, not the current retest outcome.
 
 Verified live development build **`20261104-111726`**, PostgreSQL backend, port **8090**, before and after testing. Local source HEAD was `43b6169`. No production access, training, schedule Apply, database start, new dataset freeze, or deletion of source images was performed. The independent test reused the already-created smallest nonempty dataset, Version 83. Application code was not changed.
 
