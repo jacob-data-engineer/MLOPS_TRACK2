@@ -43,6 +43,7 @@ import {
   stopTrack2Training,
   type Track2DatasetClasses,
   type Track2Detector,
+  type Track2PullConfig,
   type Track2MetricsRow,
   type Track2ModelsResponse,
   type Track2PendingImport,
@@ -359,6 +360,25 @@ interface TrainingSelection {
  * one page side by side could see different times for the same event, and
  * the next-run line could disagree with the schedule that computed it. The
  * zone is named in the output so the reading is checkable. */
+/** The Assemble card's saved build inputs, parsed the way
+ * `retrain_schedule.assemble_plan` parses them: blank names dropped,
+ * indices as written. `configured` is false when no folder is picked,
+ * which is when the chain falls back to the root-and-week-folders build
+ * and the folder's own yaml is the thing to check. */
+function readAssembleSaved(saved: Track2PullConfig["dataset_assemble"]) {
+  const labelClasses: Record<string, string> = {};
+  for (const [key, value] of Object.entries(saved?.label_classes ?? {})) {
+    const name = String(value ?? "").trim();
+    if (name && Number.isInteger(Number(key))) labelClasses[String(Number(key))] = name;
+  }
+  return {
+    configured: Boolean(saved?.train_sources?.length || saved?.eval_sources?.length),
+    slug: String(saved?.detector_slug ?? "").trim(),
+    labelClasses,
+    dropUndeclared: Boolean(saved?.drop_undeclared_labels),
+  };
+}
+
 function localDate(iso: string): string {
   return iso ? formatDayTime(iso) : "";
 }
@@ -389,6 +409,19 @@ function TrainingForm({
    * than passed down: they live on three different cards, and this one
    * only reports them. */
   const [sources, setSources] = useState({ folders: true, golden: false, pull: false });
+  /** What the Assemble card is SAVED to build -- the inputs
+   * `retrain_schedule.assemble_plan` reads when Add to Queue runs the
+   * chain. The class check below compares against these, not against
+   * `built.folder`'s yaml: that file is whatever the card wrote LAST,
+   * possibly weeks ago with another Model Name (on 2026-11-06 it was
+   * `golden_set`, one class, under a six-class run), and the chain
+   * rewrites the yaml before training anyway. */
+  const [assembleSaved, setAssembleSaved] = useState<{
+    configured: boolean;
+    slug: string;
+    labelClasses: Record<string, string>;
+    dropUndeclared: boolean;
+  } | null>(null);
   // Kept current while the page is open (2026-10-28). Read once on load,
   // ticking the golden set or Assemble's folders afterwards left this
   // card describing -- and choosing between enqueue and queue for -- the
@@ -397,11 +430,14 @@ function TrainingForm({
   // says when one saved, and only the three ticks are re-read.
   useEffect(() => listen("data-sources-changed", () => {
     getTrack2PullControl()
-      .then((status) => setSources({
-        folders: status.config.dataset_assemble?.use !== false,
-        golden: Boolean(status.config.retention?.use_golden),
-        pull: !status.config.dataset_assemble?.only,
-      }))
+      .then((status) => {
+        setSources({
+          folders: status.config.dataset_assemble?.use !== false,
+          golden: Boolean(status.config.retention?.use_golden),
+          pull: !status.config.dataset_assemble?.only,
+        });
+        setAssembleSaved(readAssembleSaved(status.config.dataset_assemble));
+      })
       .catch(() => undefined);
   }), []);
   // Choosing the dataset from this card, for when nothing upstream has.
@@ -525,15 +561,39 @@ function TrainingForm({
   // training -- the normal case, since a site dataset is labelled once
   // with everything on it. A dataset MISSING one of them cannot train it
   // at all, and that is the only real error.
-  const datasetNames = datasetClasses ? Object.values(datasetClasses.classes) : [];
+  //
+  // WHICH yaml to compare against depends on the radio. A snapshot or a
+  // pull trains the folder's yaml as it stands, so that file is read. The
+  // assembled source does NOT: Add to Queue rebuilds the yaml from the
+  // Assemble card's saved settings first, so the classes that run will
+  // see are the ones `assemble_plan` derives -- the Assemble card's Model
+  // Name, or its Label classes when the filter is off and they contain
+  // that Model Name's names. Same rule, mirrored here.
+  const assembledBuild = (() => {
+    if (dataSource !== "assembled" || !assembleSaved?.configured) return null;
+    const assembleDetector = detectors.find((d) => d.slug === assembleSaved.slug);
+    if (!assembleDetector) return { detector: null, classes: null };
+    const labelled = assembleSaved.dropUndeclared ? {} : assembleSaved.labelClasses;
+    const labelledNames = Object.values(labelled);
+    const useLabelled = labelledNames.length > 0
+      && Object.values(assembleDetector.classes).every((n) => labelledNames.includes(n));
+    return {
+      detector: assembleDetector,
+      classes: useLabelled ? labelled : assembleDetector.classes,
+    };
+  })();
+  const checkedClasses: Record<string, string> | null = assembledBuild
+    ? assembledBuild.classes
+    : datasetClasses?.classes ?? null;
+  const datasetNames = checkedClasses ? Object.values(checkedClasses) : [];
   const detectorNames = chosenDetector ? Object.values(chosenDetector.classes) : [];
   const absentClasses =
-    chosenDetector && datasetClasses
+    chosenDetector && checkedClasses
       ? detectorNames.filter((name) => !datasetNames.includes(name))
       : [];
   const willFilter =
-    chosenDetector && datasetClasses && absentClasses.length === 0 &&
-    JSON.stringify(chosenDetector.classes) !== JSON.stringify(datasetClasses.classes);
+    chosenDetector && checkedClasses && absentClasses.length === 0 &&
+    JSON.stringify(chosenDetector.classes) !== JSON.stringify(checkedClasses);
   // The same rows the Deploy and Metrics tables use. The package list has no
   // metrics, so picking a base model from it meant choosing on a version
   // number alone with no idea how good that version was.
@@ -593,6 +653,7 @@ function TrainingForm({
 
         const assembledRecord = status.config.dataset_assemble?.built ?? null;
         setAssembled(assembledRecord);
+        setAssembleSaved(readAssembleSaved(status.config.dataset_assemble));
         // WHICH SOURCES ARE TICKED, read from the same three fields the
         // chain reads. The assembled folder alone stopped describing
         // this run the moment the yaml could be composed from more than
@@ -743,7 +804,7 @@ function TrainingForm({
         tone: "warn",
         text: "No dataset chosen yet -- pick a frozen snapshot above.",
       });
-    } else if (!datasetClasses) {
+    } else if (!checkedClasses) {
       lines.push({ tone: "warn", text: `Could not read data.yaml in ${datasetFolder}.` });
     }
 
@@ -753,14 +814,32 @@ function TrainingForm({
         text: "No Model Name chosen -- the model lands in the shared open registry, "
           + "where version numbers are not per model type.",
       });
-    } else if (datasetClasses) {
+    } else if (assembledBuild && !assembledBuild.detector) {
+      // The server refuses this too (`assemble_plan`), so it blocks here.
+      blocking = true;
+      lines.push({
+        tone: "bad",
+        text: "No Model Name is chosen in Assemble a dataset, so the data.yaml "
+          + "Add to Queue writes would declare no classes.",
+      });
+    } else if (checkedClasses) {
       if (absentClasses.length > 0) {
         blocking = true;
+        // "Does not declare", never "has no labels": both sides come from
+        // a class LIST, and no .txt label file is opened to decide this.
         lines.push({
           tone: "bad",
-          text: `The dataset has no labels for ${absentClasses.join(", ")}, so a `
-            + `${chosenDetector.label} model cannot be trained from it. It declares `
-            + `${datasetNames.join(", ") || "nothing"}.`,
+          text: assembledBuild?.detector
+            ? `The data.yaml Add to Queue writes declares `
+              + `${datasetNames.join(", ") || "nothing"} -- the classes of `
+              + `${assembledBuild.detector.label}, the Model Name chosen in `
+              + `Assemble a dataset. It does not declare ${absentClasses.join(", ")}, `
+              + `so a ${chosenDetector.label} model cannot be trained from it. `
+              + "Choose the same Model Name in both places."
+            : `${datasetFolder}/data.yaml does not declare `
+              + `${absentClasses.join(", ")}, so a ${chosenDetector.label} model `
+              + `cannot be trained from it. It declares `
+              + `${datasetNames.join(", ") || "nothing"}.`,
         });
       } else if (willFilter) {
         lines.push({
