@@ -42,6 +42,23 @@ type Tab = "runs" | "versions" | "exports";
 type Picked = { kind: "run"; run: Track2CatalogRun } | { kind: "version"; version: Track2CatalogVersion };
 
 const when = (iso: string | null | undefined) => (iso ? formatDayTime(iso) : "--");
+
+/** A run's model in the four words the Models page uses -- Model name,
+ * Model type, Size, Model version -- so a row here can be matched to a
+ * version there (and its .pt exported) without decoding "yolo11s-helmet-
+ * detector v32". Type and size come from the run's architecture, or from
+ * the registry group it registered into when that was not recorded. */
+function runModel(r: { detector: string | null; architecture: string | null; model_package_arn: string | null }) {
+  const [group, version] = r.model_package_arn ? r.model_package_arn.split("/").slice(-2) : ["", ""];
+  const arch = /^yolo(\d+)([nslmx])/i.exec(r.architecture || group);
+  return {
+    name: r.detector || "--",
+    type: arch ? `YOLO${arch[1]}` : "--",
+    size: arch ? arch[2].toUpperCase() : "--",
+    version: version ? `v${version}` : "--",
+    group: group || "--",
+  };
+}
 const shortName = (uri: string) => uri.split("/").slice(-1)[0];
 
 function bytes(n: number | null | undefined): string {
@@ -166,13 +183,14 @@ export function Track2CatalogPage() {
                 <table className="tabular min-w-full whitespace-nowrap text-xs [&_tr]:h-8">
                   <thead className="sticky top-0 bg-surface text-left text-ink">
                     <tr>
-                      {["Run", "Submitted", "Status", "Model", "Dataset version", "Images", "Registered as"].map((h) => (
+                      {["Run", "Submitted", "Status", "Model name", "Model type", "Size", "Model version",
+                        "Dataset version", "Images", "Registered as"].map((h) => (
                         <th key={h} className="border-b border-hairline px-2 py-1.5 font-medium">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {runs.map((r) => (
+                    {runs.map((r) => { const m = runModel(r); return (
                       <tr key={r.run_id} onClick={() => setPicked({ kind: "run", run: r })}
                           className={`cursor-pointer border-b border-hairline/50 hover:bg-black/[0.03] ${
                             picked?.kind === "run" && picked.run.run_id === r.run_id ? "bg-accent-subtle" : ""}`}>
@@ -180,16 +198,17 @@ export function Track2CatalogPage() {
                           className="rounded px-1 underline focus-visible:outline focus-visible:outline-2" onClick={() => setPicked({ kind: "run", run: r })}>Run {r.run_number}{picked?.kind === "run" && picked.run.run_id === r.run_id ? " ✓" : ""}</button></td>
                         <td className="px-2 py-1">{when(r.submitted_at)}</td>
                         <td className="px-2 py-1">{r.status ?? "--"}</td>
-                        <td className="px-2 py-1">{[r.detector, r.architecture].filter(Boolean).join(" / ") || "--"}</td>
+                        <td className="px-2 py-1">{m.name}</td>
+                        <td className="px-2 py-1">{m.type}</td>
+                        <td className="px-2 py-1">{m.size}</td>
+                        <td className="px-2 py-1 font-medium text-ink">{m.version}</td>
                         <td className="px-2 py-1">
                           {r.version_number ? `${r.version_kind === "snapshot" ? "Snapshot" : "Version"} ${r.version_number}` : "--"}
                         </td>
                         <td className="px-2 py-1">{r.images.toLocaleString()}</td>
-                        <td className="px-2 py-1">
-                          {r.model_package_arn ? r.model_package_arn.split("/").slice(-2).join(" v") : "--"}
-                        </td>
+                        <td className="px-2 py-1">{m.group}</td>
                       </tr>
-                    ))}
+                    ); })}
                   </tbody>
                 </table>
               </div>

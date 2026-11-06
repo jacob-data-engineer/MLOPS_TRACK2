@@ -1,9 +1,31 @@
 import { useEffect, useState } from "react";
 import { isSeedVersion, statusLabel } from "../lib/slug";
+import { formatDayTime } from "../lib/format";
 import {
   getTrack2Metrics,
+  getTrack2RunsByModel,
   type Track2MetricsRow,
+  type Track2RunForModel,
 } from "../lib/api";
+
+/** "Run 58" -- the catalog's own number, the one the Data Catalog's
+ * Training runs table and the History panel print, so it can be looked up
+ * there before exporting. */
+function runLabel(run: Track2RunForModel | undefined, loaded: boolean): string {
+  if (!loaded) return "…";
+  return run ? `Run ${run.run_number}` : "—";
+}
+
+function runTitle(run: Track2RunForModel | undefined, seed: boolean): string {
+  if (!run) {
+    return seed
+      ? "A production seed -- not produced by a run on this page."
+      : "No training run recorded: an imported checkpoint, a version registered before run auditing, "
+        + "or a run the catalog has not synced yet (every 5 minutes).";
+  }
+  const when = run.submitted_at ? formatDayTime(run.submitted_at) : "";
+  return [`Run ${run.run_number}`, when && `submitted ${when}`, run.status].filter(Boolean).join("\n");
+}
 
 /** "Train on an existing model" -- which registered version a run starts from.
  *
@@ -54,10 +76,20 @@ export function Track2BaseModelPicker({
 }) {
   const [rows, setRows] = useState<Track2MetricsRow[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Which run produced each version, keyed on package ARN -- so the row
+   * says where its .pt came from without a trip to the History panel.
+   * Looked up live, never saved: it is a result, not a setting. */
+  const [runsByArn, setRunsByArn] = useState<Record<string, Track2RunForModel>>({});
+  /** "…" until the answer is in, so a blank never reads as "no run". */
+  const [runsLoaded, setRunsLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    getTrack2RunsByModel()
+      .then((res) => !cancelled && setRunsByArn(res.runs))
+      .catch(() => undefined)
+      .finally(() => !cancelled && setRunsLoaded(true));
     getTrack2Metrics()
       .then((res) => !cancelled && setRows(res.rows))
       .catch(() => undefined)
@@ -167,6 +199,7 @@ export function Track2BaseModelPicker({
                     <th className="w-8 py-1.5 pl-2" />
                     <th className="py-1.5 pr-4 font-medium">Version</th>
                     <th className="py-1.5 pr-4 font-medium">Status</th>
+                    <th className="py-1.5 pr-4 font-medium">Training run</th>
                     <th className="py-1.5 pr-4 font-medium">mAP50</th>
                     <th className="py-1.5 pr-4 font-medium">mAP50-95</th>
                     <th className="py-1.5 pr-4 font-medium">Precision</th>
@@ -211,6 +244,12 @@ export function Track2BaseModelPicker({
                           : row.status}
                       >
                         {isSeedVersion(row.description) ? "Seed" : statusLabel(row.status)}
+                      </td>
+                      <td
+                        className="tabular whitespace-nowrap py-1.5 pr-4 text-xs text-ink-secondary"
+                        title={runTitle(runsByArn[row.model_package_arn], seed)}
+                      >
+                        {runLabel(runsByArn[row.model_package_arn], runsLoaded)}
                       </td>
                       <td className="tabular py-1.5 pr-4">{metric(row.metrics?.mAP50)}</td>
                       <td className="tabular py-1.5 pr-4">{metric(row.metrics?.["mAP50-95"])}</td>

@@ -72,6 +72,22 @@ def run_numbers(run_ids: list[str]) -> dict[str, int]:
         f"SELECT run_id, run_number FROM training_runs WHERE run_id IN ({placeholders})",
         tuple(run_ids))}
 
+def runs_by_model() -> dict[str, dict]:
+    """Which run produced each registered version, keyed on package ARN.
+
+    For labelling a version with its run number. The training history
+    would answer the same question, but every row of it carries the run's
+    full file lists -- ~10 MB for sixty runs -- and a table that only needs
+    "Run 58" sat on blanks until all of it arrived. This is one indexed
+    read of five small columns."""
+    if not catalog.configured():
+        return {}
+    rows = _iso(_rows(
+        "SELECT model_package_arn, run_number, run_id, submitted_at, status"
+        " FROM training_runs WHERE model_package_arn IS NOT NULL"))
+    return {row.pop("model_package_arn"): row for row in rows}
+
+
 def runs(limit: int = PAGE, offset: int = 0) -> dict:
     total = _rows("SELECT count(*) AS n FROM training_runs")[0]["n"]
     rows = _rows(

@@ -3864,6 +3864,20 @@ export interface Track2CatalogExport {
   error: string | null;
 }
 
+/** The run behind one registered version, from the catalog. */
+export interface Track2RunForModel {
+  run_number: number;
+  run_id: string;
+  submitted_at: string | null;
+  status: string | null;
+}
+
+/** Keyed on model package ARN. A few kilobytes, where the training
+ * history carries every run's file lists (~10 MB). */
+export function getTrack2RunsByModel(): Promise<{ runs: Record<string, Track2RunForModel> }> {
+  return apiGet("/track2/catalog/runs-by-model");
+}
+
 export function getTrack2CatalogRuns(offset = 0): Promise<{ total: number; runs: Track2CatalogRun[] }> {
   return apiGet(`/track2/catalog/runs?limit=100&offset=${offset}`);
 }

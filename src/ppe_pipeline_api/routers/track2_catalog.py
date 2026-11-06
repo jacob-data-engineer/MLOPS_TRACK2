@@ -67,6 +67,13 @@ def runs(limit: int = 100, offset: int = 0, session=Depends(require_session)) ->
     return _guard(lambda: catalog_view.runs(limit, offset))
 
 
+@router.get("/runs-by-model")
+def runs_by_model(session=Depends(require_session)) -> dict:
+    """{package ARN: {run_number, run_id, submitted_at, status}} -- the run
+    behind each registered version, small enough to label a table with."""
+    return _guard(lambda: {"runs": catalog_view.runs_by_model()})
+
+
 @router.get("/versions")
 def versions(limit: int = 100, offset: int = 0, session=Depends(require_session)) -> dict:
     return _guard(lambda: catalog_view.versions(limit, offset))
