@@ -265,8 +265,10 @@ export function Track2GoldenSetPanel() {
             wrong. This card splits that folder into a train and a val side.
           </p>
           <p className="mt-2">
-            The val side becomes a fixed evaluation set, which is what makes
-            one run&apos;s numbers comparable with the last. The train side can be
+            Validation membership is frozen on the first build. New pairs go to
+            training on later builds; use a new target folder to change the split
+            or benchmark. Validation used to select the best checkpoint is not
+            an independent test set. The train side can be
             switched on in Retention, where it is trained on in full and never
             decays.
           </p>
@@ -529,6 +531,13 @@ export function Track2GoldenSetPanel() {
 
           {plan && (
             <div className="rounded-md border border-black/15 bg-page p-3">
+              <p className="mb-2 text-xs text-ink-secondary">
+                {plan.membership_locked
+                  ? `Existing split preserved. ${plan.new_training_pairs ?? 0} new pairs will join training.`
+                  : "First build freezes validation membership. Future additions go to training, so the original percentage may change."}
+                {" "}Changing sources or split settings requires a new target folder.
+              </p>
+              {plan.benchmark_id && <p className="mb-2 break-all text-xs text-ink-muted">Benchmark: {plan.benchmark_id}</p>}
               {plan.problems.map((problem) => (
                 <p key={problem.text}
                    className={`mb-1 text-xs ${

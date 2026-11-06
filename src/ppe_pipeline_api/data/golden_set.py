@@ -24,6 +24,9 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import functools
+
+from botocore.exceptions import ClientError
 
 from .. import pull_control as pc
 
@@ -76,15 +79,30 @@ def read_folder(source: str, *, bucket: str = "",
         for obj in pc._list_objects(prefix + "/", bucket):
             key = obj["Key"]
             rest = key[len(prefix) + 1:]
-            name = key.rsplit("/", 1)[-1]
-            stem, _, ext = name.rpartition(".")
+            # Identity is the path within the images/labels tree, not
+            # just its basename: camera_a/frame and camera_b/frame differ.
+            relative = rest
+            for sub in (images_subpath, labels_subpath):
+                if not labels_source and relative.startswith(sub + "/"):
+                    relative = relative[len(sub) + 1:]
+                    break
+            stem, _, ext = relative.rpartition(".")
             if not stem:
                 continue
             ext = "." + ext.lower()
             if want_images and ext in IMAGE_EXTENSIONS:
+                if stem in images:
+                    raise ValueError(f"Ambiguous image pair {stem}: {images[stem]['key']} and {key}.")
                 images[stem] = {"key": key, "size": obj.get("Size", 0), "rest": rest}
             elif want_labels and ext in LABEL_EXTENSIONS:
+                if stem in labels:
+                    raise ValueError(f"Ambiguous label pair {stem}: {labels[stem]['key']} and {key}.")
                 labels[stem] = {"key": key, "size": obj.get("Size", 0), "rest": rest}
+            else:
+                continue
+            entry = images.get(stem) if ext in IMAGE_EXTENSIONS else labels.get(stem)
+            if entry is not None:
+                entry["etag"] = str(obj.get("ETag") or "").strip('"')
 
     if labels_source:
         # Two listings, each taking only what it was asked for. Reading
@@ -132,29 +150,72 @@ def split_stems(paired: list, train_percent: int) -> tuple:
     return ordered[:cut], ordered[cut:]
 
 
+def _previous(bucket: str, target: str) -> dict | None:
+    """Read only when a manifest exists; access errors must not reset a split."""
+    key = f"{target}/split.json"
+    if not target or not any(o["Key"] == key for o in pc._list_objects(key, bucket)):
+        return None
+    manifest = json.loads(pc.s3.get_object(Bucket=bucket, Key=key)["Body"].read())
+    if not isinstance(manifest, dict) or not all(isinstance(manifest.get(s), list) for s in ("train", "val")):
+        raise ValueError("The existing golden split manifest is invalid; choose a new target folder.")
+    if set(manifest["train"]) & set(manifest["val"]):
+        raise ValueError("The existing golden split overlaps train and validation; choose a new target folder.")
+    return manifest
+
+
+def _selection(found: dict, target: str, bucket: str, split: bool,
+               percent: int, images_subpath: str, labels_subpath: str) -> tuple:
+    previous = _previous(bucket, target)
+    paired = set(found["paired"])
+    if previous is None:
+        train, val = split_stems(list(paired), percent) if split else (sorted(paired), [])
+        return train, val, None
+    expected = {
+        "source": f"s3://{found['bucket']}/{found['source']}",
+        "split": split, "train_percent": percent if split else 100,
+        "labels_source": found["labels_source"],
+        "images_subpath": images_subpath.strip("/"),
+        "labels_subpath": labels_subpath.strip("/"),
+    }
+    if any(previous.get(k, v) != v for k, v in expected.items()):
+        raise ValueError("This target already has a frozen split with different settings. "
+                         "Choose a new target folder to create a new benchmark version.")
+    # The validation set is fixed, not merely deterministic for one input.
+    # New examples go to training; deleted validation pairs must be resolved
+    # explicitly rather than making successive scores describe different sets.
+    val = set(previous["val"])
+    if val - paired:
+        raise ValueError(f"{len(val - paired)} frozen validation pair(s) are missing from the source. "
+                         "Restore them or choose a new target folder for a new benchmark.")
+    for stem, signatures in (previous.get("validation_objects") or {}).items():
+        for kind, old in signatures.items():
+            current = found[f"_{kind}_keys"].get(stem, {})
+            if old.get("etag") and current.get("etag") != old["etag"]:
+                raise ValueError(f"Frozen validation {kind} changed: {stem}. "
+                                 "Choose a new target folder for a new benchmark version.")
+    return sorted(paired - val, key=_rank), sorted(val, key=_rank), previous
+
+
 def plan(*, source: str, target_folder: str, bucket: str = "",
          target_bucket: str = "", split: bool = True, train_percent: int = 80,
          images_subpath: str = "images", labels_subpath: str = "labels",
-         labels_source: str = "") -> dict:
+         labels_source: str = "", _found: dict | None = None) -> dict:
     """What the build would write. Copies nothing."""
-    found = read_folder(source, bucket=bucket, images_subpath=images_subpath,
+    found = _found if _found is not None else read_folder(source, bucket=bucket, images_subpath=images_subpath,
                         labels_subpath=labels_subpath,
                         labels_source=labels_source)
     target_folder = (target_folder or "").strip().strip("/")
     target_bucket = (target_bucket or "").strip() or pc.destination_bucket()
 
     paired = found["paired"]
-    if split:
-        train, val = split_stems(paired, train_percent)
-    else:
-        # Off: the folder is copied whole, with no train/val level. What
-        # you curated is what lands.
-        train, val = paired, []
+    train, val, previous = _selection(found, target_folder, target_bucket, split,
+                                      train_percent, images_subpath, labels_subpath)
 
     def where(stem: str, side: str, kind: str) -> str:
         sub = images_subpath if kind == "image" else labels_subpath
         tail = f"/{side}" if split else ""
-        name = found[f"_{kind}_keys"][stem]["key"].rsplit("/", 1)[-1]
+        extension = found[f"_{kind}_keys"][stem]["key"].rsplit(".", 1)[-1]
+        name = f"{stem}.{extension}"
         return f"{target_folder}/{sub}{tail}/{name}"
 
     problems = []
@@ -193,6 +254,15 @@ def plan(*, source: str, target_folder: str, bucket: str = "",
             "text": "The target is the source. That would copy the folder over itself.",
         })
 
+    if target_bucket == found["bucket"]:
+        # An ancestor target's cleanup could delete the source. A nested
+        # target would be ingested on the next source scan.
+        for origin in (found["source"], found["labels_source"]):
+            if origin and target_folder and (target_folder.startswith(origin + "/")
+                                            or origin.startswith(target_folder + "/")):
+                problems.append({"level": "blocking", "text":
+                                 "Source and target folders must not contain one another."})
+
     sample = [
         {"stem": stem, "side": side,
          "image": where(stem, side, "image"), "label": where(stem, side, "label")}
@@ -218,9 +288,45 @@ def plan(*, source: str, target_folder: str, bucket: str = "",
         "sample": sample,
         "problems": problems,
         "ready": not any(p["level"] == "blocking" for p in problems),
+        "membership_locked": previous is not None,
+        "benchmark_id": (previous or {}).get("benchmark_id", ""),
+        "new_training_pairs": len(set(train) - set((previous or {}).get("train", []))) if previous else 0,
     }
 
 
+def _exclusive_build(fn):
+    """One writer per target across web workers/schedules, including Dynamo mode.
+
+    A crashed writer leaves the lock deliberately: an operator must verify the
+    writer has stopped before removing .split-build-lock.json and retrying.
+    Automatically expiring a lock could let a slow copy race its replacement.
+    """
+    @functools.wraps(fn)
+    def locked(**kwargs):
+        target = (kwargs.get("target_folder") or "").strip().strip("/")
+        if not target:
+            raise ValueError("Give the target folder a name.")
+        bucket = kwargs.get("target_bucket") or pc.destination_bucket()
+        key = f"{target}/.split-build-lock.json"
+        try:
+            pc.s3.put_object(Bucket=bucket, Key=key, IfNoneMatch="*",
+                             Body=json.dumps({"started_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}).encode(),
+                             ContentType="application/json")
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("PreconditionFailed", "412", "ConditionalRequestConflict", "409"):
+                raise ValueError("Another golden build owns this target. If its process stopped, "
+                                 "verify that before removing .split-build-lock.json and retrying.") from exc
+            raise
+        try:
+            return fn(**kwargs)
+        finally:
+            response = pc.s3.delete_objects(Bucket=bucket, Delete={"Objects": [{"Key": key}], "Quiet": True})
+            if response.get("Errors"):
+                raise ValueError("The golden build lock could not be released; inspect .split-build-lock.json.")
+    return locked
+
+
+@_exclusive_build
 def build(*, source: str, target_folder: str, bucket: str = "",
           target_bucket: str = "", split: bool = True, train_percent: int = 80,
           images_subpath: str = "images", labels_subpath: str = "labels",
@@ -238,7 +344,7 @@ def build(*, source: str, target_folder: str, bucket: str = "",
                    labels_source=labels_source,
                    target_bucket=target_bucket, split=split,
                    train_percent=train_percent, images_subpath=images_subpath,
-                   labels_subpath=labels_subpath)
+                   labels_subpath=labels_subpath, _found=found)
     if not outline["ready"]:
         blocking = "; ".join(p["text"] for p in outline["problems"]
                              if p["level"] == "blocking")
@@ -248,7 +354,22 @@ def build(*, source: str, target_folder: str, bucket: str = "",
     target_bucket = outline["target_bucket"]
     errors: list = []
     paired = found["paired"]
-    train, val = (split_stems(paired, train_percent) if split else (paired, []))
+    train, val, previous = _selection(found, target_folder, target_bucket, split,
+                                      train_percent, images_subpath, labels_subpath)
+
+    # Persist the initial assignment before copying. An interrupted first
+    # build must retry the same validation set even if the source grows.
+    if previous is None:
+        reservation = {"source": f"s3://{found['bucket']}/{found['source']}",
+                       "split": split, "train_percent": outline["train_percent"],
+                       "train": train, "val": val, "state": "building",
+                       "labels_source": found["labels_source"],
+                       "images_subpath": images_subpath.strip("/"),
+                       "labels_subpath": labels_subpath.strip("/"),
+                       "validation_objects": {s: {kind: {"etag": found[f"_{kind}_keys"][s].get("etag", "")}
+                                                  for kind in ("image", "label")} for s in val}}
+        pc.s3.put_object(Bucket=target_bucket, Key=f"{target_folder}/split.json",
+                         Body=json.dumps(reservation).encode(), ContentType="application/json", IfNoneMatch="*")
 
     # EVERY key this build is about to write, worked out before anything
     # is copied, because it is also the list of what may stay.
@@ -257,7 +378,7 @@ def build(*, source: str, target_folder: str, bucket: str = "",
         for stem in stems:
             for kind, sub in (("image", images_subpath), ("label", labels_subpath)):
                 entry = found[f"_{kind}_keys"][stem]
-                name = entry["key"].rsplit("/", 1)[-1]
+                name = f"{stem}.{entry['key'].rsplit('.', 1)[-1]}"
                 tail = f"/{side}" if split else ""
                 wanted[f"{target_folder}/{sub.strip('/')}{tail}/{name}"] = entry
 
@@ -289,18 +410,23 @@ def build(*, source: str, target_folder: str, bucket: str = "",
     for start in range(0, len(stale), 1000):
         batch = stale[start:start + 1000]
         try:
-            pc.s3.delete_objects(Bucket=target_bucket,
-                                 Delete={"Objects": batch, "Quiet": True})
+            deleted = pc.s3.delete_objects(Bucket=target_bucket,
+                                          Delete={"Objects": batch, "Quiet": True})
+            errors.extend({"key": e.get("Key", ""), "error": e.get("Message", "Delete failed")}
+                          for e in deleted.get("Errors", []))
             removed += len(batch)
         except Exception as exc:                               # noqa: BLE001
             errors.append({"key": batch[0]["Key"], "error": str(exc)})
 
+    if errors:
+        raise ValueError(f"Golden-set cleanup failed; build stopped: {errors[0]['error']}")
     copied = 0
     for destination, entry in wanted.items():
         try:
             pc.s3.copy_object(
                 Bucket=target_bucket, Key=destination,
                 CopySource={"Bucket": found["bucket"], "Key": entry["key"]},
+                **({"CopySourceIfMatch": entry["etag"]} if entry.get("etag") else {}),
             )
             copied += 1
         except Exception as exc:                               # noqa: BLE001
@@ -309,22 +435,49 @@ def build(*, source: str, target_folder: str, bucket: str = "",
     # Beside the data, so the division is recoverable without re-deriving
     # it: the percentage alone does not say which stems fell where once
     # the source has grown.
+    if errors:
+        raise ValueError(f"Golden-set copying failed; no successful split recorded: {errors[0]['error']}")
+    validation_objects = {stem: {kind: {"key": found[f"_{kind}_keys"][stem]["key"],
+                                      "etag": found[f"_{kind}_keys"][stem].get("etag", "")}
+                                for kind in ("image", "label")} for stem in val}
+    benchmark_id = hashlib.sha256(json.dumps(
+        [found["bucket"], found["source"], validation_objects], sort_keys=True).encode()).hexdigest()[:20]
     manifest = {
         "built_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
-        "source": f"s3://{found['bucket']}/{source}",
+        "source": f"s3://{found['bucket']}/{found['source']}",
         "split": split,
         "train_percent": outline["train_percent"],
         "train": train,
         "val": val,
+        "schema_version": 2,
+        "state": "ready",
+        "labels_source": labels_source.strip("/"),
+        "images_subpath": images_subpath.strip("/"),
+        "labels_subpath": labels_subpath.strip("/"),
+        "benchmark_id": benchmark_id,
+        "validation_objects": validation_objects,
     }
+    # Keep an immutable record of each successful membership/content revision.
+    revision = hashlib.sha256(json.dumps({k: v for k, v in manifest.items() if k != "built_at"},
+                                        sort_keys=True).encode()).hexdigest()[:24]
+    history_key = f"{target_folder}/split-versions/{revision}.json"
+    try:
+        pc.s3.put_object(Bucket=target_bucket, Key=history_key,
+                         Body=json.dumps(manifest, indent=2).encode("utf-8"),
+                         ContentType="application/json", IfNoneMatch="*")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in ("PreconditionFailed", "412"):
+            raise
     manifest_key = f"{target_folder}/split.json"
     try:
         pc.s3.put_object(Bucket=target_bucket, Key=manifest_key,
                          Body=json.dumps(manifest, indent=2).encode("utf-8"),
                          ContentType="application/json")
-    except Exception:                                          # noqa: BLE001
-        manifest_key = ""
+    except Exception as exc:
+        raise ValueError("Golden split could not be recorded; retry before training.") from exc
 
     return {**outline, "copied": copied, "removed": removed, "errors": errors,
+            "benchmark_id": benchmark_id,
+            "split_version": f"s3://{target_bucket}/{history_key}",
             "manifest": f"s3://{target_bucket}/{manifest_key}" if manifest_key else "",
             "uri": f"s3://{target_bucket}/{target_folder}/"}

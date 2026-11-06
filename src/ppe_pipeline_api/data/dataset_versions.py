@@ -195,6 +195,13 @@ def _rel_line(from_dir: str, to_path: str) -> str:
     return "./" + posixpath.relpath(to_path, from_dir or ".")
 
 
+def validation_selection_id(val: list, names: dict, remap: dict) -> str:
+    """Compare membership/taxonomy, not file contents or statistical independence."""
+    body = {"images": sorted(set(tuple(v) for v in val)),
+            "names": {str(k): v for k, v in names.items()}, "remap": remap}
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:20]
+
+
 def create(*, home: str, yaml_text: str, prefixes: list,
            eval_yaml_text: str = "", eval_prefixes: list | None = None,
            trigger: str = "", sources: list | None = None,
@@ -266,6 +273,7 @@ def create(*, home: str, yaml_text: str, prefixes: list,
     for local_dir, mapping in (doc.get("x_label_remap") or {}).items():
         b, k = old.key(str(local_dir))
         eval_remap[elocal(b, k)] = {int(s): int(t) for s, t in (mapping or {}).items()}
+    selection_id = validation_selection_id(val, names, eval_remap)
     eval_doc = {
         "path": f"s3://{home}/{folder}/eval",
         "train": ["val.txt"],
@@ -292,12 +300,14 @@ def create(*, home: str, yaml_text: str, prefixes: list,
         "sources": list(sources or []), "names": {str(i): n for i, n in train_doc["names"].items()},
         "drop_undeclared": bool(drop_undeclared), "prefixes": list(prefixes),
         "train": [f"{b}/{k}" for b, k in train], "val": [f"{b}/{k}" for b, k in val],
+        "validation_selection_id": selection_id,
     }
     _put(home, f"{folder}/manifest.json", json.dumps(manifest, indent=1), "application/json")
 
     version = {
         "version_id": vid,
         "folder": folder,
+        "validation_selection_id": selection_id,
         "bucket": home,
         "data_yaml_uri": f"s3://{home}/{folder}/data.yaml",
         "train_data_uris": ",".join(run_prefixes),

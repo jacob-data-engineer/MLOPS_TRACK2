@@ -35,6 +35,11 @@ class FakeS3:
         self.put.append((kwargs["Key"], kwargs["Body"]))
         return {}
 
+    def delete_objects(self, **kwargs):
+        for obj in kwargs["Delete"]["Objects"]:
+            self.objects.pop(obj["Key"], None)
+        return {}
+
 
 def _world(monkeypatch, objects):
     s3 = FakeS3(objects)

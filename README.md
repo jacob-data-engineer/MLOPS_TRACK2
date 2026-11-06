@@ -6,6 +6,9 @@ together on one port, plus the training-pipeline assets behind them.
 Everything needed to build, deploy and change this app lives in this
 folder. It used to sit inside the JP_UI repo and no longer refers to it.
 
+For an end-to-end explanation of the data, training, storage, and inference
+workflows, see [How the system works](SYSTEM_OVERVIEW.md).
+
 ```
 src/ppe_pipeline_api/   FastAPI app -- routers/ per page, track2_shared.py for the logic
 web/                    React + Vite SPA, built into web/dist and served by the same process

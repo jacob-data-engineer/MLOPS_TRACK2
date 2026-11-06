@@ -22,6 +22,7 @@ import {
 } from "../lib/api";
 import { Card } from "./Card";
 import { S3FolderField } from "./S3FolderField";
+import { Track2RetentionQuality } from "./Track2RetentionQuality";
 
 /**
  * Recency weighting: older weeks contribute fewer images.
@@ -94,6 +95,7 @@ export function Track2RetentionPanel() {
   const [buckets, setBuckets] = useState<Track2Bucket[]>([]);
   const [useGolden, setUseGolden] = useState(false);
   const [minImages, setMinImages] = useState(25);
+  const [minClassImages, setMinClassImages] = useState(5);
   // Whether the two floors below apply at all. A floor is a judgement --
   // "no week ever falls below a tenth" is a claim about what history is
   // worth -- so it is stated rather than always on underneath.
@@ -181,6 +183,7 @@ export function Track2RetentionPanel() {
       setGoldenBucket((current) => current || got.config.golden_bucket || "");
       setUseGolden(Boolean(got.config.use_golden));
       setMinImages(got.config.min_images);
+      setMinClassImages(got.config.min_class_images ?? 5);
       setUseFloor(got.config.use_floor ?? true);
       setRoot((current) => current || got.suggested_root);
       // Only now may the auto-save write: before this the controls hold
@@ -259,6 +262,7 @@ export function Track2RetentionPanel() {
       use_floor: useFloor,
       floor: floor / 100,
       min_images: minImages,
+      min_class_images: minClassImages,
       // use_golden is NOT here. Step 2 owns it, and this panel only read
       // its copy at page load -- writing that copy back on save would
       // silently undo a switch made on the other card. The previews below
@@ -882,6 +886,20 @@ export function Track2RetentionPanel() {
 
           {plan && (
             <div className="rounded-md border border-black/15 bg-page p-3">
+              <p className="mb-2 text-xs text-ink-muted">
+                Age counts newer non-empty collections, not elapsed calendar weeks.
+                Empty collections and time without new data do not advance decay.
+                Decay selects images; it does not change their training loss weights.
+              </p>
+              {plan.composition && <div className="mb-3 text-xs">
+                <p className="font-medium">Training contribution: {plan.composition.total.toLocaleString()} images</p>
+                <p>Recent: {plan.composition.recent.toLocaleString()} · Historical: {plan.composition.historical.toLocaleString()}
+                  {" "}· Golden: {plan.composition.golden.toLocaleString()}</p>
+                <p>Historical share: {(plan.composition.historical_share * 100).toFixed(1)}%.</p>
+                <p className="text-ink-muted">{plan.composition.scope}</p>
+                {plan.composition.historical > plan.composition.recent && plan.composition.recent > 0 &&
+                  <p className="text-critical">Historical images outnumber recent images despite the decay policy.</p>}
+              </div>}
               <p className="mb-2 text-xs font-medium text-ink">
                 {plan.keep.toLocaleString()} of {plan.available.toLocaleString()} training images,
                 {" "}{plan.dropped.toLocaleString()} left out
@@ -932,7 +950,7 @@ export function Track2RetentionPanel() {
                       {w.week}
                     </span>
                     <span className="tabular w-16 shrink-0 text-ink-muted">
-                      {w.age_weeks}w old
+                      {w.age_weeks} batches old
                     </span>
                     {/* Kept against available, so the thinning is visible
                         as a shortfall rather than a number to subtract. */}
@@ -971,6 +989,14 @@ export function Track2RetentionPanel() {
               </div>
             </div>
           )}
+
+          <label className="text-xs text-ink-secondary">
+            Warn below this many selected images per observed class (per source)
+            <input type="number" min={1} max={100000} value={minClassImages}
+              onChange={(e) => setMinClassImages(Math.max(1, Math.min(100000, Number(e.target.value) || 1)))}
+              className="ml-2 w-20 rounded border border-black/15 bg-page p-1" />
+          </label>
+          <Track2RetentionQuality root={root} config={{ ...currentConfig(), use_golden: useGolden }} />
 
           {/* ------------------------------------------- data.yaml ----- */}
           {/* A PREVIEW, like "What will be built" on Assemble a dataset

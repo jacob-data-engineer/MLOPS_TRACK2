@@ -2534,6 +2534,8 @@ export function getTrack2PullSchedule(): Promise<{
 // ---------------------------------------------------------------------------
 
 export interface Track2RetentionConfig {
+  /** Coverage warning only; never changes the sampling selection. */
+  min_class_images?: number;
   enabled: boolean;
   /** How many of the newest weeks count in full before decay starts.
    * 1 is the original behaviour: only the newest week is untouched. */
@@ -2599,6 +2601,8 @@ export interface Track2RetentionGolden {
 }
 
 export interface Track2RetentionPlan {
+  composition?: Track2RetentionComposition;
+  age_basis?: string;
   golden?: Track2RetentionGolden;
   root: string;
   weeks: Track2RetentionWeek[];
@@ -2608,6 +2612,32 @@ export interface Track2RetentionPlan {
   /** Validation images across every week, kept in full. */
   val_available?: number;
   enabled: boolean;
+}
+
+export interface Track2RetentionComposition {
+  recent: number;
+  historical: number;
+  golden: number;
+  total: number;
+  historical_share: number;
+  scope: string;
+}
+
+export interface Track2RetentionQuality {
+  complete: boolean;
+  min_class_images: number;
+  composition: Track2RetentionComposition;
+  issues: string[];
+  note: string;
+  sources: Array<{
+    source: string; available: number; selected: number;
+    missing_labels: number; unreadable_labels: number; invalid_labels: number; empty_labels: number;
+    classes: Array<{ class_id: number; before: number; after: number; low: boolean; lost: boolean }>;
+  }>;
+}
+
+export function inspectTrack2Retention(root: string, config: Partial<Track2RetentionConfig>): Promise<Track2RetentionQuality> {
+  return apiPost("/track2/retention/quality", { root, config });
 }
 
 export function getTrack2Retention(): Promise<Track2RetentionSettings> {
@@ -3086,6 +3116,7 @@ export function getTrack2Scheduled(days = 42, files: string[] | "*" = []): Promi
 
 /** A frozen dataset a run was queued or started on (dataset_versions.py). */
 export interface Track2DatasetVersion {
+  validation_selection_id?: string;
   version_id: string;
   created_at: string;
   trigger?: string;
@@ -3486,6 +3517,9 @@ export function saveTrack2DatasetYaml(
 // ---------------------------------------------------------------------------
 
 export interface Track2SplitPlan {
+  membership_locked?: boolean;
+  benchmark_id?: string;
+  new_training_pairs?: number;
   source: string;
   bucket: string;
   target_bucket: string;

@@ -1,5 +1,30 @@
 # Continue here
 
+## Retention and golden-set safeguards (6 November 2026)
+
+Implemented and deployed to development only: build `20261106-003029`, port
+8090, PostgreSQL backend. Golden splits preserve existing validation membership,
+add new pairs to training, reject ambiguous basenames using relative paths,
+validate existing validation ETags, reserve initial assignments for retries,
+and serialize target writes with a conditional S3 lock. New target folders are
+required to change split policy or benchmark. A crashed writer's lock requires
+operator verification before removal.
+
+Retention now reports recent/history/golden contributions and has an explicit
+read-only label coverage scan with a saved `min_class_images` warning threshold.
+New dataset versions expose validation selection IDs (membership/taxonomy, not
+content hashes). Collection-age sampling remains unchanged; no calendar mode,
+training-budget policy, or separate SageMaker test stage was added.
+
+Final suite: **2,596 passed**. CodeBuild and post-deploy authenticated API checks
+passed. Current weekly selection: 100 recent / 1,089 historical; week 6 has a
+class below five selected images. No training or live golden rebuild was started.
+Browser visual QA remains unavailable because the browser-access host failed.
+See [implementation evidence](outputs/retention-safety-implementation.md) and
+[system overview](SYSTEM_OVERVIEW.md#12-retention-and-golden-set-safeguards-6-november-2026).
+
+---
+
 State of this repo as of 2026-09-25, what was changed, and what is still
 outstanding. `README.md` describes the layout; this file is the handover.
 

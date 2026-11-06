@@ -107,6 +107,10 @@ export function Track2DatasetVersionsPanel() {
               {v.sources && v.sources.length > 0 && (
                 <p className="mt-0.5 text-ink-muted">{v.sources.join("; ")}</p>
               )}
+              {v.validation_selection_id && <p className="mt-1 break-all text-ink-muted">
+                Validation selection: {v.validation_selection_id}. Compare scores on matching selections;
+                this ID tracks paths and classes, not file contents or independence from checkpoint selection.
+              </p>}
               <div className="mt-1 flex gap-3">
                 <button type="button" disabled={!!busy} onClick={() => void view(v.version_id)}
                         className="font-medium text-ink-secondary underline disabled:opacity-40">

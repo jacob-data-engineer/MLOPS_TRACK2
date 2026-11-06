@@ -66,6 +66,8 @@ DEFAULTS = {
     # ...nor below this many images, whichever is the larger. A week
     # reduced to four images contributes noise, not history.
     "min_images": 25,
+    # Warning threshold only. Does not silently exempt classes from decay.
+    "min_class_images": 5,
 }
 
 
@@ -422,7 +424,8 @@ def plan(weeks: list, config: dict | None = None) -> dict:
         stems = list(week.get("stems") or [])
         age = newest_rank - ranked.get(index, newest_rank)
         fraction = retention_fraction(age, config) if config.get("enabled") else 1.0
-        kept = select_stems(stems, fraction, config)
+        excluded = week.get("name") in set(config.get("excluded_weeks") or [])
+        kept = [] if excluded else select_stems(stems, fraction, config)
         rows.append({
             "week": week.get("name", ""),
             "age_weeks": age,
@@ -440,6 +443,7 @@ def plan(weeks: list, config: dict | None = None) -> dict:
             "keep": len(kept),
             "dropped": len(stems) - len(kept),
             "stems": kept,
+            "excluded": excluded,
         })
     rows.reverse()
     return {
@@ -592,7 +596,20 @@ def preview(*, root: str, config: dict | None = None, images_subpath: str = "ima
     for row in out["weeks"]:
         row.pop("stems", None)
     out["golden"] = golden_summary(config, images_subpath=images_subpath)
+    out["composition"] = composition(out["weeks"], config, out["golden"]["available"])
+    out["age_basis"] = "non_empty_collections"
     return out
+
+
+def composition(rows: list, config: dict | None = None, golden: int = 0) -> dict:
+    """Actual source contributions, not the retention fraction of each source."""
+    full = max(1, int((config or {}).get("full_weeks") or 1))
+    recent = sum(r["keep"] for r in rows if r["age_weeks"] < full)
+    historical = sum(r["keep"] for r in rows if r["age_weeks"] >= full)
+    total = recent + historical + golden
+    return {"recent": recent, "historical": historical, "golden": golden, "total": total,
+            "historical_share": historical / total if total else 0,
+            "scope": "Weekly training selections and golden training images; picked folders are not included."}
 
 
 def golden_summary(config: dict | None = None, *, images_subpath: str = "images") -> dict:
@@ -626,7 +643,7 @@ def golden_summary(config: dict | None = None, *, images_subpath: str = "images"
 
     sub = images_subpath.strip("/")
     count = count_images(f"{root}/{sub}/train")
-    if not count:
+    if not count and not count_images(f"{root}/{sub}/val"):
         # An unsplit golden folder, written before the split existed.
         count = count_images(f"{root}/{sub}")
     return {"enabled": True, "root": root, "bucket": bucket, "available": count}

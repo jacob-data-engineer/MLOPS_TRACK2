@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as _dt
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import pull_control as pc
 from .. import dataset_snapshots as ds
@@ -44,6 +44,7 @@ class RetentionConfig(BaseModel):
     use_floor: bool | None = None
     floor: float | None = None
     min_images: int | None = None
+    min_class_images: int | None = Field(default=None, ge=1, le=100000)
     root: str | None = None
     eval_root: str | None = None
 
@@ -835,6 +836,22 @@ def preview(payload: PreviewRequest, session=Depends(require_session)) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read {root}: {exc}")
+
+
+@router.post("/quality")
+def quality(payload: PreviewRequest, session=Depends(require_session)) -> dict:
+    """Explicit label scan: no automatic S3 label reads on every UI refresh."""
+    from ..data import retention_quality
+    settings = _settings()
+    if payload.config is not None:
+        settings = {**settings, **payload.config.model_dump(exclude_none=True)}
+    root = (payload.root or settings.get("root") or "").strip("/")
+    if not root:
+        raise HTTPException(status_code=400, detail="Pick the folder that holds the weeks.")
+    try:
+        return retention_quality.inspect(root=root, config=_with_prefix(settings))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not inspect dataset coverage: {exc}")
 
 
 @router.post("/build")
