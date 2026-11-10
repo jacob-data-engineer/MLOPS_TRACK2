@@ -379,7 +379,7 @@ def test_the_class_numbers_match_the_curated_sets():
     assert "0: helmet" in sx.data_yaml_text() and "2: person" in sx.data_yaml_text()
 
 
-def test_a_labelled_pull_writes_labels_and_yaml_and_leaves_out_incomplete(monkeypatch):
+def test_a_labelled_pull_exports_person_only_even_with_missing_helmet(monkeypatch):
     columns = ["image", "width", "height", "people", "drawn_box"]
     good = ["s3://src/f/a.jpg", 1000, 500, _ROW["people"], None]
     bad = ["s3://src/f/b.jpg", 1000, 500, [{**_ROW["people"][0], "auto": None}], None]
@@ -388,12 +388,13 @@ def test_a_labelled_pull_writes_labels_and_yaml_and_leaves_out_incomplete(monkey
     s3 = _S3({("src", "f/a.jpg"): b"A", ("src", "f/b.jpg"): b"B"})
     monkeypatch.setattr(sx.storage, "s3", s3)
     out = sx.pull("violation-review", "q", dest_bucket="d", dest_folder="p", with_labels=True)
-    assert out["copied"] == 1 and out["left_out_incomplete"] == 1
-    assert out["labels_from"] == "database" and out["with_label"] == 1
+    assert out["copied"] == 2 and out["left_out_incomplete"] == 0
+    assert out["labels_from"] == "database" and out["with_label"] == 2
     label = s3.objects[("d", "p/labels/train/a.txt")].decode()
     assert label.count("\n") == 3 and label.startswith("2 ")
     assert ("d", "p/data.yaml") in s3.objects
-    assert ("d", "p/images/train/b.jpg") not in s3.objects
+    assert ("d", "p/images/train/b.jpg") in s3.objects
+    assert s3.objects[("d", "p/labels/train/b.txt")].decode().startswith("2 ")
 
 
 def test_without_labels_only_images_are_pulled(monkeypatch):
@@ -578,3 +579,23 @@ def test_stream_reports_failure_not_completion(monkeypatch):
     events = [json.loads(line) for line in result.text.splitlines() if line]
     assert [e['type'] for e in events] == ['progress', 'error']
     assert events[-1]['detail'] == 'metadata write failed'
+
+def test_manual_pull_runs_without_browser_consuming_progress(monkeypatch):
+    import threading
+    from ppe_pipeline_api.routers import track2_sql as routes
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    def work(*args, **kwargs):
+        started.set()
+        release.wait(2)
+        finished.set()
+        return {"copied": 1}
+    monkeypatch.setattr(routes, "run_pull", work)
+    response = routes.pull_stream(routes.PullRequest(database="violation-review",
+        sql="q", dest_bucket="d", dest_folder="p"), session={})
+    try:
+        assert started.wait(1)
+        # No browser ever reads the response body.
+        assert response.media_type == "application/x-ndjson"
+    finally:
+        release.set()
+    assert finished.wait(1)

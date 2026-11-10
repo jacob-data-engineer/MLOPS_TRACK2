@@ -79,7 +79,7 @@ def test_invalid_schedule_is_rejected(params):
 
 
 def setup_execution(monkeypatch, cfg, *, present=False, label_present=False):
-    image = {"uri": "s3://src/a.jpg", "bucket": "src", "key": "a.jpg", "labels": {"complete": True, "boxes": []}}
+    image = {"uri": "s3://src/a.jpg", "bucket": "src", "key": "a.jpg", "labels": {"complete": False, "boxes": [{"name": "person", "cls": 1, "x1": .1, "y1": .1, "x2": .5, "y2": .9}]}}
     result = {"images": [image]}
     monkeypatch.setattr(ss.sx, "has_crop_verdicts", lambda key: True)
     monkeypatch.setattr(ss.sx, "preset_sql", lambda *a, **kw: "fresh query")

@@ -832,7 +832,7 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
 
     With `with_labels`, each image gets a label: written from the boxes in
     the database when the query returned them (see `frame_labels`; frames
-    with a helmet box missing are left out, and counted), otherwise copied
+    without any available boxes are left out, and counted), otherwise copied
     from where Ultralytics would look beside the source image. A data.yaml
     naming the classes is written when labels were generated. Without it,
     images only.
@@ -871,7 +871,7 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
     if with_labels:
         kept = []
         for image in images:
-            if image.get("labels") and not image["labels"].get("complete"):
+            if image.get("labels") and not image["labels"].get("boxes"):
                 incomplete += 1
                 continue
             kept.append(image)

@@ -238,8 +238,11 @@ def pull_stream(payload: PullRequest, session=Depends(require_session)):
         except Exception as exc:
             events.put({"type": "error", "detail": str(exc)})
 
+    # Start on request acceptance, independent of the browser consuming the stream.
+    # Closing the page disconnects progress delivery, not the server-side copy.
+    Thread(target=worker, daemon=True).start()
+
     def stream():
-        Thread(target=worker, daemon=True).start()
         while True:
             try:
                 event = events.get(timeout=10)

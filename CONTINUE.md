@@ -1,5 +1,26 @@
 # Continue here
 
+Manual pull button renamed. Streaming manual worker now starts when request
+is accepted, independent of browser progress consumption. Scheduled pulls
+already run from the EC2 ticker without a browser; checkbox wording now says
+Enable scheduled pulls. Background-without-consumer regression passes.
+99 targeted SQL explorer, sensor and settings tests passed.
+
+
+SQL export eligibility corrected to user requirement: manual pull and sensor
+include frames with any available label box even if complete=false (missing
+helmet). All available boxes retain selected class-ID mapping. Frames with
+label metadata but no boxes remain excluded. Source-sidecar fallback unchanged.
+Updated person-only export and sensor tests; 121 targeted tests passed.
+
+
+Sensor feedback fix: last result, counts, progress and errors now stay visible
+outside collapsed destination/history details. Completed polling clears stale
+Check started text. Live 10 Nov 15:20 check completed unchanged: 3372 found,
+1272 eligible already present, 2100 excluded, no pending copies. Schedule
+saved after 15:21 slot correctly next due 11 Nov 15:21 Singapore.
+
+
 SQL settings and schedule now share one standard pinned Card with Hide/Show.
 Its body stays mounted while hidden to preserve unsaved form edits and the
 loaded filename. settings_open is included in named SQL presets.

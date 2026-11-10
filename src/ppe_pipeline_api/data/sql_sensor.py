@@ -177,7 +177,7 @@ def execute(config, run_id):
         if result.get("truncated"):
             raise ValueError("Query was truncated; narrow the saved selection before scheduling a pull.")
         eligible = [i for i in result["images"] if i.get("bucket") and
-                    (not settings.with_labels or not i.get("labels") or i["labels"].get("complete"))]
+                    (not settings.with_labels or not i.get("labels") or i["labels"].get("boxes"))]
         if len(eligible) > sx.PULL_LIMIT:
             raise ValueError("Too many eligible frames for one pull; narrow the saved selection.")
         destination = settings.pull_folder.strip().strip("/")

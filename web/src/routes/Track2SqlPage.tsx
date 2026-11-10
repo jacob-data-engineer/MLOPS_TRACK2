@@ -634,11 +634,9 @@ export function Track2SqlPage() {
                     set out of this folder.
                     {hasLabels && incompleteCount > 0 && withLabels && (
                       <span className="mt-1 block text-ink-secondary">
-                        With labels included, the {incompleteCount.toLocaleString()} frame
-                        {incompleteCount === 1 ? "" : "s"} marked &ldquo;helmet box missing&rdquo;
-                        {" "}{incompleteCount === 1 ? "is" : "are"} left out, so fewer frames are pulled
-                        than shown. Test-grade means a person drew the boxes that exist, not that
-                        every helmet has one.
+                        Frames marked &ldquo;helmet box missing&rdquo; are still exported when
+                        any label box is available. Every available box is included; a frame
+                        does not need both classes.
                       </span>
                     )}
                   </p>
@@ -649,7 +647,7 @@ export function Track2SqlPage() {
                       Include labels
                       <span className="block text-ink-muted">
                         {hasLabels
-                          ? "Exports the available frame-aligned boxes shown above, plus data.yaml. Missing required boxes can exclude a frame. Check the overlay for unlabelled objects before training."
+                          ? "Exports the available frame-aligned boxes shown above, plus data.yaml. Frames with either available class or both are included. Only frames with no available boxes are excluded. Check the overlay for unlabelled objects before training."
                           : "Copies the label that sits beside each image at the source, where there is one."}
                       </span>
                     </span>
@@ -676,7 +674,7 @@ export function Track2SqlPage() {
                       className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
                     >
                       {pulling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                      {pulling ? "Pulling..." : `Pull ${result.images.length.toLocaleString()} frame${result.images.length === 1 ? "" : "s"}`}
+                      {pulling ? "Pulling..." : `Manual pull ${result.images.length.toLocaleString()} frame${result.images.length === 1 ? "" : "s"}`}
                     </button>
                     {!pullFolder.trim() && <span className="text-xs text-ink-muted">choose a folder first</span>}
                   </div>
@@ -686,6 +684,7 @@ export function Track2SqlPage() {
                       <span className="whitespace-pre-wrap">{pullError}</span>
                     </p>
                   )}
+                  <p className="mt-2 text-xs text-ink-muted">Manual pulls continue on EC2 after you close this page. Enabled, saved schedules automatically pull at the selected time without an open browser.</p>
                   {pullProgress && (
                     <div className="mt-3 rounded border border-hairline p-3" aria-label="Frame pull progress">
                       <div className="mb-2 flex justify-between text-xs" role="status">
