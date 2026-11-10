@@ -43,7 +43,7 @@ function withSuffix(name: string, scope: Track2SettingsScope): string {
   return name.toUpperCase().endsWith(suffix) ? name.slice(0, -suffix.length) + suffix : name + suffix;
 }
 
-export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
+export function Track2PinnedBar({ scope, beforeSave, onSaved }: { scope: Track2SettingsScope; beforeSave?: () => Promise<void>; onSaved?: () => Promise<void> }) {
   const [files, setFiles] = useState<Track2SettingsFile[]>([]);
   const [current, setCurrent] = useState("");
   const [name, setName] = useState("");
@@ -236,6 +236,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
             // the write rather than refused over.
             const unapplied = pendingCards();
             try {
+              await beforeSave?.();
               await saveTrack2SettingsFile(target, allowClash, scope);
             } catch (err) {
               if (err instanceof ApiError && err.status === 409) {
@@ -252,6 +253,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
                 + "pressed, so the trigger is still set to what it was."
               : `Saved ${saved}.`);
             await refresh();
+            await onSaved?.();
           })}
           className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40"
         >

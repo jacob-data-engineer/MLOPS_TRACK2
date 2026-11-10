@@ -205,7 +205,7 @@ def validation_selection_id(val: list, names: dict, remap: dict) -> str:
 def create(*, home: str, yaml_text: str, prefixes: list,
            eval_yaml_text: str = "", eval_prefixes: list | None = None,
            trigger: str = "", sources: list | None = None,
-           drop_undeclared: bool = False, note: str = "") -> dict:
+           drop_undeclared: bool = False, note: str = "", preserve: bool = True) -> dict:
     """Freeze the dataset a run is about to be queued with. Returns the
     version, including the five values the run is started with."""
     home = home or pc.destination_bucket()
@@ -333,7 +333,7 @@ def create(*, home: str, yaml_text: str, prefixes: list,
         "trigger": trigger,
         "note": note,
         "created_at": manifest["created_at"],
-        "state": "created",
+        "state": "created" if preserve else "ready",
     }
     _row_put(version)
     # Keep every file it uses, so the version can always be rebuilt even
@@ -341,7 +341,8 @@ def create(*, home: str, yaml_text: str, prefixes: list,
     # a run must not wait for the copies.
     try:
         from . import central_store
-        central_store.preserve_in_background(version)
+        if preserve:
+            central_store.preserve_in_background(version)
     except Exception as exc:                                        # noqa: BLE001
         print(json.dumps({"dataset_version": "preserve_not_started", "id": vid,
                           "error": str(exc)}))

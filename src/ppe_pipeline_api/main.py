@@ -4,7 +4,7 @@ SPA in `web/dist` from one process.
     uv run uvicorn ppe_pipeline_api.main:app --reload
 
 Session state (the eval stepper, the currently-loaded gold set/few-shot
-library, Track1's rolling results) lives in this one process's memory —
+library, Track1's rolling results) lives in this one process's memory â€”
 see `session_store.py`. That means exactly one FastAPI process/worker is
 supported today; running more than one (e.g. `uvicorn --workers 2`, or
 multiple replicas behind a load balancer) would silently split a user's
@@ -140,6 +140,8 @@ app.include_router(track2_notifications.router, prefix="/track2/notifications", 
 app.include_router(track2_export.router, prefix="/track2/export", tags=["track2-export"])
 app.include_router(track2_cost.router, prefix="/track2/cost", tags=["track2-cost"])
 app.include_router(track2_eval.router, prefix="/track2/eval", tags=["track2-eval"])
+from .routers import track2_data_preparation
+app.include_router(track2_data_preparation.router, prefix="/track2/preparation", tags=["track2-data-preparation"])
 app.include_router(track2_pull_control.router, prefix="/track2/pull-control", tags=["track2-pull-control"])
 app.include_router(track2_retention.router, prefix="/track2/retention", tags=["track2-retention"])
 app.include_router(track2_sql.router, prefix="/track2/sql", tags=["track2-sql"])

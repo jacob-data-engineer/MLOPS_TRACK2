@@ -353,6 +353,8 @@ DEFAULTS = {
     # run on a Sunday against a week that filled on Tuesday.
     "retrain_schedule": {},
     "week_by": "capture_time",
+    # Independent SQL membership; named DP files carry this identity.
+    "soft_selection": {"enabled": False, "id": ""},
     # off | arrival | schedule. Held here as well as on the EventBridge
     # rules so the UI can show what is meant to be on when a rule has been
     # changed underneath it.
@@ -730,6 +732,10 @@ def purge_week_folders(config: dict | None = None,
     unrecoverable mistake.
     """
     config = config or read_config()
+    from .data import soft_selection
+    if soft_selection.enabled(config):
+        raise ValueError("Database selection does not create or delete physical week folders.")
+
     bucket = destination_bucket(config)
     deleted = 0
     errors: list = []
@@ -1526,6 +1532,31 @@ def route_pending(*, config: dict | None = None, limit: int | None = None,
     nothing can kill from outside.
     """
     config = config or read_config()
+    from .data import soft_selection
+    if soft_selection.enabled(config):
+        if run_id:
+            write_run_state(run_id, status="running", trigger=trigger, total=0, done=0, moved=0, skipped=0, errors=0, started_at=_now().isoformat())
+        try:
+            def progress(done, total):
+                if run_id:
+                    if stop_requested(run_id):
+                        raise soft_selection.SelectionStopped("Stopped before membership was committed.")
+                    write_run_state(run_id, done=done, total=total)
+            result = soft_selection.sync(config, progress=progress if run_id else None)
+            if run_id:
+                write_run_state(run_id, status="done", done=result["selected"], total=result["selected"],
+                                moved=result["moved"], skipped=result["skipped"], errors=0, finished_at=_now().isoformat())
+            summary={**result, "run_id": run_id, "trigger": trigger, "at": _now().isoformat(), "ok": True}
+            _record_run(summary,[{"destination":"sql:"+result["selection_id"]}] if result["moved"] else [],[],[])
+            _notify_pull_finished(summary)
+            return summary
+        except soft_selection.SelectionStopped as exc:
+            if run_id: write_run_state(run_id, status="stopped", errors=0, moved=0, error=str(exc), finished_at=_now().isoformat())
+            return {"ok":False,"stopped":True,"moved":0,"skipped":0,"errors":0,"run_id":run_id,"trigger":trigger}
+        except Exception as exc:
+            if run_id: write_run_state(run_id, status="failed", errors=1, error=str(exc), finished_at=_now().isoformat())
+            raise
+
 
     # Refused here rather than warned about in the card, because the sweep
     # that matters is the one nobody is watching: a scheduled pull at 18:33
@@ -3049,7 +3080,7 @@ SCOPES = {
         "images_subpath", "labels_subpath", "week_prefix", "week_length_days",
         "auto_create_weeks", "first_week_takes_all", "week_by",
         "image_extensions", "label_extensions", "overwrite",
-        "retention", "golden_set", "dataset_assemble", "auto_training",
+        "retention", "golden_set", "dataset_assemble", "auto_training", "soft_selection", "data_selection",
         "sql_explorer", "readiness_flow", "central_store", "catalog_export", "catalog_pt_metadata", "catalog_export_destination",
     ),
     "at": (
@@ -3069,9 +3100,11 @@ SUFFIXES = {"dp": "_DP", "at": "_AT"}
 #: `card_state` is ONE shared record, so each tab's file carries its own
 #: cards' entries and a load merges them in rather than replacing it.
 DP_CARDS = frozenset({
+    "dp settings and schedule", "review your existing settings", "data sources",
+    "split and golden-set policy", "class mapping", "selection preview and readiness", "dataset versions",
     "assemble", "golden_set", "pull_control", "retention",
     "assemble a dataset", "pick golden set / edge cases", "pull control",
-    "auto training", "pull queue", "central data store",
+    "auto training", "pull queue", "central data store", "database data selection",
     # The SQL tab saves with Data Preparation (`sql_explorer` is a DP key).
     "readiness flow",
 })
@@ -3203,6 +3236,8 @@ def settings_owner(identity: tuple, *, ignore: str = "", sources=None) -> str:
             saved = read_settings_file(name)
         except (ValueError, OSError):
             continue
+        if (saved.get("soft_selection") or {}).get("enabled"):
+            continue
         if folder_identity(saved) != identity:
             continue
         # A file with Pull Control off writes no week folders, so it
@@ -3272,7 +3307,7 @@ def save_settings_file(*, name: str = "pull_control", config: dict | None = None
     # A Multi-Auto Training file holds no folders at all, so it cannot
     # clash over them -- and `pull_in_use` reads a missing Assemble
     # section as "pulling".
-    clash = None if allow_clash or scope == "at" or not pull_in_use(body) else settings_owner(
+    clash = None if (body.get("soft_selection") or {}).get("enabled") or allow_clash or scope == "at" or not pull_in_use(body) else settings_owner(
         identity, ignore=name, sources=_picked_sources(body))
     if clash:
         roots = " + ".join(part for part in identity[:2] if part) or "(no root)"
@@ -3283,6 +3318,11 @@ def save_settings_file(*, name: str = "pull_control", config: dict | None = None
             f"which images came from which. Change the week prefix, or the root "
             f"folder, before saving this one."
         )
+    if (body.get("soft_selection") or {}).get("enabled") and scope != "at" and (not os.path.exists(path) or name != str(whole.get(f"settings_file_{scope}" if scope else "settings_file") or "")):
+        from .data import soft_selection
+        new_id = soft_selection.create((body.get("soft_selection") or {}).get("id", ""))
+        body["soft_selection"] = {**body["soft_selection"], "id": new_id}
+        whole["soft_selection"] = body["soft_selection"]
     os.makedirs(SETTINGS_DIR, exist_ok=True)
     temporary = path + ".tmp"
     with open(temporary, "w", encoding="utf-8") as handle:
@@ -3297,11 +3337,14 @@ def save_settings_file(*, name: str = "pull_control", config: dict | None = None
                 document[key] = value
         json.dump(document, handle, indent=2)
     os.replace(temporary, path)
+    if body.get("data_selection") and scope != "at":
+        from .data import selection_jobs
+        selection_jobs.save({**whole,**body},name)
     # Recorded AFTER the write succeeds, so a refused save (a clashing
     # root) does not leave the page claiming to be in a file it never
     # wrote.
     try:
-        write_config({f"settings_file_{scope}" if scope else "settings_file": name})
+        write_config({f"settings_file_{scope}" if scope else "settings_file": name, **({"soft_selection": body["soft_selection"]} if "soft_selection" in body else {})})
     except Exception:                                          # noqa: BLE001
         pass
     return {"name": name, "path": path, "bytes": os.path.getsize(path),
@@ -3394,6 +3437,7 @@ def read_settings_section(name: str, key: str) -> dict:
 
 
 TRAINING_DATA_KEYS = (
+    "soft_selection", "data_selection",
     "sources", "picked", "source_bucket", "destination_bucket", "root",
     "training_root", "eval_root", "week_cutoff", "week_anchor",
     "images_subpath", "labels_subpath", "week_prefix", "week_length_days",
@@ -3467,6 +3511,9 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True,
     if apply:
         live = read_config()
         update = dict(config)
+        if scope == "dp" and not config.get("data_selection"):
+            update["data_selection"] = {}
+            update["soft_selection"] = config.get("soft_selection") or {"enabled": False, "id": ""}
         if scope == "at" and config.get("training_data_preparation"):
             recipe = config["training_data_preparation"].get("config") or {}
             update.update({key: recipe[key] for key in TRAINING_DATA_KEYS if key in recipe})
@@ -3578,6 +3625,8 @@ def settings_claims(names: list | None = None) -> list:
             # warning away from every other.
             continue
         config = body.get("config") if isinstance(body.get("config"), dict) else body
+        if isinstance(config, dict) and (config.get("soft_selection") or {}).get("enabled"):
+            continue
         detector = (config.get("default_detector") or {}) if isinstance(config, dict) else {}
         assemble = (config.get("dataset_assemble") or {}) if isinstance(config, dict) else {}
         out.append({
@@ -3599,6 +3648,10 @@ def week_contents(config: dict | None = None) -> dict:
     is actually in it.
     """
     config = config or read_config()
+    from .data import soft_selection
+    if soft_selection.enabled(config):
+        return soft_selection.week_contents(config)
+
     roots = set()
     for source in config.get("sources") or []:
         for field in ("destination", "eval_destination"):
@@ -3661,6 +3714,10 @@ def purge_week(*, name: str, config: dict | None = None) -> dict:
     if not name:
         raise ValueError("Which week?")
     config = config or read_config()
+    from .data import soft_selection
+    if soft_selection.enabled(config):
+        return soft_selection.exclude_week(config, name)
+
 
     roots = set()
     for source in config.get("sources") or []:
@@ -3814,6 +3871,11 @@ def delete_settings_file(*, name: str) -> dict:
     path = _settings_path(name)
     if not os.path.exists(path):
         raise ValueError(f"No settings file called {name}.")
+    with open(path, encoding="utf-8") as handle:
+        deleting=json.load(handle)
+    if (deleting.get("config") or {}).get("data_selection"):
+        from .data import selection_jobs
+        selection_jobs.disable_file(name)
     os.remove(path)
     # A deleted file is not loaded any more. Clear ONLY the matching
     # "loaded from" names; the settings themselves, and the schedules,
@@ -4188,6 +4250,10 @@ def create_gap_folders(config: dict | None = None) -> dict:
     Idempotent: writing the same marker twice is the same marker.
     """
     config = config or read_config()
+    from .data import soft_selection
+    if soft_selection.enabled(config):
+        raise ValueError("Database selection does not create or delete physical week folders.")
+
     names = gap_weeks(config)
     if not names:
         return {"created": [], "keys": 0}

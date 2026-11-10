@@ -31,37 +31,13 @@ PANEL = (WEB / "components" / "Track2DatasetAssemblePanel.tsx").read_text(encodi
 OFF = (WEB / "components" / "SwitchedOff.tsx").read_text(encoding="utf-8")
 
 
-def test_the_card_is_above_the_edge_cases_card():
-    """Asked for above it, and it reads in the right order there: pick the
-    data, then curate a golden set out of what you have."""
-    assemble = PAGE.index("only={pickFoldersByHand}")
-    golden = PAGE.index("<Track2GoldenSetPanel />")
-    assert assemble < golden
-
-
-def test_auto_training_is_switched_off_by_the_wrapper():
-    before = PAGE[:PAGE.index("<Track2AutoTrainingPanel")]
-    wrapper = before.rindex("<SwitchedOff")
-    # The wrapper has to be the one immediately around it, not an
-    # earlier one that happens to appear above.
-    assert "</SwitchedOff>" not in before[wrapper:]
-    assert "off={pickFoldersByHand}" in before[wrapper:]
-
-
-def test_pull_control_switches_its_own_body_off_instead():
-    """It cannot use the wrapper any more: the wrapper makes the whole
-    subtree `inert`, and the tick that turns this card back ON now sits
-    in its own heading. Unticking it would be a one-way door -- the
-    switch would be inside the part that stopped taking clicks.
-
-    So the card dims its body and leaves its header alone."""
-    flat = " ".join(PAGE.split())
-    assert "<Track2PullControlPanel only={pickFoldersByHand}" in flat
-    # Nothing above it may have an UNCLOSED wrapper -- which includes
-    # there being no wrapper above it at all, as there now is not.
-    before = PAGE[:PAGE.index("<Track2PullControlPanel")]
-    assert before.count("<SwitchedOff") == before.count("</SwitchedOff>"), \
-        "pull control must not be inside a SwitchedOff any more"
+def test_one_definition_replaces_the_competing_folder_cards():
+    assert "<Track2DataPreparationWorkflow" in PAGE
+    assert "Track2PullControlPanel" not in PAGE
+    assert "Track2AutoTrainingPanel" not in PAGE
+    workflow=(WEB / "components" / "Track2DataPreparationWorkflow.tsx").read_text(encoding="utf-8")
+    assert workflow.index('title="Data sources"') < workflow.index('title="Split and golden-set policy"')
+    assert 'kind: "collected"' in workflow and '<option value="golden">' in workflow
 
 
 def test_it_is_still_switched_off_though():
@@ -87,17 +63,6 @@ def test_they_are_dimmed_and_left_on_the_page_not_hidden():
     assert "return <>{children}</>" in OFF, "untouched when the tick is off"
 
 
-def test_the_reason_names_the_tick_that_did_it():
-    """Auto Training still says it from the wrapper; Pull Control says it
-    itself, next to the tick that turns it back on."""
-    assert "reason={" in PAGE
-    assert "Untick" in PAGE or "Tick" in PAGE
-    pull = (WEB / "components" / "Track2PullControlPanel.tsx").read_text(encoding="utf-8")
-    flat = " ".join(pull.split())
-    assert "The run is using the folders picked on the Assemble card." in flat
-    assert "Use Pull Control</span> to collect data week by week again." in flat
-
-
 def test_the_tick_is_only_offered_where_it_turns_something_off():
     """The standard tab has none of those three cards, so a tick there
     would claim to switch off nothing."""
@@ -106,13 +71,6 @@ def test_the_tick_is_only_offered_where_it_turns_something_off():
     at = MODELS.index("{!multi && (")
     standard = MODELS[at:MODELS.index(")}", at)]
     assert "onOnlyChange" not in standard
-
-
-def test_the_state_is_declared_before_the_cards_that_read_it():
-    """The temporal dead zone that blanked this page once already."""
-    declared = PAGE.index("const [pickFoldersByHand, setPickFoldersByHand]")
-    assert declared < PAGE.index("only={pickFoldersByHand}")
-    assert declared < PAGE.index("off={pickFoldersByHand}")
 
 
 def test_the_card_explains_the_consequence_on_itself():

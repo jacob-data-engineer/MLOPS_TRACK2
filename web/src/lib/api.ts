@@ -2051,6 +2051,7 @@ export interface Track2PullRule {
 }
 
 export interface Track2PullConfig {
+  soft_selection?: { enabled: boolean; id: string };
   /** The Auto Training card's own selection: the root it is pointed at
    * and the weeks ticked out of it. Server-side so it rides along in the
    * settings file -- a selection that only exists in a tab is one nobody

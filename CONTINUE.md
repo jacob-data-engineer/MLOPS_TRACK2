@@ -1,5 +1,91 @@
 # Continue here
 
+## Unified Data Preparation definition (10 Nov 2026, replaces the partial card below)
+
+Data Preparation now renders Track2DataPreparationWorkflow: a pinned, collapsible
+settings/refresh schedule card; explicit source rows; frozen split policy; original
+source numbering and editable output IDs; retention controls; coverage/exclusion
+reports; image/box preview; canonical version history. The previous competing
+folder cards are no longer rendered. API prefix is /track2/preparation; the SPA
+route remains /track2/data-preparation. Save flushes the definition, retention and
+collection exclusions before writing the existing _DP file. Save as clones SQL
+membership; file load does not arm a schedule. Deleting a new definition file
+stops its saved refresh schedule. Legacy files receive a reviewable migration
+proposal, including their original golden sources and existing split manifest.
+
+Membership now references canonical files/labels and freezes into existing
+catalog dataset_versions/dataset_members. Actual SHA256 content detects duplicate
+train/validation images. Labels are immutable revisions. Source files remain
+untouched; shared preserved content and content-addressed YOLO training bundles
+are reused. Re-freezing unchanged membership reuses the same catalog version.
+The training chain consumes that exact version rather than creating a second one.
+Old soft_* tables remain historical; nonempty old soft_* membership is not copied
+forward automatically (the inspected live selection had zero members).
+
+Refresh/scan/freeze jobs and each saved definition's refresh clock are durable
+SQL records. The EC2 ticker queues due jobs and recovers interrupted jobs after a
+three-minute heartbeat expiry. Refresh checks source image/label pairs; missing or
+invalid labels get explicit exclusions, while source-level failures preserve the
+previous selection. New golden arrivals go to train; existing validation members
+stay fixed. Whole-collection exclusions still apply to both splits. Retention
+ages nonempty collections, never fixed/golden sources or validation. Training
+remains controlled separately on Multi-Auto Training; this refresh scheduler
+itself does not start a training job.
+
+Verification: 2,698 tests passed (two warnings). Isolated real PostgreSQL/S3 check
+passed canonical versions/members, actual YOLO remapping, cache reuse, immutable
+labels, clone isolation, training handoff, and saved-schedule durable refresh.
+Its temporary schema and S3 prefix were cleaned. No GPU training was started.
+Deployed development build 20261110-114430 to port 8090. Verified /build, /health,
+/track2/preparation JSON, SPA HTML, and new frontend bundle strings after container
+replacement. Active legacy file remains in migration review with six source rows
+and zero indexed members; no bulk indexing or training was launched.
+Browser UI inspection unavailable: both CUA and node_repl failed to initialize
+with "failed to write kernel assets ... path specified". Verify rendered layout
+when browser tooling is available; compiled bundle/API checks are not visual QA.
+
+## Database data selection (10 Nov 2026)
+
+Implemented opt-in SQL membership on Data Preparation. The Database data
+selection card creates an independent selection; Save as clones membership.
+The existing saved file carries its selection ID, source choices, class mapping,
+week exclusions and retention policy. Existing configurations remain in legacy
+mode until enabled, so deployment alone does not reroute an active schedule.
+
+New soft_selection tables in the configured catalog schema hold preserved
+source revisions, immutable label versions, per-selection membership and frozen
+snapshots. Refresh reads paired source images/labels and their original YAML
+numbering, preserves each source URI/ETag revision once, and commits membership
+atomically under a selection advisory lock. Missing/invalid labels fail the
+refresh without replacing the previous selection. Explicit empty labels are
+accepted as background. ETag/size overlap checks are not a full scene-leakage audit.
+
+Pull Control routes to SQL sync in this mode. Training freezes selected members
+and label revisions, remaps class IDs in derived YOLO files, then hands the
+snapshot to the existing dataset-version/queue workflow. Retention changes
+selection only; validation is never decayed, while explicitly unticking a week
+excludes both splits. Manually selected/golden sources are fixed. Week removal
+creates persistent membership exclusions. No shared-object garbage collection
+or deletion is implemented. Sources need their own data.yaml/data.source.yaml;
+output class IDs are not guessed as source IDs. Temporary training snapshots
+still contain YOLO folders; the repeatedly copied week-folder workflow is avoided.
+
+Verified 2,693 tests before the final cancellation/UI additions; focused 137 tests
+passed after cancellation support. Isolated real PostgreSQL + S3 check passed
+refresh/idempotency, cloning, annotation isolation, class remapping, generated
+YOLO YAML and frozen-snapshot immutability. Scratch schema and S3 fixtures were
+cleaned up. No live model training or active configuration migration performed.
+Final verification: 2,694 tests passed (one existing dependency warning).
+Development deployment 20261110-100343 succeeded on port 8090; CodeBuild
+compiled TypeScript/Vite and imported the app. Authenticated selection endpoint
+returned JSON, /health was ok and /build matched the tag/dev/PostgreSQL backend.
+Served JS contains the new card and mode toggle. Rendered-browser UI and a full
+GPU training run were not verified. Active configuration remains legacy mode
+(enabled=false, no selection ID); use the new card to switch, refresh, then Save.
+Stable port 8501 and Lambda code were not deployed. PostgreSQL development
+scheduled pulls use the existing EC2 worker/queue and the same route_pending path.
+
+
 Removed obsolete filename-time option from Pull Control. UI offers S3
 upload time or current sweep week; old capture_time settings load as file_time
 in the editor and apply on save. Existing server schedules are not rewritten.

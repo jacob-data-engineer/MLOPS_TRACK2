@@ -18,7 +18,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, field_validator
 
 from .. import pull_control
-from ..chain import retrain_schedule as clock
+from .. import schedule_clock as clock
 from . import sql_explorer as sx
 from .sql_settings import SqlSettings
 from .sql_training_export import exists

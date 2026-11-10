@@ -35,6 +35,8 @@ with a reason rather than training on whatever happened to be there.
 
 from __future__ import annotations
 
+from .. import schedule_clock
+
 import datetime as _dt
 import uuid
 import os
@@ -486,6 +488,13 @@ def preflight(config: dict | None = None) -> dict:
     than no schedule: it reads as "the model is being retrained".
     """
     config = config if config is not None else pc.read_config()
+    from .. import data
+    if data.soft_selection_enabled(config) and data_source(config) == "assembled":
+        try:
+            return preflight(data.soft_selection_preview(config))
+        except Exception as exc:
+            return {"ready": False, "root": "", "problems": [{"level": "blocking", "text": str(exc)}]}
+
     plan = settings(config)
     problems: list = []
 
@@ -802,6 +811,20 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
         return {"trigger": trigger, "at": _now().isoformat(timespec="seconds"),
                 "ok": False, "steps": steps}
 
+
+    from .. import data
+    if data.soft_selection_enabled(config) and data_source(config) == "assembled":
+        try:
+            data.refresh_soft_selection(config)
+            built = data.freeze_soft_selection(config)
+            record("database selection", True, f"Frozen {built['id']}: {built['train']} train, {built['val']} validation")
+            config = data.soft_selection_training_config(config, built)
+            checks = preflight(config)
+            if not checks["ready"]:
+                raise ValueError("; ".join(p["text"] for p in checks["problems"] if p["level"]=="blocking"))
+        except Exception as exc:
+            record("database selection", False, str(exc))
+            return {"trigger": trigger, "at": _now().isoformat(timespec="seconds"), "ok": False, "steps": steps}
     root = checks["root"]
     retention = {**(config.get("retention") or {})}
     # Which folders are weeks. Pull Control's setting, carried in so the
@@ -1354,7 +1377,7 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
     try:
         from .. import data
 
-        version = data.version_for_run(
+        version = config.get("_selection_version") or data.version_for_run(
             home=pc.destination_bucket(config), root=root,
             train_data_uris=train_data_uris, data_yaml_uri=data_yaml_uri,
             eval_root=eval_root, trigger=trigger,
@@ -1517,15 +1540,7 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
 
 
 def _valid_time(text: str) -> bool:
-    parts = str(text or "").split(":")
-    if len(parts) != 2:
-        return False
-    try:
-        hour, minute = int(parts[0]), int(parts[1])
-    except ValueError:
-        return False
-    return 0 <= hour <= 23 and 0 <= minute <= 59
-
+    return schedule_clock._valid_time(text)
 
 def schedule_expression(plan: dict) -> str:
     """The EventBridge expression for this cadence.
@@ -1717,74 +1732,14 @@ SGT = _dt.timezone(_dt.timedelta(hours=8))
 LEGACY_EPOCH = _dt.date(1970, 1, 1)
 
 
-def _grid_start(plan: dict) -> _dt.datetime | None:
-    """Slot zero of the grid, in SGT, or None when `at` is unusable.
+def _grid_start(plan: dict):
+    return schedule_clock._grid_start(plan)
 
-    `from_date` (the operator's own "from this date") wins, then the
-    stored `anchor`, then `LEGACY_EPOCH`. Never the current time: a grid
-    counted from "now" moves with the clock, which is what let a weekly
-    schedule fall due daily.
-    """
-    if not _valid_time(str(plan.get("at") or "")):
-        return None
-    hour, minute = (int(part) for part in str(plan["at"]).split(":"))
-    day = LEGACY_EPOCH
-    for key in ("from_date", "anchor"):
-        try:
-            day = _dt.date.fromisoformat(str(plan.get(key) or "").strip()[:10])
-            break
-        except ValueError:
-            continue
-    return _dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=SGT)
+def fresh_anchor(plan: dict, *, now=None) -> str:
+    return schedule_clock.fresh_anchor(plan, now=now or _now())
 
-
-def fresh_anchor(plan: dict, *, now: _dt.datetime | None = None) -> str:
-    """The anchor for a schedule being switched on or re-timed NOW.
-
-    The date of the first `at` strictly after `now` -- today if the time
-    has not come yet, else tomorrow -- so arming a schedule can never
-    make a slot that is already due.
-    """
-    if not _valid_time(str(plan.get("at") or "")):
-        return ""
-    hour, minute = (int(part) for part in str(plan["at"]).split(":"))
-    moment = (now or _now()).astimezone(SGT)
-    first = moment.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if first <= moment:
-        first += _dt.timedelta(days=1)
-    return first.date().isoformat()
-
-
-def with_anchor(before: dict, after: dict, *,
-                now: _dt.datetime | None = None) -> dict:
-    """`after`, with the anchor it should be saved with.
-
-    Re-anchored (to `fresh_anchor`) only on a DELIBERATE reset: the
-    schedule being switched on, or its interval or time changing. Any
-    other save keeps the grid -- and a schedule with no anchor yet pins
-    the one it was already showing (the `LEGACY_EPOCH` grid's next date),
-    so upgrading moves no run. A disabled schedule is left as it is.
-    """
-    out = dict(after)
-    if not out.get("enabled"):
-        return out
-
-    def every(plan):
-        try:
-            return max(1, int(plan.get("every_days") or 1))
-        except (TypeError, ValueError):
-            return 1
-
-    reset = (not before.get("enabled")
-             or every(before) != every(out)
-             or str(before.get("at") or "") != str(out.get("at") or ""))
-    if reset:
-        out["anchor"] = fresh_anchor(out, now=now)
-    elif not str(out.get("anchor") or "").strip():
-        upcoming = next_runs({**out, "from_date": ""}, start=now, count=1)
-        out["anchor"] = upcoming[0].astimezone(SGT).date().isoformat() if upcoming else ""
-    return out
-
+def with_anchor(before: dict, after: dict, *, now=None) -> dict:
+    return schedule_clock.with_anchor(before, after, now=now or _now())
 
 def _passed_slots(plan: dict, moment: _dt.datetime) -> list:
     """The latest two occurrences at or before `moment`, oldest first.
@@ -1902,30 +1857,5 @@ def check_training_schedule(config: dict | None = None) -> dict:
             "steps": out.get("steps", [])}
 
 
-def next_runs(plan: dict, *, start: _dt.datetime | None = None,
-              count: int = 4) -> list:
-    """When the next few would fire, in UTC.
-
-    Shown in the card because "every 7 days at 02:00" is not something
-    anybody can turn into a date in their head, and the first question
-    asked of a schedule is always "so when does it actually run".
-    """
-    # Singapore time, which is what the field says and what the EC2
-    # schedule this system already runs on uses.
-    #
-    # ONE grid, fixed by `_grid_start` (from_date, else anchor, else the
-    # legacy epoch) and never by `start`: this used to count from
-    # whatever moment it was handed when no from_date was set, and
-    # `_passed_slots` handed it "now minus an interval", so the grid slid
-    # with the clock and a weekly schedule fell due every day (F2).
-    grid = _grid_start(plan)
-    if grid is None:
-        return []
-    every = max(1, int(plan.get("every_days") or 1))
-    step = _dt.timedelta(days=every)
-    moment = (start or _now()).astimezone(SGT)
-    first = grid
-    if first <= moment:
-        first += step * (((moment - first) // step) + 1)
-    return [(first + step * n).astimezone(_dt.timezone.utc)
-            for n in range(max(0, int(count)))]
+def next_runs(plan: dict, *, start=None, count: int = 4) -> list:
+    return schedule_clock.next_runs(plan, start=start or _now(), count=count)

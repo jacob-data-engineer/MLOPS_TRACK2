@@ -162,10 +162,10 @@ def test_its_own_clock_runs_without_the_pull():
 # --- the screen ------------------------------------------------------------
 
 def test_each_page_has_its_own_toolbar():
-    prep = (WEB / "routes" / "Track2DataPrepPage.tsx").read_text(encoding="utf-8")
+    prep = (WEB / "components" / "Track2DataPreparationWorkflow.tsx").read_text(encoding="utf-8")
     models = (WEB / "routes" / "Track2ModelsPage.tsx").read_text(encoding="utf-8")
     bar = (WEB / "components" / "Track2PinnedBar.tsx").read_text(encoding="utf-8")
-    assert '<Track2PinnedBar scope="dp" />' in prep
+    assert '<Track2PinnedBar scope="dp" beforeSave={persist}' in prep
     assert '<Track2PinnedBar scope="at" />' in models
     assert "saveTrack2SettingsFile(target, allowClash, scope)" in bar
     assert "loadTrack2SettingsFile(picked, true, scope)" in bar
@@ -188,8 +188,8 @@ def test_the_central_data_store_is_a_saved_data_preparation_setting():
     assert "central data store" in pc.DP_CARDS
     panel = (WEB / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
     assert "saveTrack2PullConfig({ central_store: { bucket, folder } })" in panel
-    page = (WEB / "routes" / "Track2DataPrepPage.tsx").read_text(encoding="utf-8")
-    assert page.index("<Track2AutoTrainingPanel />") < page.index("<Track2CentralStorePanel />")
+    page = (WEB / "components" / "Track2DataPreparationWorkflow.tsx").read_text(encoding="utf-8")
+    assert page.index('title="Dataset versions"') < page.index("<Track2CentralStorePanel />")
 
 
 def test_legacy_training_file_preserves_pull_schedule(live):
@@ -317,3 +317,18 @@ def test_a_delete_never_clears_a_file_loaded_while_it_ran(live, monkeypatch):
     out = pc.delete_settings_file(name="old_DP")
     assert state["interleaved"] and out["cleared"] == []
     assert pc.read_config()["settings_file_dp"] == "new_DP"
+
+
+def test_legacy_load_clears_a_previous_new_definition(live):
+    pc.save_settings_file(name="legacy",scope="dp")
+    pc.write_config({"data_selection":{"sources":[]},"soft_selection":{"enabled":True,"id":"other"}})
+    pc.load_settings_file(name="legacy_DP",scope="dp")
+    assert not pc.read_config()["data_selection"]
+    assert not pc.read_config()["soft_selection"]["enabled"]
+
+
+def test_definition_cards_are_owned_by_data_preparation(live):
+    keys={"dp settings and schedule","data sources","split and golden-set policy","class mapping","selection preview and readiness","dataset versions"}
+    pc.write_config({"card_state":{key:False for key in keys}})
+    pc.save_settings_file(name="cards",scope="dp")
+    assert set(_file("cards_DP")["config"]["card_state"])==keys

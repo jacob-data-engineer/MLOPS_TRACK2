@@ -520,6 +520,12 @@ def read_inventory(root: str, *, images_subpath: str = "images",
     trainer's lists never read them, so counting them would be the same
     disagreement over again.
     """
+    from .. import pull_control
+    from . import soft_selection
+    current=pull_control.read_config()
+    if soft_selection.enabled(current) and root.strip("/") == str(current.get("root") or "").strip("/"):
+        return soft_selection.inventory(current)
+
     from .. import storage
 
     root = (root or "").strip().strip("/")
