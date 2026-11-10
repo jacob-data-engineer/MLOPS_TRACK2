@@ -4058,18 +4058,56 @@ export interface Track2SqlPullResult {
 /** Runs the query again and copies every image it names into
  * `<destFolder>/images/{train,val}`, with any label found beside each
  * source image into `labels/{train,val}`. */
-export function pullTrack2Sql(params: {
+export type Track2SqlPullProgress = {
+  phase: "querying" | "copying" | "finalizing" | "complete" | "error";
+  completed: number; total: number; copied?: number; skipped?: number;
+  failed?: number; left_out_incomplete?: number;
+};
+
+export async function pullTrack2Sql(params: {
   database: string; sql: string; bucket: string; folder: string;
   destBucket: string; destFolder: string; trainPercent: number;
   withLabels: boolean;
-}): Promise<Track2SqlPullResult> {
-  return apiPost("/track2/sql/pull", {
+}, onProgress?: (progress: Track2SqlPullProgress) => void): Promise<Track2SqlPullResult> {
+  const payload = {
     database: params.database, sql: params.sql,
     bucket: params.bucket, folder: params.folder,
     dest_bucket: params.destBucket, dest_folder: params.destFolder,
     train_percent: params.trainPercent,
     with_labels: params.withLabels,
+  };
+  if (!onProgress) return apiPost("/track2/sql/pull", payload);
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+  const response = await fetch(`${API_BASE_URL}/track2/sql/pull/stream`, {
+    method: "POST", headers, body: JSON.stringify(payload),
   });
+  if (!response.ok) {
+    if (response.status === 401) void confirmSessionIsDead();
+    const body = await response.json().catch(() => ({}));
+    throw new ApiError(response.status, body.detail || "Could not start the pull.");
+  }
+  if (!response.body) throw new ApiError(500, "No progress stream returned.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      pending += decoder.decode(value, { stream: !done });
+      const lines = pending.split("\n"); pending = lines.pop() || "";
+      if (done && pending.trim()) lines.push(pending);
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === "progress") onProgress(event);
+        if (event.type === "complete") return event.result as Track2SqlPullResult;
+        if (event.type === "error") throw new ApiError(500, event.detail);
+      }
+      if (done) break;
+    }
+    throw new ApiError(500, "Progress connection ended before completion. Some files may have copied; check the destination before retrying.");
+  } finally { reader.releaseLock(); }
 }
 
 export function loadTrack2TrainingData(name: string, apply = false): Promise<{

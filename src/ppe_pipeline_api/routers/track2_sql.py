@@ -5,11 +5,54 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from queue import Queue, Empty
+from threading import Thread
+import json
 
 from ..auth import require_session
 from ..data import sql_explorer as sx
+from ..data import sql_settings
 
 router = APIRouter()
+
+
+class SqlSettingsRequest(BaseModel):
+    name: str
+    settings: sql_settings.SqlSettings | None = None
+
+
+def _settings_action(action, *args):
+    try:
+        return action(*args)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Settings file not found.")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError:
+        raise HTTPException(status_code=400, detail="Could not access the EC2 settings folder.")
+
+
+@router.get("/settings")
+def list_sql_settings(session=Depends(require_session)) -> dict:
+    return _settings_action(sql_settings.list_files)
+
+
+@router.post("/settings/save")
+def save_sql_settings(payload: SqlSettingsRequest, session=Depends(require_session)) -> dict:
+    if payload.settings is None:
+        raise HTTPException(status_code=422, detail="Nothing to save.")
+    return _settings_action(sql_settings.save, payload.name, payload.settings)
+
+
+@router.post("/settings/load")
+def load_sql_settings(payload: SqlSettingsRequest, session=Depends(require_session)) -> dict:
+    return _settings_action(sql_settings.load, payload.name)
+
+
+@router.post("/settings/delete")
+def delete_sql_settings(payload: SqlSettingsRequest, session=Depends(require_session)) -> dict:
+    return _settings_action(sql_settings.delete, payload.name)
 
 
 class SchemaRequest(BaseModel):
@@ -134,3 +177,35 @@ def pull(payload: PullRequest, session=Depends(require_session)) -> dict:
                        with_labels=payload.with_labels)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/pull/stream")
+def pull_stream(payload: PullRequest, session=Depends(require_session)):
+    """Stream real copy progress; completion follows the metadata writes."""
+    events = Queue()
+
+    def worker():
+        try:
+            result = sx.pull(payload.database, payload.sql,
+                bucket=payload.bucket.strip(), folder=payload.folder.strip(),
+                dest_bucket=payload.dest_bucket, dest_folder=payload.dest_folder,
+                train_percent=payload.train_percent, with_labels=payload.with_labels,
+                progress=lambda value: events.put({"type": "progress", **value}))
+            events.put({"type": "complete", "result": result})
+        except Exception as exc:
+            events.put({"type": "error", "detail": str(exc)})
+
+    def stream():
+        Thread(target=worker, daemon=True).start()
+        while True:
+            try:
+                event = events.get(timeout=10)
+            except Empty:
+                yield "\n"
+                continue
+            yield json.dumps(event) + "\n"
+            if event["type"] in ("complete", "error"):
+                break
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

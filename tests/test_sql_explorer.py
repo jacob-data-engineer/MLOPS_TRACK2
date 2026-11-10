@@ -137,7 +137,7 @@ def test_the_tab_is_routed_offered_and_saves_its_settings():
     page = (web / "routes" / "Track2SqlPage.tsx").read_text(encoding="utf-8")
     assert 'path="/track2/sql" element={<Track2SqlPage />}' in app
     assert '"Track2 SQL Database Query"' in nav
-    assert "void saveTrack2PullConfig({ sql_explorer: {" in page
+    assert "sql_explorer: {" in page
     assert "pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent," in page
     from ppe_pipeline_api import pull_control as pc
     from ppe_pipeline_api.routers.track2_pull_control import ConfigRequest
@@ -332,8 +332,8 @@ def test_the_page_runs_on_select_and_shows_thumbnails():
     assert "void showClass(pickedClass.name, scope);" in page
     assert "getTrack2SqlPreviews(page)" in page
     assert '<img src={p.url}' in page
-    # the editor is still there, folded away
-    assert "Advanced: write your own SQL" in page
+    # Custom SQL editing was removed from this page.
+    assert "Advanced: write your own SQL" not in page
 
 
 # --- labels from the reviewed boxes ---------------------------------------------
@@ -463,7 +463,7 @@ def test_switching_to_a_stopped_database_never_queries_it():
     assert "return () => { current = false; };" in page
     # ... and nothing runs against a database that is not available
     assert "if (!settingsRead || !database || !chosen?.available || !pickedClass) return;" in page
-    assert "[settingsRead, database, chosen?.available, pickedClass?.name, presetScope]" in page
+    assert "[settingsRead, database, chosen?.available, pickedClass?.name, presetScope, settingsRevision]" in page
     # switching still abandons whatever was running against the old one
     assert "runId.current += 1;      // abandon a search against the old one" in page
 
@@ -548,3 +548,32 @@ def test_preset_route_probes_selected_database(monkeypatch):
     result = router.preset(router.PresetRequest(database='jpui-preview', hazard='no_helmet'), session={})
     assert seen == ['jpui-preview']
     assert 'crop_verdict_heads' not in result['sql']
+
+
+def test_pull_progress_tracks_processed_frames_and_finalization(monkeypatch):
+    _pull_setup(monkeypatch, [["s3://src/a.jpg"], ["s3://src/missing.jpg"]], {("src", "a.jpg"): b"A"})
+    events = []
+    summary = sx.pull('violation-review', 'q', dest_bucket='d', dest_folder='progress', progress=events.append)
+    assert events[0]['phase'] == 'querying'
+    copying = [e for e in events if e['phase'] == 'copying']
+    assert [e['completed'] for e in copying] == [0, 1, 2]
+    assert copying[-1]['copied'] == summary['copied'] == 1
+    assert copying[-1]['failed'] == summary['failed'] == 1
+    assert events[-1]['phase'] == 'finalizing'
+
+
+def test_stream_reports_failure_not_completion(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from ppe_pipeline_api.routers import track2_sql as routes
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[routes.require_session] = lambda: {}
+    def failed(*args, progress, **kwargs):
+        progress({'phase': 'finalizing', 'completed': 2, 'total': 2})
+        raise ValueError('metadata write failed')
+    monkeypatch.setattr(sx, 'pull', failed)
+    result = TestClient(app).post('/pull/stream', json={'database':'violation-review','sql':'q','dest_bucket':'d','dest_folder':'p'})
+    events = [json.loads(line) for line in result.text.splitlines() if line]
+    assert [e['type'] for e in events] == ['progress', 'error']
+    assert events[-1]['detail'] == 'metadata write failed'

@@ -20,7 +20,7 @@ import datetime as _dt
 import hashlib
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote, urlparse
 
 import boto3
@@ -775,7 +775,7 @@ def _exists(bucket: str, key: str) -> bool:
 
 def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
          dest_bucket: str, dest_folder: str, train_percent: int = 100,
-         with_labels: bool = True) -> dict:
+         with_labels: bool = True, progress=None) -> dict:
     """Run the query, then copy every image it names into
     `dest_bucket/dest_folder` in the layout a training run reads:
 
@@ -804,6 +804,8 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
                          "pull into another folder.")
     train_percent = max(0, min(100, int(train_percent)))
 
+    if progress:
+        progress({"phase": "querying", "completed": 0, "total": 0})
     result = run(key, sql, bucket=bucket, folder=folder)
     images = [i for i in result["images"] if i.get("bucket")]
     bare = len(result["images"]) - len(images)
@@ -877,8 +879,24 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
             out["error"] = str(exc)
         return out
 
+    counters = {"phase": "copying", "completed": 0, "total": len(plan),
+                "copied": 0, "skipped": 0, "failed": 0, "left_out_incomplete": incomplete}
+    if progress:
+        progress(dict(counters))
     with ThreadPoolExecutor(max_workers=PULL_WORKERS) as pool:
-        done = list(pool.map(copy, plan))
+        futures = {pool.submit(copy, entry): i for i, entry in enumerate(plan)}
+        done = [None] * len(plan)
+        for future in as_completed(futures):
+            item = future.result()
+            done[futures[future]] = item
+            counters["completed"] += 1
+            counters["failed"] += bool(item["error"])
+            counters["copied"] += bool(item["copied"] and not item["error"])
+            counters["skipped"] += bool(item.get("skipped") and not item["error"])
+            if progress:
+                progress(dict(counters))
+    if progress:
+        progress({**counters, "phase": "finalizing"})
 
     ok = [d for d in done if not d["error"]]
     sources_key = f"{dest_folder}/sources.json"

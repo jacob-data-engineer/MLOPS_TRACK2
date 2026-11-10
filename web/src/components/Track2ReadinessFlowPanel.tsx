@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
-  getTrack2PullControl,
   getTrack2SqlReadiness,
-  saveTrack2PullConfig,
   type Track2Readiness,
   type Track2ReadinessRole,
 } from "../lib/api";
@@ -93,13 +91,13 @@ const pretty = (hazard: string) =>
 type Link = { source: string; target: string; value: number };
 type Focus = { node?: string; link?: Link } | null;
 
-export function Track2ReadinessFlowPanel({ database, available, databaseLabel }: {
+export function Track2ReadinessFlowPanel({ database, available, databaseLabel, hazard, onHazardChange }: {
+  hazard: string;
+  onHazardChange: (value: string) => void;
   database: string;
   available: boolean;
   databaseLabel: string;
 }) {
-  const [hazard, setHazard] = useState("all");
-  const [settingsRead, setSettingsRead] = useState(false);
   const [flow, setFlow] = useState<Track2Readiness | null>(null);
   const [flowFor, setFlowFor] = useState("");
   const [busy, setBusy] = useState(false);
@@ -108,24 +106,6 @@ export function Track2ReadinessFlowPanel({ database, available, databaseLabel }:
   const [pinned, setPinned] = useState<Focus>(null);
   // A slow answer for a database no longer chosen must not land.
   const askId = useRef(0);
-
-  useEffect(() => {
-    getTrack2PullControl()
-      .then((status) => {
-        const saved = status.config.readiness_flow?.hazard;
-        if (saved) setHazard(saved);
-      })
-      .catch(() => undefined)
-      .finally(() => setSettingsRead(true));
-  }, []);
-
-  useEffect(() => {
-    if (!settingsRead) return;
-    const timer = window.setTimeout(() => {
-      void saveTrack2PullConfig({ readiness_flow: { hazard } }).catch(() => undefined);
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [settingsRead, hazard]);
 
   function read() {
     if (!database || !available) return;
@@ -182,7 +162,7 @@ export function Track2ReadinessFlowPanel({ database, available, databaseLabel }:
 
   return (
     <Card
-      title="Readiness flow"
+      title="Data exploration"
       caption="Where every judged frame stops before retraining, read live. Only human verdicts count: VLM-only and pre-filled answers stay out. Amber steps are where reviewers can recover frames."
     >
       {!available ? (
@@ -197,7 +177,7 @@ export function Track2ReadinessFlowPanel({ database, available, databaseLabel }:
                 key={key}
                 type="button"
                 aria-pressed={key === choice}
-                onClick={() => { setHazard(key); setFocus(null); setPinned(null); }}
+                onClick={() => { onHazardChange(key); setFocus(null); setPinned(null); }}
                 className={`rounded-full border px-3 py-1 text-xs ${key === choice
                   ? "border-ink bg-ink text-page" : "border-hairline bg-page text-ink"}`}
               >

@@ -1,19 +1,22 @@
+import { Track2SqlSettingsBar, type SqlPageSettings, type SqlSavedPreset } from "../components/Track2SqlSettingsBar";
+import { useCardOpen, ensureCardState } from "../lib/cardState";
 import {
-  AlertCircle, ChevronDown, ChevronRight, Copy, Database, Download, Loader2, Play, Table2,
+  AlertCircle, Copy, Database, Download, Loader2, Play,
 } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card } from "../components/Card";
 import { S3FolderField } from "../components/S3FolderField";
 import { Track2ReadinessFlowPanel } from "../components/Track2ReadinessFlowPanel";
 import {
   ApiError,
+  apiGet,
+  apiPost,
   getTrack2Buckets,
   getTrack2PullControl,
   getTrack2SqlClasses,
   getTrack2SqlDatabases,
   getTrack2SqlPreset,
   getTrack2SqlPreviews,
-  getTrack2SqlSchema,
   pullTrack2Sql,
   runTrack2Sql,
   saveTrack2PullConfig,
@@ -23,12 +26,10 @@ import {
   type Track2SqlFrameLabels,
   type Track2SqlPresetScope,
   type Track2SqlPullResult,
+  type Track2SqlPullProgress,
   type Track2SqlResult,
-  type Track2SqlTable,
 } from "../lib/api";
 
-/** Rows drawn in the table. The images list below it is never cut. */
-const ROWS_SHOWN = 500;
 /** Thumbnails per screenful; "Show more" asks for the next one. */
 const PREVIEW_PAGE = 60;
 
@@ -46,27 +47,24 @@ const SCOPE_LABEL: Record<Track2SqlPresetScope, string> = {
  * rule (every person in the frame answered by a human; VLM-only and
  * pre-filled answers left out) and runs it read-only.
  *
- * The SQL editor is still here, folded under "Advanced", for anything the
- * drop-downs do not cover. A chosen class fills it, so what is shown is
- * always exactly what "Pull these images" will copy.
+ * Generated SQL stays internal to frame selection and pulling.
  *
  * Every choice is saved like every other card's settings.
  */
 export function Track2SqlPage() {
+  const [explorationHazard, setExplorationHazard] = useState("all");
+  const [framesOpen, setFramesOpen] = useCardOpen("sql frames", true);
+  const [explorationOpen, setExplorationOpen] = useCardOpen("data exploration", true);
   const [dbs, setDbs] = useState<Track2SqlDatabase[]>([]);
   const [database, setDatabase] = useState("");
   const [buckets, setBuckets] = useState<string[]>([]);
-  const [bucket, setBucket] = useState("");
-  const [folder, setFolder] = useState("");
+  const bucket = "";
+  const folder = "";
   const [sql, setSql] = useState("");
-  const [tables, setTables] = useState<Track2SqlTable[] | null>(null);
-  const [openTable, setOpenTable] = useState("");
   const [result, setResult] = useState<Track2SqlResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const [schemaBusy, setSchemaBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [advanced, setAdvanced] = useState(false);
   // Starting or stopping the chosen database, and what the server said.
   const [power, setPower] = useState("");
   const [powerError, setPowerError] = useState("");
@@ -77,6 +75,9 @@ export function Track2SqlPage() {
   const [presetScope, setPresetScope] = useState<Track2SqlPresetScope>("resolved");
   // Thumbnails: signed links for the images shown so far.
   const [previews, setPreviews] = useState<{ uri: string; url: string }[]>([]);
+  const [framePage, setFramePage] = useState(1);
+  const [previewError, setPreviewError] = useState("");
+  const previewRequest = useRef(0);
   const [previewBusy, setPreviewBusy] = useState(false);
   // Draw each frame's labels over its thumbnail.
   const [showLabels, setShowLabels] = useState(true);
@@ -87,13 +88,15 @@ export function Track2SqlPage() {
   const [pullBucket, setPullBucket] = useState("track2-s3");
   const [pullFolder, setPullFolder] = useState("");
   const [trainPercent, setTrainPercent] = useState(80);
+  const [pullProgress, setPullProgress] = useState<Track2SqlPullProgress | null>(null);
   const [pulling, setPulling] = useState(false);
   const [pulled, setPulled] = useState<Track2SqlPullResult | null>(null);
   const [pullError, setPullError] = useState("");
   // The writer below must not run before the saved settings are read, or
   // it would save the empty defaults over them.
+  const [settingsRevision, setSettingsRevision] = useState(0);
+  const [initialPreset, setInitialPreset] = useState<SqlSavedPreset | null>(null);
   const [settingsRead, setSettingsRead] = useState(false);
-  const editor = useRef<HTMLTextAreaElement | null>(null);
   // Each run gets a number, so a slow answer to an earlier choice cannot
   // overwrite the answer to the latest one.
   const runId = useRef(0);
@@ -106,11 +109,10 @@ export function Track2SqlPage() {
       .then((res) => setBuckets(res.buckets.filter((b) => b.readable).map((b) => b.name)))
       .catch(() => undefined);
     getTrack2PullControl()
-      .then((status) => {
+      .then(async (status) => {
+        setExplorationHazard(status.config.readiness_flow?.hazard || "all");
         const saved = status.config.sql_explorer || {};
         if (saved.database) setDatabase(saved.database);
-        if (saved.bucket) setBucket(saved.bucket);
-        if (saved.folder) setFolder(saved.folder);
         if (saved.sql) setSql(saved.sql);
         if (saved.preset_class) setPresetClass(saved.preset_class);
         if (saved.preset_scope === "ready" || saved.preset_scope === "test"
@@ -120,8 +122,18 @@ export function Track2SqlPage() {
         if (typeof saved.train_percent === "number") setTrainPercent(saved.train_percent);
         if (typeof saved.show_labels === "boolean") setShowLabels(saved.show_labels);
         if (typeof saved.with_labels === "boolean") setWithLabels(saved.with_labels);
+        // Named EC2 files take precedence over the last auto-saved working state.
+        // Finish restoring them before enabling queries or auto-save.
+        const listed = await apiGet<{files: {name: string}[]}>("/track2/sql/settings");
+        const newest = listed.files[0];
+        if (newest) {
+          const preset = await apiPost<SqlSavedPreset>("/track2/sql/settings/load", { name: newest.name });
+          await ensureCardState();
+          loadPageSettings(preset.settings);
+          setInitialPreset(preset);
+        }
       })
-      .catch(() => undefined)
+      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not load the latest saved settings. Please use Load to retry."))
       .finally(() => setSettingsRead(true));
   }, []);
 
@@ -133,7 +145,7 @@ export function Track2SqlPage() {
   useEffect(() => {
     if (!settingsRead) return;
     const timer = window.setTimeout(() => {
-      void saveTrack2PullConfig({ sql_explorer: {
+      void saveTrack2PullConfig({ readiness_flow: { hazard: explorationHazard }, sql_explorer: {
         database, bucket, folder, sql,
         preset_class: presetClass, preset_scope: presetScope,
         pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
@@ -141,14 +153,8 @@ export function Track2SqlPage() {
       } }).catch(() => undefined);
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [settingsRead, database, bucket, folder, sql, presetClass, presetScope,
+  }, [settingsRead, explorationHazard, database, bucket, folder, sql, presetClass, presetScope,
       pullBucket, pullFolder, trainPercent, showLabels, withLabels]);
-
-  // A different database has different tables.
-  useEffect(() => {
-    setTables(null);
-    setOpenTable("");
-  }, [database]);
 
   // ...and different classes. Read live, so a new class shows up here
   // without a change to the app. Only once the database is running: a
@@ -212,7 +218,7 @@ export function Track2SqlPage() {
       return;
     }
     void showClass(pickedClass.name, scope);
-  }, [settingsRead, database, chosen?.available, pickedClass?.name, presetScope]);
+  }, [settingsRead, database, chosen?.available, pickedClass?.name, presetScope, settingsRevision]);
 
   async function showClass(name: string, scope: Track2SqlPresetScope) {
     const mine = ++runId.current;
@@ -231,27 +237,13 @@ export function Track2SqlPage() {
     }
   }
 
-  function loadTables() {
-    if (!database) return;
-    setSchemaBusy(true);
-    setError("");
-    getTrack2SqlSchema(database)
-      .then((res) => setTables(res.tables))
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not read the tables."))
-      .finally(() => setSchemaBusy(false));
-  }
-
-  function run() {
-    if (!database || !sql.trim() || busy) return;
-    setBusy(true);
-    void runQuery(sql, ++runId.current);
-  }
-
   async function runQuery(text: string, mine: number) {
     setError("");
     setCopied(false);
     setPulled(null);
     setPreviews([]);
+    setFramePage(1);
+    previewRequest.current += 1;
     try {
       const res = await runTrack2Sql(database, text, bucket, folder);
       if (mine !== runId.current) return;
@@ -266,58 +258,37 @@ export function Track2SqlPage() {
     }
   }
 
-  /** Signs the next screenful of thumbnails and adds it to the grid. */
+  /** Replace the gallery with one page; late requests cannot replace newer pages. */
   async function loadPreviews(uris: string[], from: number, mine = runId.current) {
+    const request = ++previewRequest.current;
     const page = uris.slice(from, from + PREVIEW_PAGE).filter((u) => u.startsWith("s3://"));
-    if (!page.length) return;
-    setPreviewBusy(true);
+    setFramePage(Math.floor(from / PREVIEW_PAGE) + 1);
+    setPreviews([]); setPreviewError(""); setPreviewBusy(true);
     try {
-      const res = await getTrack2SqlPreviews(page);
-      if (mine !== runId.current) return;
-      setPreviews((current) => (from === 0 ? res.previews : [...current, ...res.previews]));
+      const res = page.length ? await getTrack2SqlPreviews(page) : { previews: [] };
+      if (mine !== runId.current || request !== previewRequest.current) return;
+      setPreviews(res.previews);
     } catch {
-      // A grid that cannot load is not worth hiding the list for.
+      if (mine === runId.current && request === previewRequest.current)
+        setPreviewError("Could not load this page. Please retry.");
     } finally {
-      setPreviewBusy(false);
+      if (mine === runId.current && request === previewRequest.current) setPreviewBusy(false);
     }
-  }
-
-  function onEditorKey(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      run();
-    }
-  }
-
-  /** Puts text at the cursor, so clicking a column name writes it there. */
-  function insert(text: string) {
-    const box = editor.current;
-    if (!box) {
-      setSql((current) => current + text);
-      return;
-    }
-    const start = box.selectionStart ?? sql.length;
-    const end = box.selectionEnd ?? sql.length;
-    const next = sql.slice(0, start) + text + sql.slice(end);
-    setSql(next);
-    window.requestAnimationFrame(() => {
-      box.focus();
-      box.selectionStart = box.selectionEnd = start + text.length;
-    });
   }
 
   /** Runs the query again server-side and copies what it names, so the
    * folder records the exact query that chose its images. */
   function pullImages() {
     if (!database || !sql.trim() || pulling) return;
+    setPullProgress({ phase: "querying", completed: 0, total: 0 });
     setPulling(true);
     setPullError("");
     setPulled(null);
     pullTrack2Sql({ database, sql, bucket, folder,
                     destBucket: pullBucket, destFolder: pullFolder, trainPercent,
-                    withLabels })
-      .then(setPulled)
-      .catch((err) => setPullError(err instanceof ApiError ? err.detail : "The pull failed."))
+                    withLabels }, setPullProgress)
+      .then((summary) => { setPulled(summary); setPullProgress(p => p ? { ...p, phase: "complete" } : null); })
+      .catch((err) => { setPullError(err instanceof ApiError ? err.detail : "The pull connection failed. Check the destination before retrying."); setPullProgress(p => p ? { ...p, phase: "error" } : null); })
       .finally(() => setPulling(false));
   }
 
@@ -329,9 +300,60 @@ export function Track2SqlPage() {
       .catch(() => undefined);
   }
 
+  function loadPageSettings(next: SqlPageSettings) {
+    runId.current += 1;
+    setBusy(false); setResult(null); setPreviews([]); setPulled(null);
+    setError(""); setPullError(""); setSql("");
+    setDatabase(next.database); setPresetClass(next.preset_class); setPresetScope(next.preset_scope);
+    setPullBucket(next.pull_bucket); setPullFolder(next.pull_folder); setTrainPercent(next.train_percent);
+    setShowLabels(next.show_labels); setWithLabels(next.with_labels);
+    setExplorationHazard(next.exploration_hazard); setExplorationOpen(next.exploration_open); setFramesOpen(next.frames_open);
+    setSettingsRevision(v => v + 1);
+  }
+
   const selectClass = "mt-1 w-full rounded border border-black/15 bg-page px-2 py-1.5 text-sm text-ink";
   const labelsByUri = new Map(
     (result?.images ?? []).filter((i) => i.labels).map((i) => [i.uri, i.labels!]));
+  const totalPages = Math.max(1, Math.ceil((result?.images.length ?? 0) / PREVIEW_PAGE));
+  const firstPage = Math.max(1, Math.min(framePage - 4, totalPages - 9));
+  const pageNumbers = Array.from({ length: Math.min(10, totalPages) }, (_, i) => firstPage + i);
+  function renderFrameNavigation(position: "top" | "bottom") {
+    if (!result) return null;
+    return (
+                <div className="my-3 flex flex-wrap items-center gap-3">
+                  <nav aria-label={`Frame pages (${position})`} className="flex flex-wrap items-center gap-1">
+                    <button type="button" disabled={previewBusy || framePage <= 1}
+                      onClick={() => void loadPreviews(result.images.map(i => i.uri), (framePage - 2) * PREVIEW_PAGE)}
+                      className="rounded px-3 py-1 text-xs text-accent disabled:opacity-40">Previous</button>
+                    {pageNumbers.map(page => <button key={page} type="button"
+                      aria-label={`Page ${page}`} aria-current={framePage === page ? "page" : undefined}
+                      disabled={previewBusy}
+                      onClick={() => void loadPreviews(result.images.map(i => i.uri), (page - 1) * PREVIEW_PAGE)}
+                      className={`rounded px-2.5 py-1 text-xs disabled:opacity-40 ${framePage === page ? "bg-accent font-semibold text-white" : "text-accent hover:bg-black/5"}`}>
+                      {page}
+                    </button>)}
+                    <button type="button" disabled={previewBusy || framePage >= totalPages}
+                      onClick={() => void loadPreviews(result.images.map(i => i.uri), framePage * PREVIEW_PAGE)}
+                      className="rounded px-3 py-1 text-xs text-accent disabled:opacity-40">Next</button>
+                    <span className="ml-2 text-xs text-ink-muted">Page {framePage} of {totalPages}</span>
+                  </nav>
+                  {previewBusy && <span role="status" className="text-xs">Loading frames…</span>}
+                  {previewError && <span role="alert" className="text-xs text-critical">{previewError}
+                    <button type="button" className="ml-2 underline" onClick={() => void loadPreviews(result.images.map(i => i.uri), (framePage - 1) * PREVIEW_PAGE)}>Retry</button>
+                  </span>}
+                  <button
+                    type="button"
+                    onClick={copyImages}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-black/15 bg-page px-2.5 py-1 text-xs font-medium text-ink"
+                  >
+                    <Copy size={13} />
+                    Copy the list
+                  </button>
+                  {copied && <span className="text-xs text-ink-muted">Copied.</span>}
+                </div>
+    );
+  }
+
   const hasLabels = labelsByUri.size > 0;
   const incompleteCount = [...labelsByUri.values()].filter((l) => !l.complete).length;
 
@@ -347,6 +369,11 @@ export function Track2SqlPage() {
         pre-filled answers are left out. Read only: nothing here changes the database.
       </p>
 
+      <Track2SqlSettingsBar initialPreset={initialPreset} disabled={!settingsRead || pulling} onLoad={loadPageSettings}
+        settings={{ database, preset_class: presetClass, preset_scope: presetScope,
+          pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
+          show_labels: showLabels, with_labels: withLabels,
+          exploration_hazard: explorationHazard, exploration_open: explorationOpen, frames_open: framesOpen }} />
       <div className="flex flex-col gap-5">
         <Card title="Choose the frames" collapsible={false}>
           <div className="grid gap-3 md:grid-cols-3">
@@ -475,6 +502,7 @@ export function Track2SqlPage() {
         {result && (
           <Card
             title={`Frames (${result.images.length.toLocaleString()})`}
+            stateKey="sql frames"
             collapsible={false}
             caption={result.images.length
               ? `Showing ${previews.length.toLocaleString()} of ${result.images.length.toLocaleString()}. Click a frame to open it full size.`
@@ -509,6 +537,7 @@ export function Track2SqlPage() {
                     )}
                   </div>
                 )}
+                {renderFrameNavigation("top")}
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
                   {previews.map((p) => {
                     const labels = labelsByUri.get(p.uri);
@@ -524,27 +553,7 @@ export function Track2SqlPage() {
                     );
                   })}
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  {previews.length < result.images.length && (
-                    <button
-                      type="button"
-                      disabled={previewBusy}
-                      onClick={() => void loadPreviews(result.images.map((i) => i.uri), previews.length)}
-                      className="rounded-md border border-black/15 bg-page px-2.5 py-1 text-xs font-medium text-ink disabled:opacity-50"
-                    >
-                      {previewBusy ? "Loading..." : `Show ${Math.min(PREVIEW_PAGE, result.images.length - previews.length)} more`}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={copyImages}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-black/15 bg-page px-2.5 py-1 text-xs font-medium text-ink"
-                  >
-                    <Copy size={13} />
-                    Copy the list
-                  </button>
-                  {copied && <span className="text-xs text-ink-muted">Copied.</span>}
-                </div>
+                {renderFrameNavigation("bottom")}
 
                 {/* ---- pull them into a training folder ---- Here, under
                      what it acts on, so the answer appears where the button
@@ -636,6 +645,26 @@ export function Track2SqlPage() {
                       <span className="whitespace-pre-wrap">{pullError}</span>
                     </p>
                   )}
+                  {pullProgress && (
+                    <div className="mt-3 rounded border border-hairline p-3" aria-label="Frame pull progress">
+                      <div className="mb-2 flex justify-between text-xs" role="status">
+                        <span>{pullProgress.phase === "querying" ? "Reading frames and checking labels…"
+                          : pullProgress.phase === "finalizing" ? "Saving dataset metadata…"
+                          : pullProgress.phase === "error" ? "Pull interrupted"
+                          : pullProgress.phase === "complete" ? ((pulled?.failed ?? 0) > 0 ? "Finished with errors" : "Pull complete")
+                          : "Copying frames and labels…"}</span>
+                        <span>{pullProgress.completed.toLocaleString()} / {pullProgress.total.toLocaleString()} eligible frames</span>
+                      </div>
+                      <progress aria-label="Frame pull completion" max={100}
+                        value={pullProgress.phase === "querying" ? undefined : pullProgress.phase === "complete" ? 100
+                          : Math.min(99, Math.round(100 * pullProgress.completed / Math.max(1, pullProgress.total)))}
+                        className="h-3 w-full accent-accent" />
+                      <p className="mt-1 text-xs text-ink-muted">
+                        {pullProgress.copied ?? 0} copied · {pullProgress.skipped ?? 0} already present · {pullProgress.failed ?? 0} failed
+                        {(pullProgress.left_out_incomplete ?? 0) > 0 && ` · ${pullProgress.left_out_incomplete} incomplete frames excluded`}
+                      </p>
+                    </div>
+                  )}
                   {pulled && (
                     <div className="tabular mt-2 text-xs text-ink-secondary">
                       <p>
@@ -681,178 +710,14 @@ export function Track2SqlPage() {
         )}
 
         <Track2ReadinessFlowPanel
+          hazard={explorationHazard}
+          onHazardChange={setExplorationHazard}
           database={database}
           available={!!chosen?.available}
           databaseLabel={chosen?.label ?? ""}
         />
 
-        {/* ---- ADVANCED: write your own SQL ---- Folded away, because the
-             drop-downs are the normal way in; kept, for anything they do
-             not cover. A chosen class fills the editor. */}
-        <section className="rounded-sm border border-hairline bg-surface p-5">
-          <button
-            type="button"
-            onClick={() => setAdvanced((v) => !v)}
-            className="flex items-center gap-1.5 text-sm font-medium text-ink"
-          >
-            {advanced ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            Advanced: write your own SQL
-          </button>
-          {advanced && (
-            <div className="mt-4 flex flex-col gap-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="block text-xs text-ink-muted">
-                  Only images in bucket
-                  <select
-                    value={bucket}
-                    onChange={(e) => { setBucket(e.target.value); setFolder(""); }}
-                    className={selectClass}
-                  >
-                    <option value="">Any bucket</option>
-                    {buckets.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                </label>
-                {bucket ? (
-                  <S3FolderField
-                    label="Folder"
-                    hint="only images under this folder; blank for the whole bucket"
-                    value={folder}
-                    onChange={setFolder}
-                    bucket={bucket}
-                  />
-                ) : (
-                  <p className="self-end text-xs text-ink-muted">Pick a bucket to narrow the images to one of its folders.</p>
-                )}
-              </div>
 
-              <div className="grid gap-4 md:grid-cols-[16rem_1fr]">
-                <div className="max-h-96 overflow-y-auto rounded border border-hairline bg-page p-2 text-xs">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="font-medium text-ink">Tables</span>
-                    <button
-                      type="button"
-                      onClick={loadTables}
-                      disabled={!database || schemaBusy}
-                      className="rounded border border-black/15 px-2 py-0.5 text-ink disabled:opacity-50"
-                    >
-                      {schemaBusy ? "Reading..." : tables ? "Reload" : "Load tables"}
-                    </button>
-                  </div>
-                  {tables === null && !schemaBusy && (
-                    <p className="text-ink-muted">Not loaded yet.</p>
-                  )}
-                  {tables?.length === 0 && <p className="text-ink-muted">No tables this user can read.</p>}
-                  {tables?.map((table) => (
-                    <div key={table.name} className="mb-1">
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setOpenTable(openTable === table.name ? "" : table.name)}
-                          className="text-ink-muted"
-                          aria-label={openTable === table.name ? "Hide columns" : "Show columns"}
-                        >
-                          {openTable === table.name ? "▾" : "▸"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSql(`SELECT *\nFROM ${table.name}\nLIMIT 100`)}
-                          className="tabular truncate text-left text-ink hover:underline"
-                          title={`Start a query on ${table.name}`}
-                        >
-                          <Table2 size={12} className="mr-1 inline" />
-                          {table.name}
-                        </button>
-                      </div>
-                      {openTable === table.name && (
-                        <ul className="ml-5 mt-0.5">
-                          {table.columns.map((column) => (
-                            <li key={column.name}>
-                              <button
-                                type="button"
-                                onClick={() => insert(column.name)}
-                                className="tabular text-left text-ink-secondary hover:underline"
-                              >
-                                {column.name} <span className="text-ink-muted">{column.type}</span>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div>
-                  <textarea
-                    ref={editor}
-                    value={sql}
-                    onChange={(e) => setSql(e.target.value)}
-                    onKeyDown={onEditorKey}
-                    spellCheck={false}
-                    rows={12}
-                    placeholder={"SELECT image_key\nFROM some_table\nWHERE ...\nLIMIT 100"}
-                    className="tabular w-full rounded border border-black/15 bg-page px-3 py-2 font-mono text-sm text-ink"
-                  />
-                  <div className="mt-2 flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={run}
-                      disabled={busy || !database || !sql.trim()}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
-                    >
-                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-                      {busy ? "Running..." : "Run query"}
-                    </button>
-                    <span className="text-xs text-ink-muted">Ctrl+Enter runs it.</span>
-                    {result && (
-                      <span className="tabular text-xs text-ink-muted">
-                        {result.rows.length.toLocaleString()} row{result.rows.length === 1 ? "" : "s"}
-                        {result.truncated && " (cut short: the answer was too large -- add a LIMIT or select fewer columns)"}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {result && result.columns.length > 0 && (
-                <div>
-                  <p className="mb-1 text-xs text-ink-muted">
-                    {result.rows.length > ROWS_SHOWN
-                      ? `The first ${ROWS_SHOWN.toLocaleString()} of ${result.rows.length.toLocaleString()} rows.`
-                      : "Rows"}
-                  </p>
-                  <div className="max-h-[32rem] overflow-auto rounded border border-hairline">
-                    <table className="tabular min-w-full text-xs">
-                      <thead className="sticky top-0 bg-surface">
-                        <tr>
-                          {result.columns.map((column, i) => (
-                            <th key={`${column}-${i}`} className="border-b border-hairline px-2 py-1 text-left font-medium text-ink">
-                              {column}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.rows.slice(0, ROWS_SHOWN).map((row, r) => (
-                          <tr key={r} className="odd:bg-black/[0.02]">
-                            {row.map((cell, c) => (
-                              <td key={c} className="max-w-xs truncate border-b border-hairline/50 px-2 py-0.5 text-ink-secondary"
-                                  title={cellText(cell)}>
-                                {cellText(cell)}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </section>
       </div>
     </div>
   );
@@ -878,10 +743,4 @@ function LabelOverlay({ labels }: { labels: Track2SqlFrameLabels }) {
       ))}
     </svg>
   );
-}
-
-function cellText(value: unknown): string {
-  if (value === null || value === undefined) return "NULL";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
 }
