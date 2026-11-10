@@ -6,7 +6,8 @@ type Config = { enabled: boolean; every_days: number; at: string; from_date: str
 type Run = {
   id: string; status: string; started_at: string; finished_at?: string; error?: string;
   found?: number; eligible?: number; newly_eligible?: number; pending?: number; excluded?: number;
-  summary?: { copied: number; skipped: number; failed: number; with_label: number; errors?: string[] };
+  exclusion_reasons?: { count: number; reason: string }[];
+  summary?: { left_out_incomplete?: number; copied: number; skipped: number; failed: number; with_label: number; errors?: string[] };
   progress?: { completed: number; total: number; phase: string };
 };
 type Status = { config: Config; next_at: string | null; running: boolean; saved_at?: string; last_run?: Run; history: Run[] };
@@ -80,6 +81,12 @@ export function Track2SqlSensorPanel({ schedule, onChange }: { schedule: SqlSche
         <p>Last check: {stamp(last.started_at)} SGT · {last.status}</p>
         {last.found !== undefined && <p>{last.found} frames found · {last.eligible} eligible · {last.newly_eligible} newly seen eligible · {last.pending} needing images or labels · {last.excluded} excluded</p>}
         {last.summary && <p>{last.summary.copied} images copied · {last.summary.skipped} images already present · {last.summary.with_label} with labels · {last.summary.failed} failed</p>}
+        {last.exclusion_reasons?.map((item, index) => <p key={index} className="mt-1 text-ink-secondary">
+          Not copied: {item.count} image(s) - {item.reason}
+        </p>)}
+        {!last.exclusion_reasons && (last.summary?.left_out_incomplete ?? 0) > 0 && <p className="mt-1 text-ink-secondary">
+          Not copied: {last.summary?.left_out_incomplete} image(s) - no exportable label boxes. Add or recover object bounding boxes before exporting with labels.
+        </p>}
         {!!last.summary?.errors?.length && <p className="text-critical">{last.summary.errors.join("; ")}</p>}
         {status?.running && last.progress && <progress aria-label="Sensor pull progress" className="w-full" value={last.progress.completed} max={Math.max(1, last.progress.total)} />}
         {last.error && <p className="text-critical">{last.error}</p>}

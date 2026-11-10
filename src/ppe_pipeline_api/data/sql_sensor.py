@@ -178,6 +178,16 @@ def execute(config, run_id):
             raise ValueError("Query was truncated; narrow the saved selection before scheduling a pull.")
         eligible = [i for i in result["images"] if i.get("bucket") and
                     (not settings.with_labels or not i.get("labels") or i["labels"].get("boxes"))]
+        exclusion_reasons = []
+        no_bucket = sum(not i.get("bucket") for i in result["images"])
+        no_boxes = sum(bool(i.get("bucket")) and settings.with_labels and
+                       bool(i.get("labels")) and not i["labels"].get("boxes")
+                       for i in result["images"])
+        if no_boxes:
+            exclusion_reasons.append({"count": no_boxes, "reason": "No exportable label boxes are available. Add or recover object bounding boxes before exporting with labels."})
+        if no_bucket:
+            exclusion_reasons.append({"count": no_bucket, "reason": "The source image has no bucket address."})
+        outcome["exclusion_reasons"] = exclusion_reasons
         if len(eligible) > sx.PULL_LIMIT:
             raise ValueError("Too many eligible frames for one pull; narrow the saved selection.")
         destination = settings.pull_folder.strip().strip("/")

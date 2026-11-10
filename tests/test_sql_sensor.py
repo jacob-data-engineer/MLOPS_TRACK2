@@ -220,3 +220,15 @@ def test_real_pull_path_copies_once_then_discovers_new_image(env, monkeypatch):
     ss.execute(cfg, "test")
     assert ss.status()["last_run"]["summary"]["copied"] == 1
     assert ss.status()["last_run"]["newly_eligible"] == 1
+
+def test_excluded_frames_report_separate_reasons(env, monkeypatch):
+    cfg = config()
+    result = setup_execution(monkeypatch, cfg)
+    result["images"][0]["labels"]["boxes"] = []
+    result["images"].append({"uri": "unresolved.jpg", "bucket": ""})
+    ss.execute(cfg, "test")
+    last = ss.status()["last_run"]
+    assert last["excluded"] == 2
+    assert [r["count"] for r in last["exclusion_reasons"]] == [1, 1]
+    assert "label boxes" in last["exclusion_reasons"][0]["reason"]
+    assert "bucket" in last["exclusion_reasons"][1]["reason"]

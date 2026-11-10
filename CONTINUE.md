@@ -1,5 +1,16 @@
 # Continue here
 
+Removed obsolete filename-time option from Pull Control. UI offers S3
+upload time or current sweep week; old capture_time settings load as file_time
+in the editor and apply on save. Existing server schedules are not rewritten.
+Updated help and cut-off caption to match.
+
+
+Sensor last-check results now explain exclusions beside the counts. New runs
+record separate no-box and no-source-bucket counts; prior completed results
+show their stored left_out_incomplete count as missing exportable boxes.
+
+
 Manual pull button renamed. Streaming manual worker now starts when request
 is accepted, independent of browser progress consumption. Scheduled pulls
 already run from the EC2 ticker without a browser; checkbox wording now says

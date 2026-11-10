@@ -287,7 +287,7 @@ export function Track2PullControlPanel({
   const [weekDays, setWeekDays] = useState(7);
   // Which clock decides a file's week. capture_time reads the moment
   // written into the filename; file_time uses when it was uploaded.
-  const [weekBy, setWeekBy] = useState<"capture_time" | "file_time" | "scan">("file_time");
+  const [weekBy, setWeekBy] = useState<"file_time" | "scan">("file_time");
   const [autoWeeks, setAutoWeeks] = useState(true);
   const [backlog, setBacklog] = useState(true);
   // Value unread since the trigger moved to the pinned bar -- the loader
@@ -404,7 +404,7 @@ export function Track2PullControlPanel({
     // `week_3` in the bucket are the same string.
     if (c.week_prefix !== undefined) setWeekPrefix(c.week_prefix || "week_");
     if (c.week_length_days !== undefined) setWeekDays(c.week_length_days);
-    if (c.week_by) setWeekBy(c.week_by);
+    if (c.week_by) setWeekBy(c.week_by === "scan" ? "scan" : "file_time");
     if (c.auto_create_weeks !== undefined) setAutoWeeks(c.auto_create_weeks);
     if (c.first_week_takes_all !== undefined) setBacklog(c.first_week_takes_all);
     if (c.schedule_expression !== undefined) setSchedule(c.schedule_expression);
@@ -856,9 +856,8 @@ export function Track2PullControlPanel({
           </p>
           <p className="mt-2">
             <strong>Which week a file lands in</strong> is decided by the
-            timestamp in its own filename, not by when it was copied. So a
-            re-run never re-files anything, and a late upload still lands in the
-            week it was taken.
+            selected dating option: its S3 upload time, or the current week
+            for the entire sweep.
           </p>
           <p className="mt-2">
             <strong>Manually:</strong> pick the source folders, set the cut-off
@@ -1273,10 +1272,8 @@ export function Track2PullControlPanel({
             <p className="mb-1.5 text-xs font-medium text-ink">Date each file by</p>
             <div className="flex flex-col gap-1.5">
               {([
-                ["capture_time", "The time in the filename",
-                 "When the frame was taken -- ...__20260318T075125Z__... . A week then means a week of operations."],
                 ["file_time", "When it was uploaded to S3",
-                 "S3 LastModified. A week means a week of copying, which is rarely what anyone wants."],
+                 "Uses the S3 upload or last-modified time to assign each file to a week."],
                 ["scan", "All of it into the current week",
                  "One week for the whole sweep, whatever the files' dates. For a source that carries no dates at all."],
               ] as const).map(([value, label, why]) => (
@@ -1291,21 +1288,14 @@ export function Track2PullControlPanel({
                 </label>
               ))}
             </div>
-            {weekBy === "capture_time" && (
-              <p className="mt-1.5 text-xs text-ink-muted">
-                A file whose name carries no timestamp falls back to its upload
-                time rather than being dropped. The count of those is shown under
-                &quot;waiting to be pulled&quot;, so a source that does not use the
-                convention is visible.
-              </p>
-            )}
+
           </div>
 
           <label className="block">
             <span className="mb-1 block text-xs text-ink-muted">
               Cut-off date{" "}
               <span className="text-ink-muted/70">
-                (the date in the filename, not when it was uploaded)
+                {weekBy === "file_time" ? "(compared with the S3 upload time)" : "(start of the week schedule)"}
               </span>
             </span>
             <input
