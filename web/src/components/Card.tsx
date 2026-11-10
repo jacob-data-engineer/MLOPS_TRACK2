@@ -37,6 +37,7 @@ export function Card({
   children,
   collapsible = true,
   defaultOpen = true,
+  keepMounted = false,
   stateKey,
   summary,
   step,
@@ -57,6 +58,8 @@ export function Card({
   /** False for a card that renders its own Show/Hide. */
   collapsible?: boolean;
   defaultOpen?: boolean;
+  /** Preserve local form state while the card is hidden. */
+  keepMounted?: boolean;
   /** What this card's open/closed state is remembered as. Defaults to
    * the title. Pass one for a card with no title. */
   stateKey?: string;
@@ -135,7 +138,9 @@ export function Card({
       {caption && !shut && (
         <p className="mb-3 text-sm text-ink-secondary">{caption}</p>
       )}
-      {shut ? (
+      {keepMounted ? (
+        <div hidden={shut}><CardBoundary title={title}>{children}</CardBoundary></div>
+      ) : shut ? (
         // The summary renders when the card is SHUT, and it reads the
         // same state the body does -- so it can throw for the same
         // reasons. Outside the boundary it would take the page with it.

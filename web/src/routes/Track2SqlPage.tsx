@@ -54,6 +54,7 @@ const SCOPE_LABEL: Record<Track2SqlPresetScope, string> = {
  */
 export function Track2SqlPage() {
   const [explorationHazard, setExplorationHazard] = useState("all");
+  const [settingsOpen, setSettingsOpen] = useCardOpen("sql settings and schedule", true);
   const [framesOpen, setFramesOpen] = useCardOpen("sql frames", true);
   const [explorationOpen, setExplorationOpen] = useCardOpen("data exploration", true);
   const [dbs, setDbs] = useState<Track2SqlDatabase[]>([]);
@@ -314,6 +315,7 @@ export function Track2SqlPage() {
 
   function loadPageSettings(next: SqlPageSettings) {
     setSchedule(next.schedule ?? SQL_SCHEDULE_DEFAULTS);
+    setSettingsOpen(next.settings_open ?? true);
     runId.current += 1;
     setBusy(false); setResult(null); setPreviews([]); setPulled(null);
     setError(""); setPullError(""); setSql("");
@@ -371,6 +373,7 @@ export function Track2SqlPage() {
   const hasLabels = labelsByUri.size > 0;
   const incompleteCount = [...labelsByUri.values()].filter((l) => !l.complete).length;
   const pageSettings: SqlPageSettings = {
+    settings_open: settingsOpen,
     schedule,
     database, preset_class: presetClass, preset_scope: presetScope,
     pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
@@ -393,9 +396,11 @@ export function Track2SqlPage() {
         pre-filled answers are left out. Read only: nothing here changes the database.
       </p>
 
+      <Card title="Settings and schedule" stateKey="sql settings and schedule" keepMounted>
       <Track2SqlSettingsBar initialPreset={initialPreset} disabled={!settingsRead || pulling} onLoad={loadPageSettings}
         settings={pageSettings} />
       <Track2SqlSensorPanel schedule={schedule} onChange={setSchedule} />
+      </Card>
       </div>
       <div className="flex flex-col gap-5">
         <Card title="Choose the frames" collapsible={false}>

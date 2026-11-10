@@ -1,5 +1,10 @@
 # Continue here
 
+SQL settings and schedule now share one standard pinned Card with Hide/Show.
+Its body stays mounted while hidden to preserve unsaved form edits and the
+loaded filename. settings_open is included in named SQL presets.
+
+
 ## SQL pinned unified settings (10 November 2026)
 
 Schedule controls now live in the sticky top SQL header with the main settings

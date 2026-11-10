@@ -48,7 +48,7 @@ export function Track2SqlSensorPanel({ schedule, onChange }: { schedule: SqlSche
   const last = status?.last_run;
   const target = status?.config.settings;
   const button = "rounded border border-hairline px-3 py-1.5 text-xs disabled:opacity-40";
-  return <section className="rounded border border-hairline bg-surface p-3" aria-label="New frames sensor">
+  return <section className="space-y-1" aria-label="New frames sensor">
     <h4 className="text-sm font-semibold">New frames sensor</h4>
     <p className="mt-1 text-xs text-ink-muted">Checks the database for eligible frames and automatically pulls missing images and labels using the saved sensor settings. No training job is started.</p>
     <fieldset disabled={locked} className="mt-3 flex flex-wrap items-end gap-4 text-xs">

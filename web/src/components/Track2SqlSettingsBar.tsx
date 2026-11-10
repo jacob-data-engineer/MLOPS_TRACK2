@@ -5,6 +5,7 @@ export type SqlSchedule = { enabled: boolean; every_days: number; at: string; fr
 export const SQL_SCHEDULE_DEFAULTS: SqlSchedule = { enabled: false, every_days: 1, at: "00:00", from_date: "" };
 export type SqlPageSettings = {
   schedule?: SqlSchedule | null;
+  settings_open?: boolean;
   class_ids: Record<string, number>;
   export_mode: "detection" | "classification";
   detector_names: string[]; classifier_names: string[];
@@ -15,6 +16,7 @@ export type SqlPageSettings = {
 };
 export const SQL_DEFAULTS: SqlPageSettings = {
   schedule: SQL_SCHEDULE_DEFAULTS,
+  settings_open: true,
   class_ids: { helmet: 0, person: 2 },
   export_mode: "detection",
   detector_names: ["helmet", "gloves", "person", "working_boots", "man_cage", "safe_area"],
@@ -55,7 +57,7 @@ export function Track2SqlSettingsBar({ settings, onLoad, disabled, initialPreset
   const locked = disabled || busy;
   const saveName = name.trim() ? name.trim().replace(/_sql$/i, "") + "_sql" : loaded;
   const button = "rounded-md border border-black/15 px-2.5 py-1 text-xs font-medium text-ink-secondary disabled:opacity-40";
-  return <section className="mb-4 rounded border border-hairline bg-surface px-2.5 py-2" aria-label="Database query saved settings">
+  return <section className="mb-4 border-b border-hairline pb-4" aria-label="Database query saved settings">
     <div className="flex flex-wrap items-center gap-2">
       <button className={button} disabled={locked} onClick={() => { onLoad(SQL_DEFAULTS); setLoaded(""); setSavedAt(""); setName(""); setMessage(""); setError(""); }}>New</button>
       <label className="text-xs">Save as <input aria-label="SQL settings name" value={name} disabled={locked} onChange={e => setName(e.target.value)} placeholder="name (saved as name_sql)" className="ml-2 w-44 rounded-sm border border-black/15 bg-page px-2 py-1 text-xs" /></label>
