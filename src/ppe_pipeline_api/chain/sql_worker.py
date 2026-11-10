@@ -55,11 +55,7 @@ def tick():
             conn.commit()
         finally:
             conn.close()
-    from .. import data
-    data.tick_data_selection()
     config = pc.read_config()
-    if config.get("data_selection"):
-        return  # Its saved definition owns the refresh schedule.
     if not pc.pull_in_use(config):
         return
     mode = config.get("mode", "off")

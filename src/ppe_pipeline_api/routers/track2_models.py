@@ -633,12 +633,6 @@ def dataset_yaml_preview(payload: DatasetYamlInPlaceRequest,
     names -- and it should be read once before a GPU run depends on it.
     """
     try:
-        from .. import pull_control as pc
-        from ..data import soft_selection as soft
-        config=pc.read_config()
-        if soft.enabled(config):
-            config={**config,"dataset_assemble":{**config.get("dataset_assemble",{}),"label_classes":payload.classes}}
-            return soft.yaml_preview(config)
         splits = _splits_of(payload)
         retained = None
         if payload.include_pull:
@@ -683,18 +677,6 @@ def dataset_yaml_write(payload: DatasetYamlInPlaceRequest,
                        session=Depends(require_session)) -> dict:
     """Writes that yaml to S3. Copies no images."""
     try:
-        from .. import pull_control as pc
-        from ..data import soft_selection as soft
-        config=pc.read_config()
-        if soft.enabled(config):
-            config={**config,"dataset_assemble":{**config.get("dataset_assemble",{}),"label_classes":payload.classes}}
-            soft.sync(config)
-            built=soft.materialize(config)
-            folder=built["folder"]
-            out=dy.build_in_place(splits={"train":[(folder+"/images/train",folder+"/labels/train")],
-                "val":[(folder+"/images/val",folder+"/labels/val")]},classes=built["classes"],
-                bucket=built["bucket"],overwrite=True,label_scan=None)
-            return {**out,"written":True,"soft_snapshot_id":built["id"]}
         return dy.write_in_place(
             splits=_splits_of(payload),
             classes=payload.classes,

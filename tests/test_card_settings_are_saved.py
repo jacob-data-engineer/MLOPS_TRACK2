@@ -102,7 +102,6 @@ NO_SETTINGS_OF_THEIR_OWN = {
     "Track2BaseModelPicker.tsx": "a picker; the choice is saved by its parent",
     "Track2ModelPicker.tsx": "a picker; the choice is saved by its parent",
     # Act on the settings file rather than holding settings.
-    "Track2SqlSettingsBar.tsx": "named SQL page settings saved through /track2/sql/settings/save",
     "Track2PinnedBar.tsx": "loads/saves the settings file itself",
     # Saved through their own endpoints, not the pull-control config.
     "Track2ExportSettingsBar.tsx": "saveTrack2ExportSettings",

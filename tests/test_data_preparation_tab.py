@@ -19,11 +19,8 @@ DATA_CARDS = ("<Track2GoldenSetPanel", "<Track2PullControlPanel",
 
 
 def test_the_data_cards_are_on_the_data_tab_in_working_order():
-    assert "<Track2DataPreparationWorkflow" in DATA
-    workflow=(WEB / "components" / "Track2DataPreparationWorkflow.tsx").read_text(encoding="utf-8")
-    names=("Data sources", "Split and golden-set policy", "Class mapping", "Retention", "Selection preview and readiness", "Dataset versions")
-    positions=[workflow.index('title="'+name+'"') for name in names]
-    assert positions==sorted(positions)
+    at = [DATA.index(card) for card in ("<Track2DatasetAssemblePanel", *DATA_CARDS)]
+    assert at == sorted(at), "Assemble, Golden, Pull Control, weeks"
     assert "Track2PullQueuePanel" not in DATA
 
 

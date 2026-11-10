@@ -20,8 +20,8 @@ class SqlSchedule(BaseModel):
     @field_validator("at")
     @classmethod
     def valid_time(cls, value):
-        from .. import schedule_clock
-        if not schedule_clock._valid_time(value):
+        from ..chain import retrain_schedule
+        if not retrain_schedule._valid_time(value):
             raise ValueError("Use HH:MM in Singapore time.")
         return value
 

@@ -83,8 +83,6 @@ class PickedLists(BaseModel):
 
 
 class ConfigRequest(BaseModel):
-    soft_selection: dict | None = None
-    data_selection: dict | None = None
     # The Auto Training card's own selection -- the root it is pointed at
     # and the weeks ticked out of it. Stored server-side so it rides along
     # in the settings file: a selection that only exists in a browser tab
@@ -1115,37 +1113,3 @@ def fill_gaps(session=Depends(require_session)) -> dict:
         return pc.create_gap_folders()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not create them: {exc}")
-
-@router.get("/soft-selection")
-def soft_selection_status(session=Depends(require_session)):
-    from ..data import soft_selection as soft
-    try:
-        return soft.status(pc.read_config())
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-
-
-class SoftSelectionAction(BaseModel):
-    action: str
-
-
-@router.post("/soft-selection")
-def soft_selection_action(payload: SoftSelectionAction, session=Depends(require_session)):
-    from ..data import soft_selection as soft
-    config = pc.read_config()
-    try:
-        if payload.action == "enable":
-            sid = (config.get("soft_selection") or {}).get("id") or soft.create()
-            config = pc.write_config({"soft_selection": {"enabled": True, "id": sid}})
-        elif payload.action == "disable":
-            config = pc.write_config({"soft_selection": {**config.get("soft_selection", {}), "enabled": False}})
-        elif payload.action == "new":
-            sid = soft.create((config.get("soft_selection") or {}).get("id", ""))
-            config = pc.write_config({"soft_selection": {"enabled": True, "id": sid}})
-        elif payload.action == "refresh":
-            soft.sync(config)
-        else:
-            raise ValueError("Unknown selection action.")
-        return soft.status(config)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))

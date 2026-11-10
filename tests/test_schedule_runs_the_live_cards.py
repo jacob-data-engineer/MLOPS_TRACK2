@@ -42,10 +42,24 @@ LIVE = {
 
 # --- which cards are greyed ---------------------------------------------------------
 
-def test_data_preparation_has_one_definition_workflow():
-    code=PAGE.read_text(encoding="utf-8")
-    assert "Track2DataPreparationWorkflow" in code
-    assert "pickFoldersByHand" not in code
+def test_only_two_cards_are_switched_off_by_building_by_hand():
+    """If a third ever joins them, the chain's idea of "live" has to
+    change with it -- so this is pinned rather than assumed.
+
+    Two cards, but only ONE wrapper now: Pull Control dims its own body
+    instead, because the tick that turns it back on lives in its
+    heading and the wrapper would have made that tick inert."""
+    code = PAGE.read_text(encoding="utf-8")
+    assert code.count("off={pickFoldersByHand}") == 1
+    assert code.count("only={pickFoldersByHand}") == 2
+
+
+def test_the_golden_set_card_is_not_one_of_them():
+    """It is a folder somebody curated by hand. It has nothing to do
+    with week folders, so "Use these folders only" does not touch it."""
+    code = PAGE.read_text(encoding="utf-8")
+    at = code.index("<Track2GoldenSetPanel")
+    assert "SwitchedOff" not in code[max(0, at - 400):at]
 
 
 # --- the golden set is read now -------------------------------------------------------

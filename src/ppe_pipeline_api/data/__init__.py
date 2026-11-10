@@ -78,14 +78,3 @@ def __getattr__(name: str):
     if name in _CONSTANTS:
         return _value(__name__, *_CONSTANTS[name])
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-soft_selection_enabled = _through(__name__, "soft_selection", "enabled")
-soft_selection_preview = _through(__name__, "soft_selection", "preview_config")
-refresh_soft_selection = _through(__name__, "soft_selection", "sync")
-freeze_soft_selection = _through(__name__, "soft_selection", "materialize")
-soft_selection_training_config = _through(__name__, "soft_selection", "training_config")
-tick_sql_sensor = _through(__name__, "sql_sensor", "tick")
-__all__ += ['soft_selection_enabled', 'soft_selection_preview', 'refresh_soft_selection', 'freeze_soft_selection', 'soft_selection_training_config', 'tick_sql_sensor']
-
-tick_data_selection = _through(__name__, "selection_jobs", "tick")
-__all__ += ["tick_data_selection"]

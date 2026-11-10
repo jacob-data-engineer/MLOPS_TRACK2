@@ -636,8 +636,7 @@ export function Track2SqlPage() {
                       <span className="mt-1 block text-ink-secondary">
                         Frames marked &ldquo;helmet box missing&rdquo; are still exported when
                         any label box is available. Every available box is included; a frame
-                        does not need both classes. Test-grade means a person drew the boxes that exist,
-                        not that every helmet has one.
+                        does not need both classes.
                       </span>
                     )}
                   </p>

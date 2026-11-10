@@ -313,12 +313,6 @@ export function Track2PullControlPanel({
   const [wantedMode, setWantedMode] = useState<TriggerMode>("off");
   // Set by any edit, cleared by Apply -- so "what you are looking at is
   // not what is running" is visible rather than assumed.
-  const [softMode, setSoftMode] = useState(false);
-  useEffect(() => {
-    const update = () => { void getTrack2PullControl().then(s => setSoftMode(!!s.config.soft_selection?.enabled)).catch(() => undefined); };
-    update(); window.addEventListener("soft-selection-changed", update);
-    return () => window.removeEventListener("soft-selection-changed", update);
-  }, []);
   const [dirty, setDirty] = useState(false);
   /** True once the card has actually read the live config. Until then it
    * holds initial values, and saving those would overwrite the settings
@@ -397,7 +391,6 @@ export function Track2PullControlPanel({
     // `root` is the setting. A file saved before the two roots were
     // merged has only `training_root`, so it loads as the root rather
     // than as a blank field nobody would know to fill in.
-    setSoftMode(!!c.soft_selection?.enabled);
     if (c.root) setRoot(c.root);
     else if (c.training_root) setRoot(c.training_root);
     // WHICH saved file is loaded, so the clash warning below does not
@@ -1174,7 +1167,6 @@ export function Track2PullControlPanel({
               bucket={destBucket}
               allowCreate
             />
-            {softMode && <p className="mt-2 text-xs text-ink-secondary">Database selection is enabled. This legacy destination is not written; sources are indexed into this configuration’s SQL selection.</p>}
             {/* Said WHERE the folder was chosen, not as a banner at the
                 top of the card. The pull writes into this root,
                 retention prunes it and the chain trains from it -- so a
@@ -1185,7 +1177,7 @@ export function Track2PullControlPanel({
               const here = (root || "").replace(/^\/+|\/+$/g, "");
               const clash = claims.filter(
                 (c) => c.root && c.root === here && c.name !== loadedFile);
-              if (softMode || !here || !clash.length || rootClashOk === here) return null;
+              if (!here || !clash.length || rootClashOk === here) return null;
               return (
                 <div className="mt-1 rounded-md border border-critical/30 bg-critical-subtle px-2.5 py-2">
                   <p className="text-xs text-critical">
@@ -1916,7 +1908,7 @@ export function Track2PullControlPanel({
             )}
 
             {/* ------------------------------------ waiting to be pulled */}
-            {pending && !softMode && (
+            {pending && (
               <div className="mb-3 rounded-md border border-hairline bg-page p-2.5">
                 <p className="mb-1 text-xs font-medium text-ink">
                   Waiting to be pulled{" "}
