@@ -3738,6 +3738,7 @@ export interface Track2SqlImage {
 }
 
 export interface Track2SqlResult {
+  available_labels: { name: string; class_id: number; boxes: number; frames: number }[];
   columns: string[];
   rows: unknown[][];
   /** Cut short near the 6 MB a query function may return. */

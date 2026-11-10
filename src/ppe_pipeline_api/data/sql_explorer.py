@@ -206,6 +206,21 @@ def images_from(columns: list[str], rows: list[list], *, bucket: str = "",
     return found
 
 
+def label_catalog(images: list[dict]) -> list[dict]:
+    """Actual label classes present across all selected images, not a taxonomy."""
+    found = {}
+    for image in images:
+        in_frame = set()
+        for box in (image.get("labels") or {}).get("boxes", []):
+            name = box["name"]
+            entry = found.setdefault(name, {"name": name, "class_id": box["cls"], "boxes": 0, "frames": 0})
+            entry["boxes"] += 1
+            in_frame.add(name)
+        for name in in_frame:
+            found[name]["frames"] += 1
+    return sorted(found.values(), key=lambda entry: (entry["class_id"], entry["name"]))
+
+
 def run(key: str, sql: str, *, bucket: str = "", folder: str = "") -> dict:
     out = _invoke(key, {"action": "query", "sql": sql})
     images = images_from(out["columns"], out["rows"], bucket=bucket, folder=folder)
@@ -215,7 +230,8 @@ def run(key: str, sql: str, *, bucket: str = "", folder: str = "") -> dict:
         for image in images:
             image["labels"] = frame_labels(dict(zip(out["columns"], out["rows"][image["row"]])))
     return {"columns": out["columns"], "rows": out["rows"],
-            "truncated": out.get("truncated", False), "images": images}
+            "truncated": out.get("truncated", False), "images": images,
+            "available_labels": label_catalog(images)}
 
 
 # --- labels, from the boxes the review database holds (2026-10-29) ----------
@@ -835,10 +851,11 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
     if generated and class_ids is not None:
         import yaml
         from .sql_training_export import exists
-        if (set(class_ids) != {"helmet", "person"}
+        available = {entry["name"] for entry in label_catalog(images)}
+        if (not class_ids or not available.issubset(class_ids)
                 or any(type(v) is not int or not 0 <= v <= 99 for v in class_ids.values())
-                or len(set(class_ids.values())) != 2):
-            raise ValueError("Helmet and person need different whole-number class IDs from 0 to 99.")
+                or len(set(class_ids.values())) != len(class_ids)):
+            raise ValueError("Every available label needs a different whole-number class ID from 0 to 99.")
         yaml_key = f"{dest_folder}/data.yaml"
         if exists(dest_bucket, yaml_key):
             yaml_body = storage.s3.get_object(Bucket=dest_bucket, Key=yaml_key)["Body"].read().decode()

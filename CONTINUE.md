@@ -1,5 +1,16 @@
 # Continue here
 
+## Dynamic SQL label display (10 November 2026)
+
+The query response now includes `available_labels`, counted from the actual
+boxes across all selected images. Both the legend and class-ID editor use that
+catalog, including single-class and empty results; IDs are validated for the
+returned labels rather than requiring helmet/person. Changing the hazard clears
+old results immediately. No vehicle boxes are invented from a hazard name.
+Live source inspection found vehicle evidence at video moments whose coordinates
+cannot automatically be applied to the selected source frame. The catalog is
+explicitly scoped to available frame-aligned labels, not all nested video evidence.
+
 ## SQL export scope correction (10 November 2026)
 
 User clarified that only helmet/person numeric IDs were requested. The SQL

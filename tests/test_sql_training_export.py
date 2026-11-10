@@ -94,6 +94,28 @@ def test_original_pull_remaps_only_person_and_helmet(setup, monkeypatch):
     assert yaml.safe_load(s3.objects["dest", "simple/data.yaml"])["names"] == config["names"]
 
 
+def test_catalog_uses_all_frames_and_actual_label_names():
+    images = [{"labels": {"boxes": [{"name": "person", "cls": 2}]}} for _ in range(60)]
+    images.append({"labels": {"boxes": [{"name": "vehicle", "cls": 7}, {"name": "vehicle", "cls": 7}]}})
+    assert ex.sx.label_catalog(images) == [
+        {"name": "person", "class_id": 2, "boxes": 60, "frames": 60},
+        {"name": "vehicle", "class_id": 7, "boxes": 2, "frames": 1}]
+    assert ex.sx.label_catalog([]) == []
+    assert ex.sx.label_catalog([{"labels": {"boxes": []}}]) == []
+
+
+@pytest.mark.parametrize("name", ["vehicle", "cargo", "person"])
+def test_original_pull_accepts_actual_single_class_mapping(setup, monkeypatch, name):
+    _, s3 = setup
+    monkeypatch.setattr(ex.sx, "run", lambda *a, **kw: {"images": [{
+        "uri": "s3://src/frame.jpg", "bucket": "src", "key": "frame.jpg",
+        "labels": {"complete": True, "boxes": [{"name": name, "cls": 7, "x1": .1, "y1": .1, "x2": .5, "y2": .5}]}}]})
+    result = ex.sx.pull("db", "q", dest_bucket="dest", dest_folder="actual", class_ids={name: 0})
+    assert result["copied"] == 1
+    assert yaml.safe_load(s3.objects["dest", "actual/data.yaml"])["names"] == {0: name}
+    assert next(v.decode() for (b, k), v in s3.objects.items() if k.endswith(".txt")).startswith("0 ")
+
+
 def test_classifier_recovers_crops_from_missing_helmet_frames_and_respects_ids(setup):
     data, s3 = setup
     data["people"][0]["auto"] = None

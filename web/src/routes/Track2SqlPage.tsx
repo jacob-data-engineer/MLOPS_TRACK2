@@ -84,7 +84,10 @@ export function Track2SqlPage() {
   // Write labels (and a data.yaml) into the training folder with the frames.
   const [withLabels, setWithLabels] = useState(true);
   const [classIds, setClassIds] = useState(SQL_DEFAULTS.class_ids);
-  const invalidClassIds = classIds.helmet === classIds.person || Object.values(classIds).some(id => !Number.isInteger(id) || id < 0 || id > 99);
+  const availableLabels = result?.available_labels ?? [];
+  const selectedClassIds = Object.fromEntries(availableLabels.map(label => [label.name, classIds[label.name] ?? label.class_id]));
+  const selectedIds = Object.values(selectedClassIds);
+  const invalidClassIds = new Set(selectedIds).size !== selectedIds.length || selectedIds.some(id => !Number.isInteger(id) || id < 0 || id > 99);
   // Where a pull copies to. Saved with the rest, so the next pull of the
   // same kind lands in the same place.
   const [pullBucket, setPullBucket] = useState("track2-s3");
@@ -224,6 +227,7 @@ export function Track2SqlPage() {
 
   async function showClass(name: string, scope: Track2SqlPresetScope) {
     const mine = ++runId.current;
+    setResult(null); setPreviews([]); setPulled(null); setPullProgress(null);
     setBusy(true);
     setError("");
     try {
@@ -288,7 +292,7 @@ export function Track2SqlPage() {
     setPulled(null);
     pullTrack2Sql({ database, sql, bucket, folder,
                     destBucket: pullBucket, destFolder: pullFolder, trainPercent,
-                    withLabels, classIds }, setPullProgress)
+                    withLabels, classIds: availableLabels.length ? selectedClassIds : undefined }, setPullProgress)
       .then((summary) => { setPulled(summary); setPullProgress(p => p ? { ...p, phase: "complete" } : null); })
       .catch((err) => { setPullError(err instanceof ApiError ? err.detail : "The pull connection failed. Check the destination before retrying."); setPullProgress(p => p ? { ...p, phase: "error" } : null); })
       .finally(() => setPulling(false));
@@ -377,7 +381,7 @@ export function Track2SqlPage() {
           pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
           show_labels: showLabels, with_labels: withLabels,
           exploration_hazard: explorationHazard, exploration_open: explorationOpen, frames_open: framesOpen,
-          class_ids: classIds, export_mode: "detection", detector_names: SQL_DEFAULTS.detector_names, classifier_names: SQL_DEFAULTS.classifier_names }} />
+          class_ids: { ...classIds, ...selectedClassIds }, export_mode: "detection", detector_names: SQL_DEFAULTS.detector_names, classifier_names: SQL_DEFAULTS.classifier_names }} />
       <div className="flex flex-col gap-5">
         <Card title="Choose the frames" collapsible={false}>
           <div className="grid gap-3 md:grid-cols-3">
@@ -525,12 +529,12 @@ export function Track2SqlPage() {
                     </label>
                     {showLabels && (
                       <span className="flex items-center gap-3 text-ink-muted">
-                        <span className="flex items-center gap-1">
-                          <i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: BOX_COLOUR[2] }} />person
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: BOX_COLOUR[0] }} />helmet
-                        </span>
+                        {availableLabels.map(label => <span key={label.name} className="flex items-center gap-1"
+                          title={`${label.boxes.toLocaleString()} boxes in ${label.frames.toLocaleString()} selected frames`}>
+                          <i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: boxColour(label.name) }} />
+                          {label.name} ({label.boxes.toLocaleString()})
+                        </span>)}
+                        {availableLabels.length === 0 && <span>No box labels available in these frames.</span>}
                         {incompleteCount > 0 && (
                           <span className="text-critical">
                             {incompleteCount.toLocaleString()} frame(s) marked: a helmet box is missing
@@ -625,22 +629,24 @@ export function Track2SqlPage() {
                       Include labels
                       <span className="block text-ink-muted">
                         {hasLabels
-                          ? "A YOLO label per frame from the reviewed boxes (person, and helmet where worn), plus a data.yaml naming the classes. Frames with a helmet box missing are left out, so the helmet is never taught as background. The boxes cover only the people the review app judged: anyone else in the frame is unlabelled -- check the overlay, and complete those frames before training on them."
+                          ? "Exports the available frame-aligned boxes shown above, plus data.yaml. Missing required boxes can exclude a frame. Check the overlay for unlabelled objects before training."
                           : "Copies the label that sits beside each image at the source, where there is one."}
                       </span>
                     </span>
                   </label>
                   {withLabels && <fieldset disabled={pulling} className="mt-3 rounded border border-hairline p-3">
-                    <legend className="px-1 text-sm font-medium">Class IDs</legend>
+                    <legend className="px-1 text-sm font-medium">Available labels and class IDs</legend>
                     <div className="flex flex-wrap gap-6">
-                      {["helmet", "person"].map(name => <label key={name} className="flex items-center gap-2 text-xs">
+                      {availableLabels.map(({name}) => <label key={name} className="flex items-center gap-2 text-xs">
                         {name}<input aria-label={`${name} class ID`} type="number" min={0} max={99}
-                          value={classIds[name]} onChange={e => setClassIds(previous => ({...previous, [name]: Number(e.target.value)}))}
+                          value={selectedClassIds[name]} onChange={e => setClassIds(previous => ({...previous, [name]: Number(e.target.value)}))}
                           className="w-20 rounded border border-hairline bg-page px-2 py-1" />
                       </label>)}
                     </div>
+                    {availableLabels.length === 0 && <p className="text-xs text-ink-muted">No box labels are available to map.</p>}
+                    <p className="mt-2 text-xs text-ink-muted">Labels come from all selected frames, not just this page. Hazard names and detections from other video moments are not frame labels.</p>
                     <p className="mt-2 text-xs text-ink-muted">These numbers are used in the label files and data.yaml. IDs must be different. Gaps are reserved as unused IDs in data.yaml.</p>
-                    {invalidClassIds && <p role="alert" className="mt-1 text-xs text-critical">Use two different whole numbers from 0 to 99.</p>}
+                    {invalidClassIds && <p role="alert" className="mt-1 text-xs text-critical">Use a different whole number from 0 to 99 for each available label.</p>}
                   </fieldset>}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
@@ -739,9 +745,12 @@ export function Track2SqlPage() {
   );
 }
 
-/** person blue, helmet green -- the report's own colours for human boxes
- * and ready frames. */
-const BOX_COLOUR: Record<number, string> = { 0: "#0c8f3c", 2: "#2a78d6" };
+/** Stable per-label colours shared by the legend and overlays. */
+function boxColour(name: string): string {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return `hsl(${hash % 360} 75% 43%)`;
+}
 
 /** A frame's boxes drawn over its thumbnail. The SVG is the frame's own
  * size and letterboxed the same way as the image (`meet` / object-contain),
@@ -754,7 +763,7 @@ function LabelOverlay({ labels }: { labels: Track2SqlFrameLabels }) {
          className="pointer-events-none absolute inset-0 h-full w-full">
       {labels.boxes.map((b, i) => (
         <rect key={i} x={b.x1 * w} y={b.y1 * h} width={(b.x2 - b.x1) * w} height={(b.y2 - b.y1) * h}
-              fill="none" stroke={BOX_COLOUR[b.cls] ?? "#d48a00"} strokeWidth={2}
+              fill="none" stroke={boxColour(b.name)} strokeWidth={2}
               vectorEffect="non-scaling-stroke" />
       ))}
     </svg>
