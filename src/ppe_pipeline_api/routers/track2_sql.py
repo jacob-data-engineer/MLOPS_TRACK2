@@ -70,6 +70,7 @@ class QueryRequest(BaseModel):
 
 
 class PullRequest(QueryRequest):
+    class_ids: dict[str, int] | None = None
     export_mode: Literal["detection", "classification"] | None = None
     class_names: list[str] | None = None
     # Where the images go, as images/{train,val} + labels/{train,val}.
@@ -91,7 +92,7 @@ def run_pull(payload, progress=None):
                                          mode=payload.export_mode, names=payload.class_names)
     if sql_training_export.exists(payload.dest_bucket, payload.dest_folder.strip().strip("/") + "/export-contract.json"):
         raise ValueError("This destination is a labelled training export. Keep labels enabled or choose another folder.")
-    return sx.pull(payload.database, payload.sql, **options, with_labels=payload.with_labels)
+    return sx.pull(payload.database, payload.sql, **options, with_labels=payload.with_labels, class_ids=payload.class_ids)
 
 
 class PresetRequest(BaseModel):

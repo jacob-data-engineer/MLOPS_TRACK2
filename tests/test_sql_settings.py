@@ -15,7 +15,7 @@ def test_round_trip_all_page_controls_and_suffix(settings_dir):
         train_percent=67, show_labels=False, with_labels=False,
         exploration_hazard='worker_on_edge', exploration_open=False, frames_open=False,
         export_mode='classification', detector_names=['person', 'helmet'],
-        classifier_names=['no_helmet', 'helmet_worn'])
+        classifier_names=['no_helmet', 'helmet_worn'], class_ids={'helmet': 1, 'person': 0})
     saved = ss.save('review', values)
     assert saved['name'] == 'review_sql'
     assert json.loads((settings_dir/'sql'/'review_sql.json').read_text())['settings'] == values.model_dump()

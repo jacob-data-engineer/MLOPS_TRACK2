@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "../lib/api";
 
 export type SqlPageSettings = {
+  class_ids: Record<string, number>;
   export_mode: "detection" | "classification";
   detector_names: string[]; classifier_names: string[];
   database: string; preset_class: string; preset_scope: "resolved" | "ready" | "test";
@@ -10,6 +11,7 @@ export type SqlPageSettings = {
   exploration_hazard: string; exploration_open: boolean; frames_open: boolean;
 };
 export const SQL_DEFAULTS: SqlPageSettings = {
+  class_ids: { helmet: 0, person: 2 },
   export_mode: "detection",
   detector_names: ["helmet", "gloves", "person", "working_boots", "man_cage", "safe_area"],
   classifier_names: ["helmet_worn", "no_helmet"],

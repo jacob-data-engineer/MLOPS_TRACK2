@@ -12,6 +12,7 @@ from .. import pull_control
 
 
 class SqlSettings(BaseModel):
+    class_ids: dict[str, int] = Field(default_factory=lambda: {"helmet": 0, "person": 2})
     export_mode: Literal["detection", "classification"] = "detection"
     detector_names: list[str] = Field(default_factory=lambda: ["helmet", "gloves", "person", "working_boots", "man_cage", "safe_area"])
     classifier_names: list[str] = Field(default_factory=lambda: ["helmet_worn", "no_helmet"])

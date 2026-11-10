@@ -75,6 +75,25 @@ def test_mapping_changes_labels_and_yaml_together_and_retry_skips(setup):
     assert ("dest", "new/.export-lock") not in s3.objects
 
 
+def test_original_pull_remaps_only_person_and_helmet(setup, monkeypatch):
+    data, s3 = setup
+    labels = ex.sx.frame_labels(data)
+    monkeypatch.setattr(ex.sx, "run", lambda *a, **kw: {"images": [
+        {"uri": "s3://src/frame.jpg", "bucket": "src", "key": "frame.jpg", "labels": labels}]})
+    def pull(ids):
+        return ex.sx.pull("db", "q", dest_bucket="dest", dest_folder="simple", class_ids=ids)
+    result = pull({"helmet": 1, "person": 0})
+    assert result["copied"] == 1
+    config = yaml.safe_load(s3.objects["dest", "simple/data.yaml"])
+    assert config["names"] == {0: "person", 1: "helmet"}
+    text = next(v.decode() for (b, k), v in s3.objects.items() if k.endswith(".txt"))
+    assert [line.split()[0] for line in text.splitlines()] == ["0", "1", "0"]
+    assert pull({"helmet": 1, "person": 0})["skipped"] == 1
+    with pytest.raises(ValueError, match="different class IDs"):
+        pull({"helmet": 0, "person": 1})
+    assert yaml.safe_load(s3.objects["dest", "simple/data.yaml"])["names"] == config["names"]
+
+
 def test_classifier_recovers_crops_from_missing_helmet_frames_and_respects_ids(setup):
     data, s3 = setup
     data["people"][0]["auto"] = None

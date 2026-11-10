@@ -777,7 +777,7 @@ def _exists(bucket: str, key: str) -> bool:
 
 def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
          dest_bucket: str, dest_folder: str, train_percent: int = 100,
-         with_labels: bool = True, progress=None) -> dict:
+         with_labels: bool = True, progress=None, class_ids=None) -> dict:
     """Run the query, then copy every image it names into
     `dest_bucket/dest_folder` in the layout a training run reads:
 
@@ -831,6 +831,32 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
             kept.append(image)
         images = kept
     generated = with_labels and any(i.get("labels") for i in images)
+    yaml_body = data_yaml_text()
+    if generated and class_ids is not None:
+        import yaml
+        from .sql_training_export import exists
+        if (set(class_ids) != {"helmet", "person"}
+                or any(type(v) is not int or not 0 <= v <= 99 for v in class_ids.values())
+                or len(set(class_ids.values())) != 2):
+            raise ValueError("Helmet and person need different whole-number class IDs from 0 to 99.")
+        yaml_key = f"{dest_folder}/data.yaml"
+        if exists(dest_bucket, yaml_key):
+            yaml_body = storage.s3.get_object(Bucket=dest_bucket, Key=yaml_key)["Body"].read().decode()
+            names = yaml.safe_load(yaml_body).get("names", {})
+            names = dict(enumerate(names)) if isinstance(names, list) else {int(k): v for k, v in names.items()}
+            if any(names.get(cid) != name for name, cid in class_ids.items()):
+                raise ValueError("This folder uses different class IDs. Choose a new folder for the changed mapping.")
+        else:
+            existing = storage.s3.list_objects_v2(Bucket=dest_bucket, Prefix=dest_folder + "/labels/", MaxKeys=1)
+            if existing.get("Contents"):
+                raise ValueError("Existing labels have no data.yaml to verify their class IDs. Choose a new folder.")
+            names = {i: f"unused_{i}" for i in range(max(class_ids.values()) + 1)}
+            names.update({cid: name for name, cid in class_ids.items()})
+            yaml_body = yaml.safe_dump({"path": ".", "train": "images/train", "val": "images/val", "names": names}, sort_keys=False)
+        for image in images:
+            if image.get("labels"):
+                image["labels"] = {**image["labels"], "boxes": [
+                    {**b, "cls": class_ids[b["name"]]} for b in image["labels"]["boxes"]]}
 
     plan, taken = [], set()
     for image in images:
@@ -930,11 +956,12 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
                           ContentType="application/json")
     if generated:
         storage.s3.put_object(Bucket=dest_bucket, Key=f"{dest_folder}/data.yaml",
-                              Body=data_yaml_text().encode(), ContentType="text/yaml")
+                              Body=yaml_body.encode(), ContentType="text/yaml")
     storage.s3.put_object(
         Bucket=dest_bucket, Key=f"{dest_folder}/query.json",
         Body=json.dumps({"database": key, "sql": sql, "bucket": bucket, "folder": folder,
                          "train_percent": train_percent, "with_labels": with_labels,
+                         "class_ids": class_ids,
                          "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
                          "summary": summary}, indent=1).encode(),
         ContentType="application/json")

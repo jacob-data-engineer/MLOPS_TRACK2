@@ -1,5 +1,17 @@
 # Continue here
 
+## SQL export scope correction (10 November 2026)
+
+User clarified that only helmet/person numeric IDs were requested. The SQL
+page now shows just those two inputs, with no export-format selector, crop
+mode, six-class preset or extra class editors. It uses the original `sx.pull`
+frame workflow. `class_ids` is saved in SQL presets and remaps generated
+labels and YAML together. Existing destination YAML is preserved when its
+helmet/person IDs match; a mismatch requires a different folder. Gaps in new
+YAML mappings use unused-ID placeholders so YOLO indices remain valid.
+The previous expanded export API remains for compatibility, but the SQL page
+does not invoke it. Targeted checks: 96 passed.
+
 ## SQL training export (10 November 2026)
 
 Deployed to development port 8090 as `20261110-055122`. Targeted tests: 95

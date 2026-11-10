@@ -4067,6 +4067,7 @@ export type Track2SqlPullProgress = {
 };
 
 export async function pullTrack2Sql(params: {
+  classIds?: Record<string, number>;
   exportMode?: "detection" | "classification"; classNames?: string[];
   database: string; sql: string; bucket: string; folder: string;
   destBucket: string; destFolder: string; trainPercent: number;
@@ -4079,6 +4080,7 @@ export async function pullTrack2Sql(params: {
     train_percent: params.trainPercent,
     with_labels: params.withLabels,
     export_mode: params.exportMode, class_names: params.classNames,
+    class_ids: params.classIds,
   };
   if (!onProgress) return apiPost("/track2/sql/pull", payload);
   const headers = new Headers({ "Content-Type": "application/json" });
