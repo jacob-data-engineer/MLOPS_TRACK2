@@ -13,7 +13,9 @@ def test_round_trip_all_page_controls_and_suffix(settings_dir):
     values = ss.SqlSettings(database='jpui-preview', preset_class='worker_on_edge',
         preset_scope='resolved', pull_bucket='example', pull_folder='training/set1',
         train_percent=67, show_labels=False, with_labels=False,
-        exploration_hazard='worker_on_edge', exploration_open=False)
+        exploration_hazard='worker_on_edge', exploration_open=False, frames_open=False,
+        export_mode='classification', detector_names=['person', 'helmet'],
+        classifier_names=['no_helmet', 'helmet_worn'])
     saved = ss.save('review', values)
     assert saved['name'] == 'review_sql'
     assert json.loads((settings_dir/'sql'/'review_sql.json').read_text())['settings'] == values.model_dump()

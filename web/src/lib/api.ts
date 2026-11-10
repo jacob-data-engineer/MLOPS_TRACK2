@@ -4039,6 +4039,8 @@ export function getTrack2SqlPreset(
 /** What a pull copied. Nothing is overwritten: names already at the
  * destination are `skipped`, so a pull can be repeated. */
 export interface Track2SqlPullResult {
+  export_mode?: "detection" | "classification";
+  excluded_reasons?: Record<string, number>;
   bucket: string;
   folder: string;
   found: number;
@@ -4065,6 +4067,7 @@ export type Track2SqlPullProgress = {
 };
 
 export async function pullTrack2Sql(params: {
+  exportMode?: "detection" | "classification"; classNames?: string[];
   database: string; sql: string; bucket: string; folder: string;
   destBucket: string; destFolder: string; trainPercent: number;
   withLabels: boolean;
@@ -4075,6 +4078,7 @@ export async function pullTrack2Sql(params: {
     dest_bucket: params.destBucket, dest_folder: params.destFolder,
     train_percent: params.trainPercent,
     with_labels: params.withLabels,
+    export_mode: params.exportMode, class_names: params.classNames,
   };
   if (!onProgress) return apiPost("/track2/sql/pull", payload);
   const headers = new Headers({ "Content-Type": "application/json" });

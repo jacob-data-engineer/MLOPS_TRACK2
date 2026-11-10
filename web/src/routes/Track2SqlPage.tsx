@@ -1,4 +1,4 @@
-import { Track2SqlSettingsBar, type SqlPageSettings, type SqlSavedPreset } from "../components/Track2SqlSettingsBar";
+import { Track2SqlSettingsBar, SQL_DEFAULTS, type SqlPageSettings, type SqlSavedPreset } from "../components/Track2SqlSettingsBar";
 import { useCardOpen, ensureCardState } from "../lib/cardState";
 import {
   AlertCircle, Copy, Database, Download, Loader2, Play,
@@ -83,6 +83,17 @@ export function Track2SqlPage() {
   const [showLabels, setShowLabels] = useState(true);
   // Write labels (and a data.yaml) into the training folder with the frames.
   const [withLabels, setWithLabels] = useState(true);
+  const [exportMode, setExportMode] = useState<"detection" | "classification">("detection");
+  const [detectorNames, setDetectorNames] = useState(SQL_DEFAULTS.detector_names);
+  const [classifierNames, setClassifierNames] = useState(SQL_DEFAULTS.classifier_names);
+  const exportNames = exportMode === "classification" ? classifierNames : detectorNames;
+  function changeClassId(name: string, target: number) {
+    if (!Number.isInteger(target) || target < 0 || target >= exportNames.length) return;
+    const next = [...exportNames];
+    const old = next.indexOf(name);
+    [next[old], next[target]] = [next[target], next[old]];
+    (exportMode === "classification" ? setClassifierNames : setDetectorNames)(next);
+  }
   // Where a pull copies to. Saved with the rest, so the next pull of the
   // same kind lands in the same place.
   const [pullBucket, setPullBucket] = useState("track2-s3");
@@ -286,7 +297,7 @@ export function Track2SqlPage() {
     setPulled(null);
     pullTrack2Sql({ database, sql, bucket, folder,
                     destBucket: pullBucket, destFolder: pullFolder, trainPercent,
-                    withLabels }, setPullProgress)
+                    withLabels, exportMode, classNames: exportNames }, setPullProgress)
       .then((summary) => { setPulled(summary); setPullProgress(p => p ? { ...p, phase: "complete" } : null); })
       .catch((err) => { setPullError(err instanceof ApiError ? err.detail : "The pull connection failed. Check the destination before retrying."); setPullProgress(p => p ? { ...p, phase: "error" } : null); })
       .finally(() => setPulling(false));
@@ -307,6 +318,9 @@ export function Track2SqlPage() {
     setDatabase(next.database); setPresetClass(next.preset_class); setPresetScope(next.preset_scope);
     setPullBucket(next.pull_bucket); setPullFolder(next.pull_folder); setTrainPercent(next.train_percent);
     setShowLabels(next.show_labels); setWithLabels(next.with_labels);
+    setExportMode(next.export_mode ?? "detection");
+    setDetectorNames(next.detector_names ?? SQL_DEFAULTS.detector_names);
+    setClassifierNames(next.classifier_names ?? SQL_DEFAULTS.classifier_names);
     setExplorationHazard(next.exploration_hazard); setExplorationOpen(next.exploration_open); setFramesOpen(next.frames_open);
     setSettingsRevision(v => v + 1);
   }
@@ -373,7 +387,8 @@ export function Track2SqlPage() {
         settings={{ database, preset_class: presetClass, preset_scope: presetScope,
           pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
           show_labels: showLabels, with_labels: withLabels,
-          exploration_hazard: explorationHazard, exploration_open: explorationOpen, frames_open: framesOpen }} />
+          exploration_hazard: explorationHazard, exploration_open: explorationOpen, frames_open: framesOpen,
+          export_mode: exportMode, detector_names: detectorNames, classifier_names: classifierNames }} />
       <div className="flex flex-col gap-5">
         <Card title="Choose the frames" collapsible={false}>
           <div className="grid gap-3 md:grid-cols-3">
@@ -503,7 +518,6 @@ export function Track2SqlPage() {
           <Card
             title={`Frames (${result.images.length.toLocaleString()})`}
             stateKey="sql frames"
-            collapsible={false}
             caption={result.images.length
               ? `Showing ${previews.length.toLocaleString()} of ${result.images.length.toLocaleString()}. Click a frame to open it full size.`
               : undefined}
@@ -561,11 +575,9 @@ export function Track2SqlPage() {
                 <div className="mt-4 rounded border border-hairline bg-page p-3">
                   <p className="mb-2 text-sm font-medium text-ink">Pull these frames into a training folder</p>
                   <p className="mb-3 text-xs text-ink-secondary">
-                    Copies each frame to <span className="tabular">images/train</span> or{" "}
-                    <span className="tabular">images/val</span>, and its label to{" "}
-                    <span className="tabular">labels/</span> when one sits beside it at the source.
-                    Copies only &mdash; nothing at the source is changed, and a name already in the
-                    folder is skipped. Point Assemble on Data Preparation at the folder to train on it.
+                    {withLabels && exportMode === "classification"
+                      ? "Creates person crops in train/ and val/ class folders for a separate classification trainer. Source images and reviews stay unchanged."
+                      : "Copies full frames into images/train or images/val, with labels when enabled. Point Assemble on Data Preparation at the detector dataset folder to train on it."}
                   </p>
                   <div className="grid gap-3 md:grid-cols-[14rem_1fr_9rem]">
                     <label className="block text-xs text-ink-muted">
@@ -581,6 +593,9 @@ export function Track2SqlPage() {
                       </select>
                     </label>
                     <S3FolderField
+                      // Reload the saved destination even if the user only browsed
+                      // elsewhere without changing the selected folder.
+                      key={`${settingsRevision}:${pullBucket}`}
                       label="Folder"
                       hint="new or existing; images/ and labels/ go inside it"
                       value={pullFolder}
@@ -605,7 +620,7 @@ export function Track2SqlPage() {
                     again never moves one from val into train &mdash; which also means the split is
                     approximate on a small set (80% of 72 frames came out 54 / 18). Keep your test
                     set out of this folder.
-                    {hasLabels && incompleteCount > 0 && withLabels && (
+                    {hasLabels && incompleteCount > 0 && withLabels && exportMode === "detection" && (
                       <span className="mt-1 block text-ink-secondary">
                         With labels included, the {incompleteCount.toLocaleString()} frame
                         {incompleteCount === 1 ? "" : "s"} marked &ldquo;helmet box missing&rdquo;
@@ -621,21 +636,48 @@ export function Track2SqlPage() {
                     <span>
                       Include labels
                       <span className="block text-ink-muted">
-                        {hasLabels
+                        {exportMode === "classification" ? "One person crop per explicit human worn/bare answer. Missing helmet boxes do not exclude these crops; unresolved answers and invalid person boxes are skipped."
+                          : hasLabels
                           ? "A YOLO label per frame from the reviewed boxes (person, and helmet where worn), plus a data.yaml naming the classes. Frames with a helmet box missing are left out, so the helmet is never taught as background. The boxes cover only the people the review app judged: anyone else in the frame is unlabelled -- check the overlay, and complete those frames before training on them."
                           : "Copies the label that sits beside each image at the source, where there is one."}
                       </span>
                     </span>
                   </label>
+                  {withLabels && <fieldset disabled={pulling} className="mt-3 rounded border border-hairline p-3">
+                    <legend className="px-1 text-sm font-medium">Training export and class IDs</legend>
+                    <label className="block text-xs">Export format
+                      <select aria-label="Training export format" className={selectClass} value={exportMode}
+                        onChange={e => setExportMode(e.target.value as "detection" | "classification")}>
+                        <option value="detection">YOLO detection — full frames</option>
+                        <option value="classification" disabled={presetClass !== "no_helmet"}>Helmet classification — person crops</option>
+                      </select>
+                    </label>
+                    <p className="my-2 text-xs text-ink-muted">Class IDs are written into the exported labels and data.yaml. Changing an ID swaps it with the class already using that number.</p>
+                    {exportMode === "detection" && <div className="mb-2 flex gap-3 text-xs">
+                      <button type="button" className="underline" onClick={() => setDetectorNames(SQL_DEFAULTS.detector_names)}>YOLO26 six classes</button>
+                      <button type="button" className="underline" onClick={() => setDetectorNames(["person", "helmet"])}>Person + helmet only</button>
+                    </div>}
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {exportNames.map((name, id) => <label key={name} className="flex items-center justify-between gap-2 text-xs">
+                        {name}<input aria-label={`${name} class ID`} type="number" min={0} max={exportNames.length - 1}
+                          value={id} onChange={e => changeClassId(name, Number(e.target.value))}
+                          className="w-16 rounded border border-hairline bg-page px-2 py-1" />
+                      </label>)}
+                    </div>
+                    <p className="mt-2 text-xs text-ink-muted">{exportMode === "detection"
+                      ? "Exports person and helmet boxes only. Combine with the original vendor dataset when fine-tuning a six-class detector. Check for unlabelled people before training."
+                      : "Exports train/ and val/ class folders, with numeric prefixes matching these IDs. This is classification data, not input for the existing object-detection trainer. Use All human-resolved to include crops from frames missing helmet boxes."}</p>
+                    <p className="mt-1 text-xs text-ink-muted">Use a new empty destination for the first export. Later exports must keep the same format, class IDs and split.</p>
+                  </fieldset>}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       onClick={pullImages}
-                      disabled={pulling || !pullBucket || !pullFolder.trim()}
+                      disabled={pulling || !pullBucket || !pullFolder.trim() || (withLabels && exportMode === "classification" && presetClass !== "no_helmet")}
                       className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
                     >
                       {pulling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                      {pulling ? "Pulling..." : `Pull ${result.images.length.toLocaleString()} frame${result.images.length === 1 ? "" : "s"}`}
+                      {pulling ? "Pulling..." : withLabels && exportMode === "classification" ? "Export reviewed person crops" : `Pull ${result.images.length.toLocaleString()} frame${result.images.length === 1 ? "" : "s"}`}
                     </button>
                     {!pullFolder.trim() && <span className="text-xs text-ink-muted">choose a folder first</span>}
                   </div>
@@ -653,7 +695,7 @@ export function Track2SqlPage() {
                           : pullProgress.phase === "error" ? "Pull interrupted"
                           : pullProgress.phase === "complete" ? ((pulled?.failed ?? 0) > 0 ? "Finished with errors" : "Pull complete")
                           : "Copying frames and labels…"}</span>
-                        <span>{pullProgress.completed.toLocaleString()} / {pullProgress.total.toLocaleString()} eligible frames</span>
+                        <span>{pullProgress.completed.toLocaleString()} / {pullProgress.total.toLocaleString()} eligible samples</span>
                       </div>
                       <progress aria-label="Frame pull completion" max={100}
                         value={pullProgress.phase === "querying" ? undefined : pullProgress.phase === "complete" ? 100
@@ -661,7 +703,7 @@ export function Track2SqlPage() {
                         className="h-3 w-full accent-accent" />
                       <p className="mt-1 text-xs text-ink-muted">
                         {pullProgress.copied ?? 0} copied · {pullProgress.skipped ?? 0} already present · {pullProgress.failed ?? 0} failed
-                        {(pullProgress.left_out_incomplete ?? 0) > 0 && ` · ${pullProgress.left_out_incomplete} incomplete frames excluded`}
+                        {(pullProgress.left_out_incomplete ?? 0) > 0 && ` · ${pullProgress.left_out_incomplete} frames with no eligible samples excluded`}
                       </p>
                     </div>
                   )}
@@ -672,12 +714,11 @@ export function Track2SqlPage() {
                         {pulled.copied.toLocaleString()} copied, {pulled.skipped.toLocaleString()} already there
                         {" "}({pulled.train.toLocaleString()} train, {pulled.val.toLocaleString()} val).{" "}
                         {pulled.with_label.toLocaleString()} with a label
-                        {pulled.labels_from === "database" ? " (from the reviewed boxes, with a data.yaml)" : ""}.
+                        {pulled.export_mode === "classification" ? " (from explicit human person verdicts)" : pulled.labels_from === "database" ? " (from the reviewed boxes, with a data.yaml)" : ""}.
                       </p>
                       {pulled.left_out_incomplete > 0 && (
                         <p className="mt-1">
-                          {pulled.left_out_incomplete.toLocaleString()} frame(s) left out: a helmet box is
-                          missing. Draw or accept it in the box queue, then pull again.
+                          {pulled.left_out_incomplete.toLocaleString()} frame(s) had no eligible samples.
                         </p>
                       )}
                       {pulled.labels_from !== "none" && pulled.with_label < pulled.copied + pulled.skipped && (
@@ -698,9 +739,11 @@ export function Track2SqlPage() {
                         </p>
                       )}
                       <p className="mt-1 text-ink-muted">
-                        sources.json and query.json in the folder record where each file came from
-                        and the query that chose them.
+                        {pulled.export_mode ? "The exports/ receipts record source images, labels, exclusions and the query. export-contract.json records the class mapping and split."
+                          : "sources.json and query.json record source images and the query."}
                       </p>
+                      {pulled.excluded_reasons && Object.entries(pulled.excluded_reasons).map(([reason, count]) =>
+                        <p key={reason}>{reason.replaceAll("_", " ")}: {count}</p>)}
                     </div>
                   )}
                 </div>

@@ -1,5 +1,33 @@
 # Continue here
 
+## SQL training export (10 November 2026)
+
+Deployed to development port 8090 as `20261110-055122`. Targeted tests: 95
+passed; TypeScript/build and live build/health checks passed. Read-only live
+eligibility check: 3,372 frames, 1,269 detector-eligible, 7,676 candidate
+classification crops (7,397 worn / 279 no-helmet); 4,667 crops came from
+detector-excluded frames. Actual crop rendering/S3 export was covered with
+isolated fixtures, not a live dataset write. Browser initialization failed,
+so rendered UI verification remains unavailable.
+
+SQL page exports now support full-frame detection and person-crop helmet
+classification. Detection supports six vendor classes or a person/helmet map;
+changing IDs updates labels and YAML together. Classification uses explicit
+per-person human answers, not the SQL wearing fallback, and does not require
+helmet boxes. Numeric class-directory prefixes preserve selected ID order.
+Classification exports are for a separate classifier trainer, not the platform's
+object-detection trainer. These settings persist in named SQL presets.
+
+New exports require an empty destination. An export contract pins format,
+class mapping and split; a source index rejects changed labels on append.
+An S3 conditional lock serializes exports; if a process dies while holding it,
+verify it is no longer running before removing its `.export-lock` object.
+Immutable `exports/` receipts retain query, source and label provenance.
+Detector completeness checks cover recorded people only, not unseen people;
+same-frame crops share a split, but cross-frame incident deduplication remains
+the responsibility of dataset preparation. No model training is started by export.
+
+
 ## Retention and golden-set safeguards (6 November 2026)
 
 Implemented and deployed to development only: build `20261106-003029`, port

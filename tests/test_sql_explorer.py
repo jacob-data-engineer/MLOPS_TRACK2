@@ -573,6 +573,7 @@ def test_stream_reports_failure_not_completion(monkeypatch):
         progress({'phase': 'finalizing', 'completed': 2, 'total': 2})
         raise ValueError('metadata write failed')
     monkeypatch.setattr(sx, 'pull', failed)
+    monkeypatch.setattr(routes.sql_training_export, 'exists', lambda *args: False)
     result = TestClient(app).post('/pull/stream', json={'database':'violation-review','sql':'q','dest_bucket':'d','dest_folder':'p'})
     events = [json.loads(line) for line in result.text.splitlines() if line]
     assert [e['type'] for e in events] == ['progress', 'error']

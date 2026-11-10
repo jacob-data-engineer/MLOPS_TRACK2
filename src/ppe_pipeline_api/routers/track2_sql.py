@@ -13,6 +13,8 @@ import json
 from ..auth import require_session
 from ..data import sql_explorer as sx
 from ..data import sql_settings
+from ..data import sql_training_export
+from typing import Literal
 
 router = APIRouter()
 
@@ -68,6 +70,8 @@ class QueryRequest(BaseModel):
 
 
 class PullRequest(QueryRequest):
+    export_mode: Literal["detection", "classification"] | None = None
+    class_names: list[str] | None = None
     # Where the images go, as images/{train,val} + labels/{train,val}.
     dest_bucket: str
     dest_folder: str
@@ -76,6 +80,18 @@ class PullRequest(QueryRequest):
     # Write a YOLO label for each image (from the database's boxes when the
     # query returns them) and a data.yaml. Off: images only.
     with_labels: bool = True
+
+
+def run_pull(payload, progress=None):
+    options = dict(bucket=payload.bucket.strip(), folder=payload.folder.strip(),
+                   dest_bucket=payload.dest_bucket, dest_folder=payload.dest_folder,
+                   train_percent=payload.train_percent, progress=progress)
+    if payload.export_mode and payload.with_labels:
+        return sql_training_export.export(payload.database, payload.sql, **options,
+                                         mode=payload.export_mode, names=payload.class_names)
+    if sql_training_export.exists(payload.dest_bucket, payload.dest_folder.strip().strip("/") + "/export-contract.json"):
+        raise ValueError("This destination is a labelled training export. Keep labels enabled or choose another folder.")
+    return sx.pull(payload.database, payload.sql, **options, with_labels=payload.with_labels)
 
 
 class PresetRequest(BaseModel):
@@ -170,11 +186,7 @@ def pull(payload: PullRequest, session=Depends(require_session)) -> dict:
     """Run the query and copy the images it names into a training folder.
     Copies only: nothing at the source or the destination is deleted."""
     try:
-        return sx.pull(payload.database, payload.sql,
-                       bucket=payload.bucket.strip(), folder=payload.folder.strip(),
-                       dest_bucket=payload.dest_bucket, dest_folder=payload.dest_folder,
-                       train_percent=payload.train_percent,
-                       with_labels=payload.with_labels)
+        return run_pull(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -186,11 +198,7 @@ def pull_stream(payload: PullRequest, session=Depends(require_session)):
 
     def worker():
         try:
-            result = sx.pull(payload.database, payload.sql,
-                bucket=payload.bucket.strip(), folder=payload.folder.strip(),
-                dest_bucket=payload.dest_bucket, dest_folder=payload.dest_folder,
-                train_percent=payload.train_percent, with_labels=payload.with_labels,
-                progress=lambda value: events.put({"type": "progress", **value}))
+            result = run_pull(payload, progress=lambda value: events.put({"type": "progress", **value}))
             events.put({"type": "complete", "result": result})
         except Exception as exc:
             events.put({"type": "error", "detail": str(exc)})

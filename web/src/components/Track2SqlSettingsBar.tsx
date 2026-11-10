@@ -2,12 +2,17 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "../lib/api";
 
 export type SqlPageSettings = {
+  export_mode: "detection" | "classification";
+  detector_names: string[]; classifier_names: string[];
   database: string; preset_class: string; preset_scope: "resolved" | "ready" | "test";
   pull_bucket: string; pull_folder: string; train_percent: number;
   show_labels: boolean; with_labels: boolean;
   exploration_hazard: string; exploration_open: boolean; frames_open: boolean;
 };
 export const SQL_DEFAULTS: SqlPageSettings = {
+  export_mode: "detection",
+  detector_names: ["helmet", "gloves", "person", "working_boots", "man_cage", "safe_area"],
+  classifier_names: ["helmet_worn", "no_helmet"],
   database: "violation-review", preset_class: "", preset_scope: "resolved",
   pull_bucket: "track2-s3", pull_folder: "", train_percent: 80,
   show_labels: true, with_labels: true, exploration_hazard: "all", exploration_open: true, frames_open: true,

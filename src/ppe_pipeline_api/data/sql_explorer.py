@@ -492,6 +492,7 @@ judged AS (
          -- every kept person's boxes, for labels: `wearing` is a helmet
          -- answer, `auto` the best non-hand-drawn helmet box for them
          jsonb_agg(jsonb_build_object(
+           'candidate_id', p.person, 'verdict', an.verdict,
            'person_box', pr.person_box,
            'wearing', {wearing},
            'auto', CASE WHEN bo.box IS NOT NULL
@@ -514,6 +515,7 @@ judged AS (
   GROUP BY f.case_key, f.image_key
 )
 SELECT 's3://{REVIEW_IMAGE_BUCKET}/' || j.image_key AS image,
+       '{hazard}' AS hazard_type,
        j.case_key, j.kept_people, j.violations,
        {box} AS helmet_box,
        j.width, j.height, j.people, dbx.box AS drawn_box
