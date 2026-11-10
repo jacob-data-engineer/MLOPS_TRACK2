@@ -162,7 +162,8 @@ export function Track2ReadinessFlowPanel({ database, available, databaseLabel, h
 
   return (
     <Card
-      title="Data exploration"
+      title="Data Exploration statistics"
+      stateKey="data exploration"
       caption="Where every judged frame stops before retraining, read live. Only human verdicts count: VLM-only and pre-filled answers stay out. Amber steps are where reviewers can recover frames."
     >
       {!available ? (

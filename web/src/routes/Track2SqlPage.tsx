@@ -1,4 +1,4 @@
-import { Track2SqlSettingsBar, SQL_DEFAULTS, type SqlPageSettings, type SqlSavedPreset } from "../components/Track2SqlSettingsBar";
+import { Track2SqlSettingsBar, SQL_DEFAULTS, SQL_SCHEDULE_DEFAULTS, type SqlPageSettings, type SqlSavedPreset } from "../components/Track2SqlSettingsBar";
 import { useCardOpen, ensureCardState } from "../lib/cardState";
 import {
   AlertCircle, Copy, Database, Download, Loader2, Play,
@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card } from "../components/Card";
 import { S3FolderField } from "../components/S3FolderField";
 import { Track2ReadinessFlowPanel } from "../components/Track2ReadinessFlowPanel";
+import { Track2SqlSensorPanel } from "../components/Track2SqlSensorPanel";
 import {
   ApiError,
   apiGet,
@@ -83,6 +84,7 @@ export function Track2SqlPage() {
   const [showLabels, setShowLabels] = useState(true);
   // Write labels (and a data.yaml) into the training folder with the frames.
   const [withLabels, setWithLabels] = useState(true);
+  const [schedule, setSchedule] = useState(SQL_SCHEDULE_DEFAULTS);
   const [classIds, setClassIds] = useState(SQL_DEFAULTS.class_ids);
   const availableLabels = result?.available_labels ?? [];
   const selectedClassIds = Object.fromEntries(availableLabels.map(label => [label.name, classIds[label.name] ?? label.class_id]));
@@ -134,6 +136,10 @@ export function Track2SqlPage() {
         if (newest) {
           const preset = await apiPost<SqlSavedPreset>("/track2/sql/settings/load", { name: newest.name });
           await ensureCardState();
+          if (!preset.settings.schedule) {
+            const sensor = await apiGet<{ config: { enabled: boolean; every_days: number; at: string; from_date: string } }>("/track2/sql/sensor");
+            preset.settings.schedule = { enabled: sensor.config.enabled, every_days: sensor.config.every_days, at: sensor.config.at, from_date: sensor.config.from_date };
+          }
           loadPageSettings(preset.settings);
           setInitialPreset(preset);
         }
@@ -307,6 +313,7 @@ export function Track2SqlPage() {
   }
 
   function loadPageSettings(next: SqlPageSettings) {
+    setSchedule(next.schedule ?? SQL_SCHEDULE_DEFAULTS);
     runId.current += 1;
     setBusy(false); setResult(null); setPreviews([]); setPulled(null);
     setError(""); setPullError(""); setSql("");
@@ -363,9 +370,19 @@ export function Track2SqlPage() {
 
   const hasLabels = labelsByUri.size > 0;
   const incompleteCount = [...labelsByUri.values()].filter((l) => !l.complete).length;
+  const pageSettings: SqlPageSettings = {
+    schedule,
+    database, preset_class: presetClass, preset_scope: presetScope,
+    pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
+    show_labels: showLabels, with_labels: withLabels,
+    exploration_hazard: explorationHazard, exploration_open: explorationOpen, frames_open: framesOpen,
+    class_ids: result ? selectedClassIds : classIds, export_mode: "detection",
+    detector_names: SQL_DEFAULTS.detector_names, classifier_names: SQL_DEFAULTS.classifier_names,
+  };
 
   return (
     <div>
+      <div className="sticky top-0 z-30 mb-5 bg-page py-3 shadow-sm max-h-[80vh] overflow-y-auto">
       <h1 className="mb-1 flex items-center gap-2 text-xl font-semibold text-ink">
         <Database size={20} className="text-accent" strokeWidth={2} />
         Track2 SQL Database Query
@@ -377,11 +394,9 @@ export function Track2SqlPage() {
       </p>
 
       <Track2SqlSettingsBar initialPreset={initialPreset} disabled={!settingsRead || pulling} onLoad={loadPageSettings}
-        settings={{ database, preset_class: presetClass, preset_scope: presetScope,
-          pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
-          show_labels: showLabels, with_labels: withLabels,
-          exploration_hazard: explorationHazard, exploration_open: explorationOpen, frames_open: framesOpen,
-          class_ids: { ...classIds, ...selectedClassIds }, export_mode: "detection", detector_names: SQL_DEFAULTS.detector_names, classifier_names: SQL_DEFAULTS.classifier_names }} />
+        settings={pageSettings} />
+      <Track2SqlSensorPanel schedule={schedule} onChange={setSchedule} />
+      </div>
       <div className="flex flex-col gap-5">
         <Card title="Choose the frames" collapsible={false}>
           <div className="grid gap-3 md:grid-cols-3">
@@ -730,6 +745,8 @@ export function Track2SqlPage() {
             )}
           </Card>
         )}
+
+
 
         <Track2ReadinessFlowPanel
           hazard={explorationHazard}

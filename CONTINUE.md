@@ -1,5 +1,37 @@
 # Continue here
 
+## SQL pinned unified settings (10 November 2026)
+
+Schedule controls now live in the sticky top SQL header with the main settings
+bar. The named _sql file includes schedule plus all page choices. Main Save
+updates the worker snapshot under its lock; failed file writes roll back that
+snapshot. Load restores controls without silently changing the active schedule;
+Save applies it. Separate Save sensor/Disable buttons removed: uncheck enabled
+and Save to disable. Existing standalone schedules are restored when the latest
+legacy preset lacks schedule; the next Save consolidates it. Runtime history
+remains internal worker state. Details collapse to keep the pinned header short.
+Targeted tests: 121 passed.
+
+
+## SQL new-frame sensor (10 November 2026)
+
+Added an EC2-local scheduled sensor below the SQL frame pull. Defaults to
+every day at 00:00 Asia/Singapore; supports every N days and a start date.
+Save sensor captures the current database/hazard/scope/destination/split/labels
+and class-ID mapping, independently from later page edits. It remains off until
+enabled and saved. Check now runs the saved snapshot without shifting the clock.
+
+The app ticker starts work on a separate thread. State, next slot and 20 recent
+results persist at `/settings/sql-sensor/state.json`; dev and stable settings
+mounts remain separate. It uses the auto-training anchored schedule math and
+the manual SQL pull implementation. It compares destination images AND labels,
+skips existing pairs, retries missing labels, and never launches training.
+One catch-up after downtime; interrupted enabled runs retry after restart.
+Stopped databases and truncated queries report errors. Background-off instances
+cannot arm the sensor. App downtime means no polling until app recovery.
+Manual and scheduled SQL pulls are serialized in the supported single-worker
+app to avoid racing labels/YAML. Targeted tests: 118 passed.
+
 ## Dynamic SQL label display (10 November 2026)
 
 The query response now includes `available_labels`, counted from the actual

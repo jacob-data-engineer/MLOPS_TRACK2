@@ -7,11 +7,32 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from .. import pull_control
 
 
+class SqlSchedule(BaseModel):
+    enabled: bool = False
+    every_days: int = Field(default=1, ge=1, le=365)
+    at: str = "00:00"
+    from_date: str = ""
+
+    @field_validator("at")
+    @classmethod
+    def valid_time(cls, value):
+        from ..chain import retrain_schedule
+        if not retrain_schedule._valid_time(value):
+            raise ValueError("Use HH:MM in Singapore time.")
+        return value
+
+    @field_validator("from_date")
+    @classmethod
+    def valid_date(cls, value):
+        return datetime.date.fromisoformat(value).isoformat() if value else ""
+
+
 class SqlSettings(BaseModel):
+    schedule: SqlSchedule | None = None
     class_ids: dict[str, int] = Field(default_factory=lambda: {"helmet": 0, "person": 2})
     export_mode: Literal["detection", "classification"] = "detection"
     detector_names: list[str] = Field(default_factory=lambda: ["helmet", "gloves", "person", "working_boots", "man_cage", "safe_area"])
@@ -80,3 +101,20 @@ def delete(name: str) -> dict:
     path = preset_path(name)
     path.unlink()
     return {"name": path.stem, "deleted": True}
+
+
+def save_with_schedule(name: str, settings: SqlSettings) -> dict:
+    """One Save persists the whole page and updates the worker snapshot."""
+    from . import sql_sensor
+    preset_path(name)
+    with sql_sensor._lock:
+        previous = sql_sensor.read()
+        schedule = settings.schedule
+        try:
+            if schedule is not None:
+                sql_sensor.save(sql_sensor.SensorConfig(**schedule.model_dump(), settings=settings))
+            return save(name, settings)
+        except Exception:
+            if schedule is not None:
+                sql_sensor.write(previous)
+            raise

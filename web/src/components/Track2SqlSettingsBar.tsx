@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "../lib/api";
 
+export type SqlSchedule = { enabled: boolean; every_days: number; at: string; from_date: string };
+export const SQL_SCHEDULE_DEFAULTS: SqlSchedule = { enabled: false, every_days: 1, at: "00:00", from_date: "" };
 export type SqlPageSettings = {
+  schedule?: SqlSchedule | null;
   class_ids: Record<string, number>;
   export_mode: "detection" | "classification";
   detector_names: string[]; classifier_names: string[];
@@ -11,6 +14,7 @@ export type SqlPageSettings = {
   exploration_hazard: string; exploration_open: boolean; frames_open: boolean;
 };
 export const SQL_DEFAULTS: SqlPageSettings = {
+  schedule: SQL_SCHEDULE_DEFAULTS,
   class_ids: { helmet: 0, person: 2 },
   export_mode: "detection",
   detector_names: ["helmet", "gloves", "person", "working_boots", "man_cage", "safe_area"],
@@ -57,6 +61,7 @@ export function Track2SqlSettingsBar({ settings, onLoad, disabled, initialPreset
       <label className="text-xs">Save as <input aria-label="SQL settings name" value={name} disabled={locked} onChange={e => setName(e.target.value)} placeholder="name (saved as name_sql)" className="ml-2 w-44 rounded-sm border border-black/15 bg-page px-2 py-1 text-xs" /></label>
       <button className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40" disabled={locked || !(name.trim() || loaded)} onClick={() => void work(async () => {
         const got = await apiPost<{name: string; path: string; saved_at: string}>("/track2/sql/settings/save", {name: name.trim() || loaded, settings});
+        window.dispatchEvent(new Event("sql-settings-saved"));
         setLoaded(got.name); setSelected(got.name); setName(""); setSavedAt(got.saved_at); setMessage(`Saved ${got.name}`); await refresh();
       })}>{name.trim() ? `Save as ${saveName}` : "Save"}</button>
       {!name.trim() && <span className="text-xs text-ink-muted">{loaded ? `saves over ${loaded}` : "type a name — no file is loaded to save over"}</span>}

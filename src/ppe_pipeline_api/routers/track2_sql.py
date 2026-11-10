@@ -13,10 +13,44 @@ import json
 from ..auth import require_session
 from ..data import sql_explorer as sx
 from ..data import sql_settings
+from ..data import sql_sensor
 from ..data import sql_training_export
 from typing import Literal
 
 router = APIRouter()
+
+
+@router.get("/sensor")
+def get_sensor(session=Depends(require_session)):
+    return sql_sensor.status()
+
+
+@router.post("/sensor")
+def save_sensor(payload: sql_sensor.SensorConfig, session=Depends(require_session)):
+    try:
+        return sql_sensor.save(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/sensor/check")
+def check_sensor(session=Depends(require_session)):
+    try:
+        if not sql_sensor.start(manual=True):
+            raise HTTPException(status_code=409, detail="A sensor check is already running.")
+        return sql_sensor.status()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/sensor/disable")
+def disable_sensor(session=Depends(require_session)):
+    try:
+        config = sql_sensor.SensorConfig.model_validate(sql_sensor.status()["config"])
+        config.enabled = False
+        return sql_sensor.save(config)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 class SqlSettingsRequest(BaseModel):
@@ -44,7 +78,7 @@ def list_sql_settings(session=Depends(require_session)) -> dict:
 def save_sql_settings(payload: SqlSettingsRequest, session=Depends(require_session)) -> dict:
     if payload.settings is None:
         raise HTTPException(status_code=422, detail="Nothing to save.")
-    return _settings_action(sql_settings.save, payload.name, payload.settings)
+    return _settings_action(sql_settings.save_with_schedule, payload.name, payload.settings)
 
 
 @router.post("/settings/load")

@@ -60,3 +60,38 @@ def test_latest_saved_file_is_first_even_after_overwrite(settings_dir):
     newest = ss.list_files()['files'][0]['name']
     assert newest == 'older_sql'
     assert ss.load(newest)['settings']['train_percent'] == 75
+
+def test_schedule_saved_in_same_file_and_applied(settings_dir, monkeypatch):
+    from ppe_pipeline_api.data import sql_sensor
+    monkeypatch.setattr(sql_sensor, "_running", False)
+    monkeypatch.setenv("APP_BACKGROUND", "on")
+    values = ss.SqlSettings(preset_class="no_helmet", pull_folder="helmet",
+        class_ids={"person": 1, "helmet": 0},
+        schedule=ss.SqlSchedule(enabled=True, every_days=7, at="00:00"))
+    ss.save_with_schedule("all", values)
+    loaded = ss.load("all")["settings"]
+    assert loaded == values.model_dump()
+    assert sql_sensor.status()["config"]["settings"] == loaded
+    assert sql_sensor.status()["config"]["every_days"] == 7
+    values.schedule.enabled = False
+    ss.save_with_schedule("all", values)
+    assert sql_sensor.status()["next_at"] is None
+
+
+def test_failed_file_save_restores_schedule(settings_dir, monkeypatch):
+    from ppe_pipeline_api.data import sql_sensor
+    monkeypatch.setattr(sql_sensor, "_running", False)
+    before = sql_sensor.read()
+    def fail(*args):
+        raise OSError("disk error")
+    monkeypatch.setattr(ss, "save", fail)
+    with pytest.raises(OSError):
+        ss.save_with_schedule("all", ss.SqlSettings(schedule=ss.SqlSchedule()))
+    assert sql_sensor.read() == before
+
+
+def test_disabled_schedule_can_save_blank_new_page(settings_dir, monkeypatch):
+    from ppe_pipeline_api.data import sql_sensor
+    monkeypatch.setattr(sql_sensor, "_running", False)
+    ss.save_with_schedule("blank", ss.SqlSettings(schedule=ss.SqlSchedule()))
+    assert ss.load("blank")["settings"]["schedule"]["enabled"] is False

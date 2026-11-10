@@ -33,6 +33,11 @@ async def queue_poll_loop() -> None:
     while True:
         await asyncio.sleep(25)
         try:
+            from ..data import sql_sensor
+            await asyncio.to_thread(sql_sensor.tick)
+        except Exception as exc:
+            print(f"SQL file sensor tick failed: {exc}")
+        try:
             from . import sql_worker
             await asyncio.to_thread(sql_worker.tick)
         except Exception as exc:

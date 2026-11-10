@@ -20,6 +20,8 @@ import datetime as _dt
 import hashlib
 import json
 import re
+import threading
+from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote, urlparse
 
@@ -791,9 +793,37 @@ def _exists(bucket: str, key: str) -> bool:
         return False
 
 
+def copy_plan(images: list[dict], train_percent: int) -> list:
+    """Shared naming/split plan for manual pulls and scheduled discovery."""
+    plan, taken = [], set()
+    for image in images:
+        name = image["key"].rsplit("/", 1)[-1]
+        if "." not in name:
+            parent = image["key"].rsplit("/", 2)[-2] if image["key"].count("/") else name
+            name = f"{parent}.jpg"
+        if name in taken:
+            stem, _, ext = name.rpartition(".")
+            name = f"{stem}_{hashlib.sha1(image['uri'].encode()).hexdigest()[:8]}.{ext}"
+        taken.add(name)
+        plan.append((image, split_for(image["uri"], train_percent), name))
+    return plan
+
+
+_pull_lock = threading.Lock()
+
+
+def serialized_pull(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _pull_lock:
+            return fn(*args, **kwargs)
+    return wrapped
+
+
+@serialized_pull
 def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
          dest_bucket: str, dest_folder: str, train_percent: int = 100,
-         with_labels: bool = True, progress=None, class_ids=None) -> dict:
+         with_labels: bool = True, progress=None, class_ids=None, query_result=None) -> dict:
     """Run the query, then copy every image it names into
     `dest_bucket/dest_folder` in the layout a training run reads:
 
@@ -824,7 +854,7 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
 
     if progress:
         progress({"phase": "querying", "completed": 0, "total": 0})
-    result = run(key, sql, bucket=bucket, folder=folder)
+    result = query_result if query_result is not None else run(key, sql, bucket=bucket, folder=folder)
     images = [i for i in result["images"] if i.get("bucket")]
     bare = len(result["images"]) - len(images)
     if not images:
@@ -875,20 +905,7 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
                 image["labels"] = {**image["labels"], "boxes": [
                     {**b, "cls": class_ids[b["name"]]} for b in image["labels"]["boxes"]]}
 
-    plan, taken = [], set()
-    for image in images:
-        name = image["key"].rsplit("/", 1)[-1]
-        if "." not in name:
-            # `.../<id>/source`: the folder is the identity, and these are
-            # JPEGs (the cargo evidence frames).
-            parent = image["key"].rsplit("/", 2)[-2] if image["key"].count("/") else name
-            name = f"{parent}.jpg"
-        if name in taken:
-            stem, _, ext = name.rpartition(".")
-            name = f"{stem}_{hashlib.sha1(image['uri'].encode()).hexdigest()[:8]}.{ext}"
-        taken.add(name)
-        side = split_for(image["uri"], train_percent)
-        plan.append((image, side, name))
+    plan = copy_plan(images, train_percent)
 
     def copy(entry):
         image, side, name = entry
