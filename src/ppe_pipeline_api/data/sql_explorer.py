@@ -372,7 +372,30 @@ def classes(key: str) -> list[dict]:
             for r in out["rows"] if r and r[0]]
 
 
-def preset_sql(hazard: str, scope: str = "resolved") -> str:
+def has_crop_verdicts(key: str) -> bool:
+    """Probe the query connection's search path; never hide partial migrations."""
+    out = _invoke(key, {"action": "query", "sql": (
+        "SELECT to_regclass('crop_verdict_heads') IS NOT NULL, "
+        "to_regclass('crop_verdict_events') IS NOT NULL")})
+    heads, events = out["rows"][0]
+    if heads != events:
+        raise ValueError("Incomplete review database schema: crop verdict heads and events must both exist.")
+    return bool(heads)
+
+
+def _crop_heads_sql(enabled: bool) -> str:
+    if not enabled:
+        # An empty typed source lets legacy corrections/reviews keep their
+        # existing priority and human-only rules without inventing verdicts.
+        return ("SELECT NULL::text AS case_key, NULL::text AS person, "
+                "NULL::text AS verdict, NULL::text AS lane WHERE false")
+    return """SELECT h.case_key, h.candidate_id AS person,
+         e.current_verdict AS verdict, e.review_lane AS lane
+  FROM crop_verdict_heads h JOIN crop_verdict_events e ON e.event_id = h.current_event_id
+  WHERE e.actor_subject IS NOT NULL"""
+
+
+def preset_sql(hazard: str, scope: str = "resolved", *, crop_verdicts: bool = True) -> str:
     """The human-verified frames of one class, with an `image` column.
 
     `scope` "ready" keeps frames whose helmet box is usable for training
@@ -412,9 +435,8 @@ detector_box AS (
 answers AS (
   SELECT DISTINCT ON (case_key, person) case_key, person, verdict
   FROM (
-    SELECT h.case_key, h.candidate_id AS person, e.current_verdict AS verdict, 0 AS rank
-    FROM crop_verdict_heads h JOIN crop_verdict_events e ON e.event_id = h.current_event_id
-    WHERE e.actor_subject IS NOT NULL
+    SELECT case_key, person, verdict, 0 AS rank
+    FROM ({_crop_heads_sql(crop_verdicts)}) crop_heads
     UNION ALL
     SELECT c.case_key, v.key, v.value, 1
     FROM corrections c, jsonb_each_text(coalesce(c.data->'crop_verdicts', '{{}}')) v
@@ -552,7 +574,7 @@ _HUMAN_STEPS = ("Answered in Crop Similarity", "Audited (independent)",
                 "Audited (with suggestion)", "Reviewed on Escalations")
 
 
-def readiness_sql() -> str:
+def readiness_sql(*, crop_verdicts: bool = True) -> str:
     """One row per (class, path through the steps), with a frame count."""
     human_review = ("coalesce(r.data->>'review_origin', 'human') <> 'similarity_prefill' "
                     "AND coalesce(r.data->>'auto_settled', 'false') <> 'true'")
@@ -572,9 +594,7 @@ detector_box AS (
   FROM audit_rows GROUP BY case_key, candidate_id
 ),
 head AS (
-  SELECT h.case_key, h.candidate_id AS person, e.current_verdict AS verdict, e.review_lane AS lane
-  FROM crop_verdict_heads h JOIN crop_verdict_events e ON e.event_id = h.current_event_id
-  WHERE e.actor_subject IS NOT NULL
+  {_crop_heads_sql(crop_verdicts)}
 ),
 answers AS (
   SELECT DISTINCT ON (case_key, person) case_key, person, verdict
@@ -692,7 +712,7 @@ def readiness(key: str) -> dict:
     """The flow for every class and for all of them together:
     `{measured_at, steps, frames: {class: n}, links: {class: [{source, target, value}]}}`.
     Read live; nothing is cached, so the numbers are as of the request."""
-    out = _invoke(key, {"action": "query", "sql": readiness_sql()})
+    out = _invoke(key, {"action": "query", "sql": readiness_sql(crop_verdicts=has_crop_verdicts(key))})
     links: dict[str, dict[tuple, int]] = {"all": {}}
     frames: dict[str, int] = {"all": 0}
     for hazard, *steps, count in out["rows"]:

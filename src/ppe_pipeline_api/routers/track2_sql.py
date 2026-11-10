@@ -38,6 +38,7 @@ class PullRequest(QueryRequest):
 class PresetRequest(BaseModel):
     # A class (hazard type) from /classes, and which of its frames.
     hazard: str
+    database: str = "violation-review"
     scope: str = "resolved"
 
 
@@ -65,7 +66,8 @@ def preset(payload: PresetRequest, session=Depends(require_session)) -> dict:
     """The ready-made human-verified query for one class, as SQL the page
     puts in the editor -- so it can be read, changed and pulled from."""
     try:
-        return {"sql": sx.preset_sql(payload.hazard, payload.scope)}
+        return {"sql": sx.preset_sql(payload.hazard, payload.scope,
+                                   crop_verdicts=sx.has_crop_verdicts(payload.database))}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

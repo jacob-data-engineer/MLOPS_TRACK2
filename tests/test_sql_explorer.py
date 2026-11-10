@@ -471,6 +471,7 @@ def test_switching_to_a_stopped_database_never_queries_it():
 # --- the Readiness flow card (2026-11-05) ----------------------------------------
 
 def test_the_flow_is_built_per_class_and_for_all_from_one_query(monkeypatch):
+    monkeypatch.setattr(sx, "has_crop_verdicts", lambda key: True)
     rows = [
         ["no_helmet", "Inference found people", "Settled by VLM", "Audited (independent)",
          "Fully resolved", "Box: human", 7],
@@ -513,3 +514,37 @@ def test_the_flow_has_a_real_route_and_its_class_is_saved_with_data_preparation(
     assert "/track2/sql/readiness" in app.openapi()["paths"]
     assert "readiness_flow" in pc.DEFAULTS and "readiness_flow" in ConfigRequest.model_fields
     assert "readiness_flow" in pc.SCOPES["dp"] and "readiness flow" in pc.DP_CARDS
+
+@pytest.mark.parametrize('present', [True, False])
+def test_schema_probe_selects_matching_query(monkeypatch, present):
+    calls = []
+    def invoke(key, payload):
+        calls.append((key, payload['sql']))
+        return {'rows': [[present, present]]} if len(calls) == 1 else {'rows': []}
+    monkeypatch.setattr(sx, '_invoke', invoke)
+    assert sx.readiness('jpui-preview')['frames'] == {'all': 0}
+    assert all(key == 'jpui-preview' for key, _ in calls)
+    assert ('FROM crop_verdict_heads' in calls[1][1]) == present
+
+@pytest.mark.parametrize('flags', [[True, False], [False, True]])
+def test_partial_schema_does_not_silently_use_legacy(monkeypatch, flags):
+    monkeypatch.setattr(sx, '_invoke', lambda *args: {'rows': [flags]})
+    with pytest.raises(ValueError, match='Incomplete review database schema'):
+        sx.has_crop_verdicts('jpui-preview')
+
+@pytest.mark.parametrize('scope', ['resolved', 'ready', 'test'])
+def test_legacy_queries_keep_human_filters_without_missing_relations(scope):
+    for sql in [sx.preset_sql('no_helmet', scope, crop_verdicts=False),
+                sx.readiness_sql(crop_verdicts=False)]:
+        assert 'crop_verdict_heads' not in sql and 'crop_verdict_events' not in sql
+        assert 'similarity_prefill' in sql and 'auto_settled' in sql
+        assert 'FROM corrections' in sql and 'FROM reviews' in sql
+
+
+def test_preset_route_probes_selected_database(monkeypatch):
+    from ppe_pipeline_api.routers import track2_sql as router
+    seen = []
+    monkeypatch.setattr(sx, 'has_crop_verdicts', lambda key: seen.append(key) or False)
+    result = router.preset(router.PresetRequest(database='jpui-preview', hazard='no_helmet'), session={})
+    assert seen == ['jpui-preview']
+    assert 'crop_verdict_heads' not in result['sql']

@@ -219,7 +219,7 @@ export function Track2SqlPage() {
     setBusy(true);
     setError("");
     try {
-      const { sql: text } = await getTrack2SqlPreset(name, scope);
+      const { sql: text } = await getTrack2SqlPreset(name, scope, database);
       if (mine !== runId.current) return;
       setSql(text);
       await runQuery(text, mine);

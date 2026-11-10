@@ -4031,9 +4031,9 @@ export function getTrack2SqlReadiness(database: string): Promise<Track2Readiness
 }
 
 export function getTrack2SqlPreset(
-  hazard: string, scope: Track2SqlPresetScope,
+  hazard: string, scope: Track2SqlPresetScope, database: string,
 ): Promise<{ sql: string }> {
-  return apiPost("/track2/sql/preset", { hazard, scope });
+  return apiPost("/track2/sql/preset", { hazard, scope, database });
 }
 
 /** What a pull copied. Nothing is overwritten: names already at the
