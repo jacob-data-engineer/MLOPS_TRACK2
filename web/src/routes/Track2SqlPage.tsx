@@ -96,6 +96,12 @@ export function Track2SqlPage() {
   const [pullBucket, setPullBucket] = useState("track2-s3");
   const [pullFolder, setPullFolder] = useState("");
   const [trainPercent, setTrainPercent] = useState(80);
+  // File into Pull Control's weeks by capture date instead of one folder,
+  // so Retention decays SQL frames with everything else.
+  const [byWeek, setByWeek] = useState(false);
+  const [trainAfter, setTrainAfter] = useState(false);
+  // Where week folders live: Pull Control's root. Read, never edited here.
+  const [weekRoot, setWeekRoot] = useState<{ bucket: string; root: string; cutoff: string; days: number } | null>(null);
   const [pullProgress, setPullProgress] = useState<Track2SqlPullProgress | null>(null);
   const [pulling, setPulling] = useState(false);
   const [pulled, setPulled] = useState<Track2SqlPullResult | null>(null);
@@ -119,6 +125,8 @@ export function Track2SqlPage() {
     getTrack2PullControl()
       .then(async (status) => {
         setExplorationHazard(status.config.readiness_flow?.hazard || "all");
+        setWeekRoot({ bucket: status.config.destination_bucket || "track2-s3", root: status.config.root || "",
+                      cutoff: status.config.week_cutoff || "", days: status.config.week_length_days || 7 });
         const saved = status.config.sql_explorer || {};
         if (saved.database) setDatabase(saved.database);
         if (saved.sql) setSql(saved.sql);
@@ -299,7 +307,7 @@ export function Track2SqlPage() {
     setPulled(null);
     pullTrack2Sql({ database, sql, bucket, folder,
                     destBucket: pullBucket, destFolder: pullFolder, trainPercent,
-                    withLabels, classIds: availableLabels.length ? selectedClassIds : undefined }, setPullProgress)
+                    withLabels, byWeek, classIds: availableLabels.length ? selectedClassIds : undefined }, setPullProgress)
       .then((summary) => { setPulled(summary); setPullProgress(p => p ? { ...p, phase: "complete" } : null); })
       .catch((err) => { setPullError(err instanceof ApiError ? err.detail : "The pull connection failed. Check the destination before retrying."); setPullProgress(p => p ? { ...p, phase: "error" } : null); })
       .finally(() => setPulling(false));
@@ -322,6 +330,7 @@ export function Track2SqlPage() {
     setDatabase(next.database); setPresetClass(next.preset_class); setPresetScope(next.preset_scope);
     setPullBucket(next.pull_bucket); setPullFolder(next.pull_folder); setTrainPercent(next.train_percent);
     setShowLabels(next.show_labels); setWithLabels(next.with_labels);
+    setByWeek(!!next.by_week); setTrainAfter(!!next.train_after);
     setClassIds(next.class_ids ?? SQL_DEFAULTS.class_ids);
     setExplorationHazard(next.exploration_hazard); setExplorationOpen(next.exploration_open); setFramesOpen(next.frames_open);
     setSettingsRevision(v => v + 1);
@@ -377,7 +386,7 @@ export function Track2SqlPage() {
     schedule,
     database, preset_class: presetClass, preset_scope: presetScope,
     pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
-    show_labels: showLabels, with_labels: withLabels,
+    show_labels: showLabels, with_labels: withLabels, by_week: byWeek, train_after: trainAfter && byWeek,
     exploration_hazard: explorationHazard, exploration_open: explorationOpen, frames_open: framesOpen,
     class_ids: result ? selectedClassIds : classIds, export_mode: "detection",
     detector_names: SQL_DEFAULTS.detector_names, classifier_names: SQL_DEFAULTS.classifier_names,
@@ -399,7 +408,8 @@ export function Track2SqlPage() {
       <Card title="Settings and schedule" stateKey="sql settings and schedule" keepMounted>
       <Track2SqlSettingsBar initialPreset={initialPreset} disabled={!settingsRead || pulling} onLoad={loadPageSettings}
         settings={pageSettings} />
-      <Track2SqlSensorPanel schedule={schedule} onChange={setSchedule} />
+      <Track2SqlSensorPanel schedule={schedule} onChange={setSchedule}
+        byWeek={byWeek} trainAfter={trainAfter} onTrainAfter={setTrainAfter} />
       </Card>
       </div>
       <div className="flex flex-col gap-5">
@@ -591,7 +601,24 @@ export function Track2SqlPage() {
                     Copies frames and their labels into the selected training folder. Source images and reviews stay unchanged.
 
                   </p>
-                  <div className="grid gap-3 md:grid-cols-[14rem_1fr_9rem]">
+                  <label className="mb-3 flex items-start gap-1.5 text-xs text-ink">
+                    <input type="checkbox" className="mt-0.5" checked={byWeek}
+                           onChange={(e) => setByWeek(e.target.checked)} />
+                    <span>
+                      Sort into weeks by capture date
+                      <span className="block text-ink-muted">
+                        {byWeek
+                          ? <>Each frame goes into the week it was captured in, under Pull Control&rsquo;s root{" "}
+                              <span className="tabular text-ink">s3://{weekRoot?.bucket}/{weekRoot?.root || "(no root set)"}/week_N/</span>
+                              {weekRoot?.cutoff ? <> ({weekRoot.days}-day weeks from {new Date(weekRoot.cutoff).toLocaleDateString("en-SG")}; everything before is week_1)</> : null}.
+                              {" "}Retention then decays these weeks like any other. The capture date is the stamp in the frame&rsquo;s case key, not its review date; frames without one are left out and counted.</>
+                          : "Off: everything goes into the one folder below, outside the weeks, so Retention does not see it."}
+                      </span>
+                      {byWeek && !weekRoot?.root && <span className="block text-critical">Pull Control has no root folder. Set it on the Data Preparation tab first.</span>}
+                    </span>
+                  </label>
+                  <div className={`grid gap-3 ${byWeek ? "md:grid-cols-[9rem]" : "md:grid-cols-[14rem_1fr_9rem]"}`}>
+                    {!byWeek && <>
                     <label className="block text-xs text-ink-muted">
                       Into bucket
                       <select
@@ -615,6 +642,7 @@ export function Track2SqlPage() {
                       bucket={pullBucket}
                       allowCreate
                     />
+                    </>}
                     <label className="block text-xs text-ink-muted">
                       % to train
                       <input
@@ -670,13 +698,13 @@ export function Track2SqlPage() {
                     <button
                       type="button"
                       onClick={pullImages}
-                      disabled={pulling || !pullBucket || !pullFolder.trim() || (withLabels && invalidClassIds)}
+                      disabled={pulling || (byWeek ? !weekRoot?.root : (!pullBucket || !pullFolder.trim())) || (withLabels && invalidClassIds)}
                       className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
                     >
                       {pulling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                       {pulling ? "Pulling..." : `Manual pull ${result.images.length.toLocaleString()} frame${result.images.length === 1 ? "" : "s"}`}
                     </button>
-                    {!pullFolder.trim() && <span className="text-xs text-ink-muted">choose a folder first</span>}
+                    {!byWeek && !pullFolder.trim() && <span className="text-xs text-ink-muted">choose a folder first</span>}
                   </div>
                   {pullError && (
                     <p className="mt-2 flex items-start gap-1.5 text-sm text-critical">
@@ -724,6 +752,22 @@ export function Track2SqlPage() {
                           {(pulled.copied + pulled.skipped - pulled.with_label).toLocaleString()} frame(s) have no
                           label beside them at the source. Training reads an unlabelled image as
                           &ldquo;nothing here&rdquo;, so label them before training on this folder.
+                        </p>
+                      )}
+                      {pulled.by_week && pulled.weeks && Object.keys(pulled.weeks).length > 0 && (
+                        <p className="mt-1">
+                          Filed into {Object.keys(pulled.weeks).length} week{Object.keys(pulled.weeks).length === 1 ? "" : "s"}:{" "}
+                          {Object.entries(pulled.weeks).map(([week, count]) => `${week} (${count})`).join(", ")}.
+                        </p>
+                      )}
+                      {(pulled.left_out_undated ?? 0) > 0 && (
+                        <p className="mt-1">
+                          {pulled.left_out_undated} frame(s) carry no capture date and were left out rather than filed as new.
+                        </p>
+                      )}
+                      {(pulled.left_out_no_week ?? 0) > 0 && (
+                        <p className="mt-1">
+                          {pulled.left_out_no_week} frame(s) fall in no week Pull Control allows (before the cut-off with the backlog off, or weeks not auto-created).
                         </p>
                       )}
                       {pulled.bare_paths_left_out > 0 && (

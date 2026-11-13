@@ -41,7 +41,8 @@ def test_a_queue_add_skips_it_too(monkeypatch):
     assert called == []
 
 
-def test_the_card_has_the_tick_and_keeps_the_button():
-    assert "Freeze the dataset on every run" in PANEL
-    assert "saveTrack2PullConfig({ freeze_on_run: on })" in PANEL
-    assert "Freeze this dataset" in PANEL
+def test_the_retention_card_no_longer_shows_repeatable_runs():
+    """Removed from the page on 2026-11-13 as not useful. `freeze_on_run`
+    stays a saved setting (default on), read by the chain as before."""
+    assert "Freeze the dataset on every run" not in PANEL
+    assert "Freeze this dataset" not in PANEL

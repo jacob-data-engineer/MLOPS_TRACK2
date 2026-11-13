@@ -115,6 +115,8 @@ class PullRequest(QueryRequest):
     # Write a YOLO label for each image (from the database's boxes when the
     # query returns them) and a data.yaml. Off: images only.
     with_labels: bool = True
+    # File into Pull Control's week folders by capture date; dest_* ignored.
+    by_week: bool = False
 
 
 def run_pull(payload, progress=None):
@@ -124,9 +126,12 @@ def run_pull(payload, progress=None):
     if payload.export_mode and payload.with_labels:
         return sql_training_export.export(payload.database, payload.sql, **options,
                                          mode=payload.export_mode, names=payload.class_names)
-    if sql_training_export.exists(payload.dest_bucket, payload.dest_folder.strip().strip("/") + "/export-contract.json"):
+    if payload.by_week:
+        options["dest_bucket"], options["dest_folder"] = sx.week_destination()
+    if sql_training_export.exists(options["dest_bucket"], options["dest_folder"].strip().strip("/") + "/export-contract.json"):
         raise ValueError("This destination is a labelled training export. Keep labels enabled or choose another folder.")
-    return sx.pull(payload.database, payload.sql, **options, with_labels=payload.with_labels, class_ids=payload.class_ids)
+    return sx.pull(payload.database, payload.sql, **options, with_labels=payload.with_labels,
+                   class_ids=payload.class_ids, by_week=payload.by_week)
 
 
 class PresetRequest(BaseModel):

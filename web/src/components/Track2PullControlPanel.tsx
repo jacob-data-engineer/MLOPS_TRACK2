@@ -12,7 +12,6 @@ import {
   purgeTrack2Weeks,
   type Track2WeekPurgePreview,
   getTrack2SettingsFiles,
-  type Track2SettingsClaim,
   listTrack2Folders,
   previewTrack2Pull,
   purgeTrack2Week,
@@ -78,15 +77,6 @@ function timeOfDay(text: string): string {
  * like it had not stuck. Same for "every 1 days" against "Every day".
  */
 const MIN_COUNT = 2;
-
-/** A cadence as a number of days -- the only thing that is stored. */
-function everyDaysOf(kind: PullKind, n: number): number {
-  const count = Math.max(Math.floor(n) || MIN_COUNT, MIN_COUNT);
-  if (kind === "day") return 1;
-  if (kind === "week") return 7;
-  if (kind === "weeks") return count * 7;
-  return count;
-}
 
 /** The inverse, for showing a stored cadence back as the choice that
  * says it most plainly: 14 days is "every 2 weeks", not "every 14 days".
@@ -270,17 +260,6 @@ export function Track2PullControlPanel({
   // One root holds everything. The train/val split lives inside each
   // week, under images/ and labels/ -- see the tree below.
   const [root, setRoot] = useState("retraining");
-  /** Every saved settings file's root, and the Model Name it trains as.
-   * Read from the FILES, not from live config -- the live one is
-   * whatever was loaded last, and the question is what the others use. */
-  const [claims, setClaims] = useState<Track2SettingsClaim[]>([]);
-  /** Dismissed for this root. The clash is a warning worth reading, not
-   * a rule: the same week folders CAN feed two Classes. Keyed on the
-   * folder so changing to a different clashing one warns again. */
-  const [rootClashOk, setRootClashOk] = useState("");
-  /** The settings file these values came from, excluded from the clash
-   * check -- a configuration cannot clash with itself. */
-  const [loadedFile, setLoadedFile] = useState("");
   const [imagesSub, setImagesSub] = useState("images");
   const [labelsSub, setLabelsSub] = useState("labels");
   const [weekPrefix, setWeekPrefix] = useState("week_");
@@ -297,8 +276,8 @@ export function Track2PullControlPanel({
   // How often, as one of four shapes rather than a number of days. Only
   // `pullEveryDays` is stored -- the shape is re-derived on load, so
   // "every 2 weeks" comes back as 2 weeks and not as 14 days.
-  const [pullKind, setPullKind] = useState<PullKind>("week");
-  const [pullN, setPullN] = useState(2);
+  const [, setPullKind] = useState<PullKind>("week");
+  const [, setPullN] = useState(2);
   // What time of day a pull lands on. "default" follows the cut-off,
   // which keeps the card down to one clock; "at" moves the clock only,
   // never the dates. Applies to all four cadences above it.
@@ -310,7 +289,7 @@ export function Track2PullControlPanel({
   const [anchorText, setAnchorText] = useState("");
   // What the card wants the trigger to be. Separate from what is live,
   // because nothing on this card takes effect until Apply settings.
-  const [wantedMode, setWantedMode] = useState<TriggerMode>("off");
+  const [, setWantedMode] = useState<TriggerMode>("off");
   // Set by any edit, cleared by Apply -- so "what you are looking at is
   // not what is running" is visible rather than assumed.
   const [dirty, setDirty] = useState(false);
@@ -393,9 +372,6 @@ export function Track2PullControlPanel({
     // than as a blank field nobody would know to fill in.
     if (c.root) setRoot(c.root);
     else if (c.training_root) setRoot(c.training_root);
-    // WHICH saved file is loaded, so the clash warning below does not
-    // accuse this configuration of clashing with itself.
-    setLoadedFile(String(c.settings_file || ""));
     if (c.images_subpath !== undefined) setImagesSub(c.images_subpath);
     if (c.labels_subpath !== undefined) setLabelsSub(c.labels_subpath);
     // The real value, always. The field is read-only now, and one that
@@ -516,12 +492,8 @@ export function Track2PullControlPanel({
       // loading and deleting moved to the Retention card, which writes
       // one file for every card rather than one for this.
       setSettingsFiles(got.files);
-      // What every OTHER saved file already trains out of, so the root
-      // picker can say so before a second one is pointed at it.
-      setClaims(got.claims ?? []);
     } catch {
       setSettingsFiles([]);
-      setClaims([]);
     }
   }, []);
 
@@ -693,7 +665,6 @@ export function Track2PullControlPanel({
   // behind it is left out entirely rather than shown empty, because
   // nothing will create it -- and drawing a folder that will not exist is
   // how the old version came to promise a shape it never built.
-  const triggers = status?.triggers;
   // The prefix as SAVED, which is what the folders on S3 are named
   // after -- not the one being typed.
   const savedPrefix = status?.config?.week_prefix ?? "";
@@ -744,7 +715,6 @@ export function Track2PullControlPanel({
     return lines.join("\n");
   })();
 
-  const pullEveryDays = everyDaysOf(pullKind, pullN);
   // "" means "use the cut-off's time", which is exactly what the API
   // takes, so the two states need no translation between them.
   const pullTime = pullTimeMode === "at" ? timeOfDay(pullTimeText) : "";
@@ -1167,46 +1137,6 @@ export function Track2PullControlPanel({
               bucket={destBucket}
               allowCreate
             />
-            {/* Said WHERE the folder was chosen, not as a banner at the
-                top of the card. The pull writes into this root,
-                retention prunes it and the chain trains from it -- so a
-                second configuration pointed here inherits the first
-                one's data, and the first one's pulls reshape the
-                second one's corpus. */}
-            {(() => {
-              const here = (root || "").replace(/^\/+|\/+$/g, "");
-              const clash = claims.filter(
-                (c) => c.root && c.root === here && c.name !== loadedFile);
-              if (!here || !clash.length || rootClashOk === here) return null;
-              return (
-                <div className="mt-1 rounded-md border border-critical/30 bg-critical-subtle px-2.5 py-2">
-                  <p className="text-xs text-critical">
-                    A directory already is in use for the following model name:{" "}
-                    {clash.map((c, i) => (
-                      <span key={c.name}>
-                        {i > 0 && ", "}
-                        <strong>{c.model || "no model chosen"}</strong>
-                        <span className="text-ink-muted"> (saved as {c.name})</span>
-                      </span>
-                    ))}
-                    .
-                  </p>
-                  <p className="mt-1 text-xs text-ink-secondary">
-                    Pulls into <span className="tabular">{here}</span> will reshape
-                    what that configuration trains on, and retention will prune
-                    its weeks. Pick another root, or override if both are meant
-                    to share these folders.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setRootClashOk(here)}
-                    className="mt-1.5 rounded-md border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary"
-                  >
-                    Use it anyway
-                  </button>
-                </div>
-              );
-            })()}
             <p className="mt-1 text-xs text-ink-muted">
               One root means one S3 prefix, which is what a trainer downloads --
               so a <span className="tabular">data.yaml</span> naming both splits
@@ -1968,46 +1898,6 @@ export function Track2PullControlPanel({
               </div>
             )}
 
-            {/* READ-ONLY here. These controls moved to the pinned bar
-                at the top of the page -- the one place that is always
-                reachable -- and leaving an editable copy behind would
-                be two controls for one setting, which is the shape of
-                every "I changed it and it did not take" bug on this
-                page. This states what is in effect and where to change
-                it. */}
-            <p className="mb-1 text-xs font-medium text-ink">How it runs automatically</p>
-            <p className="tabular text-xs text-ink-secondary">
-              {wantedMode === "off" && "Off -- nothing fires on its own."}
-              {wantedMode === "arrival" && "When files arrive."}
-              {wantedMode === "schedule" && (
-                <>
-                  On a schedule
-                  {pullEveryDays ? ` -- every ${pullEveryDays} day(s)` : ""}
-                  {pullTime ? ` at ${pullTime} SGT` : ""}.
-                </>
-              )}
-            </p>
-            <p className="mt-0.5 text-xs text-ink-muted">
-              Change it in the <strong>Pull</strong> row of the toolbar pinned
-              at the top of the page.
-            </p>
-
-            <p className="mt-1.5 text-xs text-ink-muted">
-              {wantedMode === "off" && "Nothing runs on its own -- only Pull now."}
-              {wantedMode === "arrival" && "Every object written to the bucket wakes the router, which pulls only if that file was under one of these folders. Needs EventBridge notifications on the bucket."}
-              {wantedMode === "schedule" && (
-                anchorToIso(anchorText)
-                  ? `A pull runs every ${pullEveryDays} day${pullEveryDays === 1 ? "" : "s"}, whether or not anything changed.`
-                  : "Nothing is armed until a cut-off date is set."
-              )}
-            </p>
-            {triggers && (
-              <p className="tabular mt-1 text-xs text-ink-muted">
-                arrival: {triggers.arrival.exists ? (triggers.arrival.enabled ? "enabled" : "disabled") : triggers.arrival.error}
-                {"   "}schedule: {triggers.schedule.exists ? (triggers.schedule.enabled ? "enabled" : "disabled") : triggers.schedule.error}
-              </p>
-            )}
-
             {plan && (
               <div className="mt-2 rounded-md border border-black/15 bg-page p-2">
                 {plan.would_create.length > 0 && (
@@ -2060,25 +1950,6 @@ export function Track2PullControlPanel({
             </p>
           )}
 
-          {/* ---------------------------------------- 10. recent sweeps */}
-          <div className="rounded-md border border-black/15 bg-page p-3">
-            <p className="mb-1 text-xs font-medium text-ink">
-              Recent sweeps{" "}
-              <span className="font-normal text-ink-muted">(times are SGT)</span>
-            </p>
-            {(status?.runs ?? []).length === 0 ? (
-              <p className="text-xs text-ink-muted">None yet.</p>
-            ) : (
-              <div className="flex max-h-60 flex-col gap-0.5 overflow-y-auto">
-                {(status?.runs ?? []).slice(0, 15).map((run) => (
-                  <p key={run.at} className="tabular text-xs text-ink-secondary">
-                    {sgt(run.at)} {run.trigger} -- copied {run.moved},
-                    skipped {run.skipped}{run.errors ? `, ${run.errors} failed` : ""}
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       )}
       </div>

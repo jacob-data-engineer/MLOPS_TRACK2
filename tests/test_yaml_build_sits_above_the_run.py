@@ -25,12 +25,12 @@ def test_the_panel_portals_its_build_section_there():
 
 
 def test_it_renders_in_place_when_there_is_no_slot():
-    assert "{!buildSlot && buildSection}" in PANEL
+    assert "{!buildSlot && !onOnlyChange && buildSection}" in PANEL
 
 
 def test_the_portal_is_outside_the_open_shut_branch():
     """Visible whether or not the Assemble card is shown."""
-    assert PANEL.index("{buildSlot && createPortal(") > PANEL.index("{!buildSlot && buildSection}")
+    assert PANEL.index("{buildSlot && createPortal(") > PANEL.index("{!buildSlot && !onOnlyChange && buildSection}")
 
 
 def test_the_build_section_carries_the_whole_yaml_flow():

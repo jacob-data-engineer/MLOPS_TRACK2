@@ -56,4 +56,6 @@ def test_the_debounced_writer_is_still_there():
     """It is what saves every change on the card."""
     code = _panel()
     assert "setTimeout(() => {" in code
-    assert code.count("saveTrack2PullConfig({") == 1
+    # Two since 2026-11-13: the card's writer and the class-fields writer
+    # on Multi-Auto Training.
+    assert code.count("saveTrack2PullConfig({") == 2

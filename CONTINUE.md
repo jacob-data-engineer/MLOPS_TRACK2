@@ -1,5 +1,68 @@
 # Continue here
 
+Stop button for Combine data sources + Catalog section removed from the
+Central data store card (13 Nov). `POST .../central-store/combine/stop`
+sets `retrain_schedule._combine_stop`; `combined_store._copy` asks it
+before every copy, skips the rest and raises `Stopped`. Store copies made
+stay (append only; next combine carries on). A stop during the decay
+deletes the half-built `_decay`. Chain runs are not stoppable this way
+(only the button job). The Data Catalog page is still in the nav; its
+catalog tests on this card were dropped. First live combine (by hand,
+16:47): 27,537 into `Test/helmet_cental_delete`, 24,827 into `_decay`.
+
+Combine data sources (13 Nov, dev `20261113-065016`). Central data store
+card: "Combine data sources" button + "Train from the combined store" tick
+(`central_store.train_from_combined`, absent = off). `data/combined_store.py`
+copies every ticked source into `<store>/{weeks,golden,folders/<slug>}` --
+APPEND ONLY, never overwrite/delete (operator's rule) -- then rebuilds
+`<store>_decay` (weeks train via `retained_lists.select` on `<store>/weeks`;
+golden + folders whole; week val not copied). With the tick on, the
+assembled branch of `_run_chain_body` trains on `<store>_decay` alone.
+`retrain_schedule.cleanup_decayed` (ticker) deletes `_decay` when the
+marker is for_run + built >10 min ago + nothing executing + no queued entry
+names it. Button builds are for_run=false and are kept. Store must be in
+the app bucket. Not yet exercised on live data.
+
+"Repeatable runs" (Freeze this dataset + Freeze on every run tick) removed
+from the Retention card (13 Nov, dev `20261113-062412`). `freeze_on_run`
+stays a saved setting, live = true, so runs still snapshot before
+training; there is no longer a manual freeze or an off switch in the UI.
+
+"Class coverage before and after decay" moved from the Retention card to
+Multi-Auto Training as `Track2CoverageCard` (in Track2RetentionQuality.tsx),
+under "Classes and data.yaml" (13 Nov, dev `20261113-060713`). It reads
+suggested_root, the saved retention policy and golden_set.target_folder,
+and patches only `min_class_images`; the Retention card no longer sends it.
+
+Retention card cleanup (13 Nov, dev `20261113-055939`): its own golden-set
+folder picker and "Training weeks root" picker removed. Root is always
+Pull Control's (`suggested_root` = config["root"], what the chain reads);
+golden folder is read from `golden_set.target_folder` (the Golden Set card,
+what the chain builds). `retention.golden_root` was empty live and unused by
+the run. Pull Control's "How it runs automatically" and "Recent sweeps"
+blocks also removed (`20261113-054846`).
+
+Classes / Label classes / class filter / data.yaml preview moved off Data
+Preparation onto Multi-Auto Training ("Classes and data.yaml", editable)
+(13 Nov, dev `20261113-052129`). Both tabs write `dataset_assemble`: each
+re-reads it and changes only its own fields (DP: folders; Training: the
+two class fields) because write_config replaces the block whole.
+
+SQL pull files into weeks by capture date (13 Nov, dev `20261113-050404`).
+"Sort into weeks by capture date" writes to Pull Control's root as
+`week_N/{images,labels}/{train,val}` using `project_week`; capture moment is
+the `YYYYMMDDTHHMMSSZ` stamp in `case_key` (data->>'timestamp' and judged_at
+are REVIEW time -- never use them). 7,006/7,020 no_helmet frames are stamped;
+undated frames are left out and counted. Sensor tick "Start training after
+each scheduled pull" (off by default, needs by_week) calls
+`queue_after_pull.after_sql_pull` -- registered on `sql_sensor.after_pull` by
+the ticker so data/ does not import chain/ -- with min_files + claim_once.
+Live config has `dataset_assemble.only = true`, so weeks are NOT in the yaml
+until "Use Pull Control" is ticked. Root-clash banner on Pull Control removed.
+Pre-existing failures (3): SqlSettingsBar save test, side boundaries (old
+sql_sensor/sql_settings/ticker crossings), UAT SQL wording.
+
+
 Removed obsolete filename-time option from Pull Control. UI offers S3
 upload time or current sweep week; old capture_time settings load as file_time
 in the editor and apply on save. Existing server schedules are not rewritten.

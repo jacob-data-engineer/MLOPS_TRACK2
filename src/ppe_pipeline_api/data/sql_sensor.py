@@ -2,7 +2,9 @@
 
 One sensor per app's persistent /settings mount. The app has one supported
 worker; its RLock serializes schedule edits and run claims. Long checks run in
-a separate thread, not on the shared training ticker. No training is launched.
+a separate thread, not on the shared training ticker. Training is launched
+only when the saved settings tick `train_after` (with `by_week`), and then
+through the same chain and guards a Pull Control sweep uses.
 """
 from __future__ import annotations
 
@@ -89,7 +91,15 @@ def validate_selection(config):
     settings = config.settings
     if not settings.database or not settings.preset_class:
         raise ValueError("Choose a database and hazard before saving the sensor.")
-    folder = settings.pull_folder.strip().strip("/")
+    if settings.by_week:
+        # The destination is Pull Control's root; it must exist now, not
+        # at 00:00 when nobody is watching.
+        sx.week_destination()
+        folder = "weeks"
+    elif settings.train_after:
+        raise ValueError("Training after a pull needs \"Sort into weeks by capture date\" on.")
+    else:
+        folder = settings.pull_folder.strip().strip("/")
     if not settings.pull_bucket or not folder:
         raise ValueError("Choose the destination bucket and folder first.")
     if any(folder == p or folder.startswith(p + "/") for p in sx.PROTECTED):
@@ -190,16 +200,23 @@ def execute(config, run_id):
         outcome["exclusion_reasons"] = exclusion_reasons
         if len(eligible) > sx.PULL_LIMIT:
             raise ValueError("Too many eligible frames for one pull; narrow the saved selection.")
-        destination = settings.pull_folder.strip().strip("/")
-        if exists(settings.pull_bucket, destination + "/export-contract.json"):
+        if settings.by_week:
+            dest_bucket, destination = sx.week_destination()
+        else:
+            dest_bucket, destination = settings.pull_bucket, settings.pull_folder.strip().strip("/")
+        if exists(dest_bucket, destination + "/export-contract.json"):
             raise ValueError("This destination uses a different export format. Choose a regular frame-pull destination.")
+        placed = sx.week_plan(eligible, settings.train_percent, by_week=settings.by_week)
         def pending(entry):
-            image, side, name = entry
-            image_key = f"{destination}/images/{side}/{name}"
-            label_key = f"{destination}/labels/{side}/{name.rsplit('.', 1)[0]}.txt"
-            return not exists(settings.pull_bucket, image_key) or (settings.with_labels and not exists(settings.pull_bucket, label_key))
+            image, side, name, week = entry
+            image_key, label_key = sx.target_keys(destination, side, name, week)
+            return not exists(dest_bucket, image_key) or (settings.with_labels and not exists(dest_bucket, label_key))
         with ThreadPoolExecutor(max_workers=8) as pool:
-            pending_count = sum(pool.map(pending, sx.copy_plan(eligible, settings.train_percent)))
+            pending_count = sum(pool.map(pending, placed["entries"]))
+        if placed["undated"]:
+            exclusion_reasons.append({"count": placed["undated"], "reason": "No capture date in the frame's case key, so it has no week. Left out rather than filed as new."})
+        if placed["no_week"]:
+            exclusion_reasons.append({"count": placed["no_week"], "reason": "Captured before Pull Control's cut-off while the first week does not take the backlog, or the week does not exist and weeks are not auto-created."})
         current = sorted({i["uri"] for i in eligible})
         with _lock:
             seen = set(read().get("seen", []))
@@ -211,8 +228,10 @@ def execute(config, run_id):
             outcome["summary"] = sx.pull(settings.database, sql, dest_bucket=settings.pull_bucket,
                 dest_folder=destination, train_percent=settings.train_percent, with_labels=settings.with_labels,
                 class_ids=settings.class_ids if settings.with_labels else None, query_result=result,
-                progress=lambda event: update_progress(run_id, event))
+                progress=lambda event: update_progress(run_id, event), by_week=settings.by_week)
             outcome["status"] = "partial" if outcome["summary"]["failed"] else "complete"
+            if settings.train_after and settings.by_week and not manual_run(run_id):
+                outcome["training"] = chain_after(run_id, outcome["summary"])
         else:
             outcome["status"] = "unchanged"
         with _lock:
@@ -230,6 +249,32 @@ def execute(config, run_id):
                 write(state)
             finally:
                 _running = False
+
+
+def manual_run(run_id) -> bool:
+    """Whether this run was "Check now". Only a SCHEDULED pull chains."""
+    return (read().get("last_run") or {}).get("trigger") == "manual" and \
+        (read().get("last_run") or {}).get("id") == run_id
+
+
+#: The training chain, registered by the chain side (`chain/ticker.py`)
+#: rather than imported: the data side imports neither training nor chain.
+#: None in an instance whose ticker is not running, which then says so.
+after_pull = None
+
+
+def chain_after(run_id, summary) -> dict:
+    """Hand a scheduled pull into the weeks to the training chain.
+
+    Never raises: a chain that cannot start is reported on the sensor's
+    result, not lost in a thread.
+    """
+    if after_pull is None:
+        return {"queued": False, "reason": "The training chain is not running in this app instance."}
+    try:
+        return after_pull(run_id, summary)
+    except Exception as exc:                                        # noqa: BLE001
+        return {"queued": False, "reason": f"chain: {exc}"[:400]}
 
 
 def update_progress(run_id, event):

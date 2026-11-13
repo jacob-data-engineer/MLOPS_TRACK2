@@ -189,8 +189,10 @@ def test_the_page_is_routed_and_offered():
     web = ROOT / "web" / "src"
     assert 'path="/track2/catalog" element={<Track2CatalogPage />}' in (web / "App.tsx").read_text(encoding="utf-8")
     assert '"Track2 Data Catalog"' in (web / "components" / "Layout.tsx").read_text(encoding="utf-8")
+    # The catalog section left the Central data store card (2026-11-13);
+    # the page is reached from the nav.
     card = (web / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
-    assert "formatDayTime(catalog.last_sync.finished_at)" in card and "UTC`" not in card
+    assert "getTrack2CatalogStatus" not in card
     from ppe_pipeline_api.main import app
     paths = app.openapi()["paths"]
     for path in ("/track2/catalog/runs", "/track2/catalog/versions", "/track2/catalog/exports",
@@ -530,16 +532,6 @@ def test_sync_with_the_postgres_backend_says_there_is_nothing_to_copy(monkeypatc
         app.dependency_overrides.pop(require_session, None)
     assert body["started"] is False and body["direct"] is True
     assert "nothing to copy" in body["detail"] and not started
-
-
-def test_the_card_says_what_is_true_for_each_backend():
-    card = (ROOT / "web" / "src" / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
-    assert 'const direct = catalog?.record_backend === "postgres";' in card
-    assert "Records are written straight to PostgreSQL as they happen" in card
-    assert "onClick={refresh}" in card
-    # the DynamoDB copy is watched until it finishes, not re-read once after 5 s
-    assert "for (let i = 0; i < 60; i += 1)" in card
-    assert "window.setTimeout(() => {\n        getTrack2CatalogStatus()" not in card
 
 
 def test_the_status_says_when_it_was_read():

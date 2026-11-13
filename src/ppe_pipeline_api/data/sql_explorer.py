@@ -231,6 +231,11 @@ def run(key: str, sql: str, *, bucket: str = "", folder: str = "") -> dict:
     if all(c in out["columns"] for c in ("people", "width", "height")):
         for image in images:
             image["labels"] = frame_labels(dict(zip(out["columns"], out["rows"][image["row"]])))
+    # When each frame was captured, for filing it into the week it belongs
+    # to. Read once here so the preview, the pull and the sensor agree.
+    for image in images:
+        when = capture_moment(dict(zip(out["columns"], out["rows"][image["row"]])), image["key"])
+        image["captured_at"] = when.isoformat() if when else ""
     return {"columns": out["columns"], "rows": out["rows"],
             "truncated": out.get("truncated", False), "images": images,
             "available_labels": label_catalog(images)}
@@ -809,6 +814,112 @@ def copy_plan(images: list[dict], train_percent: int) -> list:
     return plan
 
 
+#: Columns read as a frame's capture moment, in order. A query that names
+#: one of these outright wins over the stamp inside `case_key`.
+CAPTURE_COLUMNS = ("captured_at", "capture_time", "capture_at")
+
+
+def capture_moment(row: dict, image_key: str = "") -> _dt.datetime | None:
+    """When a frame was captured, or None when nothing says.
+
+    The review database has no capture column. The moment is the
+    `20260602T014129Z` stamp inside `case_key` (checked 2026-11-13: 7,006 of
+    the 7,020 `no_helmet` frames carry one). `data->>'timestamp'` and
+    `judged_at` are when the frame was REVIEWED -- months later -- and are
+    deliberately not read: filing by them would make every frame look as
+    new as its review and flatten the decay curve.
+
+    None is a fact, not a gap to fill: the caller counts it and leaves the
+    frame out of the weeks rather than inventing a date.
+    """
+    from .. import pull_control as pc
+    for column in CAPTURE_COLUMNS:
+        value = row.get(column)
+        if not value:
+            continue
+        try:
+            moment = _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        return moment if moment.tzinfo else moment.replace(tzinfo=_dt.timezone.utc)
+    for text in (row.get("case_key"), image_key):
+        if text:
+            moment = pc.capture_time(str(text))
+            if moment is not None:
+                return moment
+    return None
+
+
+def week_plan(images: list[dict], train_percent: int, *, by_week: bool = False,
+              config: dict | None = None, weeks: list | None = None) -> dict:
+    """Where each image goes: `copy_plan` plus the week folder it is filed in.
+
+    `entries` are `(image, side, name, week)`; `week` is "" when not filing
+    by week. The week is Pull Control's own arithmetic (`project_week` over
+    its cut-off and week length), so a SQL frame and a Pull Control file
+    captured the same day land in the same `week_N`, and Retention ages them
+    together. Frames with no capture moment, or that fall in no week the
+    configuration allows, are counted and left out -- never filed into the
+    current week, which would make old frames look new.
+
+    Pure apart from reading the config and week rows: nothing is created.
+    `new_weeks` are the week rows the caller must create before copying.
+    """
+    plan = copy_plan(images, train_percent)
+    if not by_week:
+        return {"entries": [(i, s, n, "") for i, s, n in plan],
+                "undated": 0, "no_week": 0, "new_weeks": []}
+    from .. import pull_control as pc
+    config = config if config is not None else pc.read_config()
+    known = list(weeks if weeks is not None else pc.list_weeks())
+    entries, new_weeks, undated, no_week = [], [], 0, 0
+    for image, side, name in plan:
+        text = image.get("captured_at") or ""
+        if not text:
+            undated += 1
+            continue
+        week, projected = pc.project_week(_dt.datetime.fromisoformat(text), known, config)
+        if not week:
+            no_week += 1
+            continue
+        for row in projected:
+            new_weeks.append(row)
+            known.append(row)
+        entries.append((image, side, name, week["name"]))
+    return {"entries": entries, "undated": undated, "no_week": no_week,
+            "new_weeks": new_weeks}
+
+
+def week_destination(config: dict | None = None) -> tuple[str, str]:
+    """`(bucket, root)` that week folders live in: Pull Control's root.
+
+    One root for every source of weeks, so Retention, the yaml builder and
+    the chain see SQL frames with no change of their own.
+    """
+    from .. import pull_control as pc
+    config = config if config is not None else pc.read_config()
+    root = str(config.get("root") or "").strip().strip("/")
+    if not root:
+        raise ValueError("Pull Control has no root folder set, so there are no weeks "
+                         "to file into. Set its root first.")
+    return pc.destination_bucket(config), root
+
+
+def target_keys(dest_folder: str, side: str, name: str, week: str = "") -> tuple[str, str]:
+    """`(image_key, label_key)` for one entry of `week_plan`."""
+    base = f"{dest_folder}/{week}" if week else dest_folder
+    return (f"{base}/images/{side}/{name}",
+            f"{base}/labels/{side}/{name.rsplit('.', 1)[0]}.txt")
+
+
+def _count_weeks(done: list) -> dict:
+    out: dict = {}
+    for d in done:
+        if d.get("week"):
+            out[d["week"]] = out.get(d["week"], 0) + 1
+    return dict(sorted(out.items(), key=lambda kv: int(re.sub(r"\D", "", kv[0]) or 0)))
+
+
 _pull_lock = threading.Lock()
 
 
@@ -823,7 +934,8 @@ def serialized_pull(fn):
 @serialized_pull
 def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
          dest_bucket: str, dest_folder: str, train_percent: int = 100,
-         with_labels: bool = True, progress=None, class_ids=None, query_result=None) -> dict:
+         with_labels: bool = True, progress=None, class_ids=None, query_result=None,
+         by_week: bool = False) -> dict:
     """Run the query, then copy every image it names into
     `dest_bucket/dest_folder` in the layout a training run reads:
 
@@ -842,7 +954,19 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
     `sources.json` maps each copied file back to where it came from, and
     `query.json` records the query that chose them -- the only record of
     why these images are in this folder.
+
+    With `by_week`, the destination is Pull Control's root instead of
+    `dest_bucket/dest_folder`, and each frame is filed by its capture date:
+
+        <root>/week_N/images/{train,val}/<name>   (+ labels/ beside it)
+
+    which is the layout Retention's inventory and the yaml builder read.
     """
+    config = None
+    if by_week:
+        from .. import pull_control as pc
+        config = pc.read_config()
+        dest_bucket, dest_folder = week_destination(config)
     dest_bucket = (dest_bucket or "").strip()
     dest_folder = (dest_folder or "").strip().strip("/")
     if not dest_bucket or not dest_folder:
@@ -894,7 +1018,12 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
             if any(names.get(cid) != name for name, cid in class_ids.items()):
                 raise ValueError("This folder uses different class IDs. Choose a new folder for the changed mapping.")
         else:
-            existing = storage.s3.list_objects_v2(Bucket=dest_bucket, Prefix=dest_folder + "/labels/", MaxKeys=1)
+            if by_week:
+                # Labels sit inside the week folders, not under the root.
+                listed = storage.s3.list_objects_v2(Bucket=dest_bucket, Prefix=dest_folder + "/", MaxKeys=1000)
+                existing = {"Contents": [o for o in listed.get("Contents", []) if "/labels/" in o["Key"]]}
+            else:
+                existing = storage.s3.list_objects_v2(Bucket=dest_bucket, Prefix=dest_folder + "/labels/", MaxKeys=1)
             if existing.get("Contents"):
                 raise ValueError("Existing labels have no data.yaml to verify their class IDs. Choose a new folder.")
             names = {i: f"unused_{i}" for i in range(max(class_ids.values()) + 1)}
@@ -905,12 +1034,18 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
                 image["labels"] = {**image["labels"], "boxes": [
                     {**b, "cls": class_ids[b["name"]]} for b in image["labels"]["boxes"]]}
 
-    plan = copy_plan(images, train_percent)
+    placed = week_plan(images, train_percent, by_week=by_week, config=config)
+    plan = placed["entries"]
+    if by_week:
+        from .. import pull_control as pc
+        for row in placed["new_weeks"]:
+            # A week row, so Pull Control's week list shows what was filed.
+            pc.create_week(name=row["name"], starts_at=row["starts_at"])
 
     def copy(entry):
-        image, side, name = entry
-        target = f"{dest_folder}/images/{side}/{name}"
-        out = {"image": image["uri"], "target": target, "side": side,
+        image, side, name, week = entry
+        target, label_target = target_keys(dest_folder, side, name, week)
+        out = {"image": image["uri"], "target": target, "side": side, "week": week,
                "copied": False, "label": "", "error": ""}
         try:
             if _exists(dest_bucket, target):
@@ -920,7 +1055,6 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
                     Bucket=dest_bucket, Key=target,
                     CopySource={"Bucket": image["bucket"], "Key": image["key"]})
                 out["copied"] = True
-            label_target = f"{dest_folder}/labels/{side}/{name.rsplit('.', 1)[0]}.txt"
             if not with_labels:
                 return out
             if image.get("labels"):
@@ -981,6 +1115,10 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
         "val": sum(d["side"] == "val" for d in ok),
         "bare_paths_left_out": bare,
         "left_out_incomplete": incomplete,
+        "by_week": by_week,
+        "left_out_undated": placed["undated"],
+        "left_out_no_week": placed["no_week"],
+        "weeks": _count_weeks(ok),
         "labels_from": "database" if generated else ("source" if with_labels else "none"),
         "failed": len(done) - len(ok),
         "errors": [f"{d['image']}: {d['error']}" for d in done if d["error"]][:10],
@@ -995,7 +1133,7 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
         Bucket=dest_bucket, Key=f"{dest_folder}/query.json",
         Body=json.dumps({"database": key, "sql": sql, "bucket": bucket, "folder": folder,
                          "train_percent": train_percent, "with_labels": with_labels,
-                         "class_ids": class_ids,
+                         "class_ids": class_ids, "by_week": by_week,
                          "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
                          "summary": summary}, indent=1).encode(),
         ContentType="application/json")

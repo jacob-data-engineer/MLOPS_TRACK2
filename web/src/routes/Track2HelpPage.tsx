@@ -356,11 +356,8 @@ const TRAINING_STEPS: StepList = [
         and its file count. <strong>Load</strong> points the form at it;{" "}
         <strong>Run</strong> loads it and queues the run;{" "}
         <strong>Delete</strong> asks first, and removes only the record,
-        never the images. Snapshots are made two ways: <strong>Freeze the
-        dataset on every run</strong> in Retention (on by default; off, runs
-        train on the same images but leave no snapshot), which captures
-        every ticked source; and <strong>Freeze this dataset</strong>, the
-        manual button, which freezes Pull Control&rsquo;s root only.
+        never the images. A snapshot is made automatically before every run,
+        capturing every ticked source.
       </>
     ),
   },

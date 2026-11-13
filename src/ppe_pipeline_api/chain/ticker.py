@@ -34,9 +34,20 @@ async def queue_poll_loop() -> None:
         await asyncio.sleep(25)
         try:
             from ..data import sql_sensor
+            from . import queue_after_pull
+            # The sensor lives on the data side and may not import the
+            # chain; the chain hands it the one thing it calls.
+            sql_sensor.after_pull = queue_after_pull.after_sql_pull
             await asyncio.to_thread(sql_sensor.tick)
         except Exception as exc:
             print(f"SQL file sensor tick failed: {exc}")
+        try:
+            from . import retrain_schedule
+            done = await asyncio.to_thread(retrain_schedule.cleanup_decayed)
+            if done:
+                print(f"Decayed copy cleaned up: {done}")
+        except Exception as exc:
+            print(f"Decayed copy clean-up failed: {exc}")
         try:
             from . import sql_worker
             await asyncio.to_thread(sql_worker.tick)

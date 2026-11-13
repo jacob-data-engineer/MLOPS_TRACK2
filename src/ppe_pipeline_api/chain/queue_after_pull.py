@@ -353,6 +353,31 @@ def check(config: dict | None = None) -> dict:
             "steps": outcome.get("steps", [])}
 
 
+def after_sql_pull(run_id: str, summary: dict) -> dict:
+    """The chain after a scheduled SQL pull filed frames into the weeks.
+
+    The same chain a Pull Control sweep sets off (`run_chain`, submit
+    "queue": lists -> data.yaml -> dataset version -> queued run), behind
+    the same batch guard (`min_files`) and a claim, so dev and stable --
+    which each run the SQL sensor -- cannot both queue a GPU run for one
+    pull. Registered on `data.sql_sensor.after_pull` by the ticker.
+    """
+    from . import retrain_schedule as rs
+
+    copied = int(summary.get("copied") or 0)
+    minimum = max(1, int(settings().get("min_files") or 1))
+    if copied < minimum:
+        return {"queued": False,
+                "reason": f"{copied} new frame(s), below the {minimum} that counts as a batch."}
+    if not pc.claim_once("sql_pull_chain", run_id):
+        return {"queued": False, "reason": "Another app instance is handling this pull."}
+    config = pc.read_config()
+    outcome = rs.run_chain(config=rs.automatic(config), trigger="after-sql-pull", submit="queue")
+    if outcome.get("ok"):
+        return {"queued": True, "reason": ""}
+    return {"queued": False, "reason": _first_problem(outcome)}
+
+
 def _first_problem(outcome: dict) -> str:
     """The step that stopped it, or a short success line."""
     for step in outcome.get("steps") or []:

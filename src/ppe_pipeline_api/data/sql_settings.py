@@ -49,6 +49,14 @@ class SqlSettings(BaseModel):
     exploration_hazard: str = "all"
     exploration_open: bool = True
     frames_open: bool = True
+    # File each frame into Pull Control's week folders by its capture date,
+    # so Retention decays SQL frames like any other week. Off: the flat
+    # pull_folder layout, exactly as before.
+    by_week: bool = False
+    # After a SCHEDULED pull that copied something, run the training chain
+    # (lists -> data.yaml -> dataset version -> queue). Off by default: each
+    # firing is a GPU run. Only meaningful with by_week.
+    train_after: bool = False
 
 
 def directory() -> Path:

@@ -36,6 +36,7 @@ with a reason rather than training on whatever happened to be there.
 from __future__ import annotations
 
 import datetime as _dt
+import threading
 import uuid
 import os
 
@@ -970,10 +971,29 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
             # longer in use. Leaving it would score the run on images
             # nothing was trained on.
             splits = {**splits, "val": []}
+        yaml_bucket = assembled["bucket"]
+        if combined_enabled(config):
+            # Every ticked source copied into the central store (added to,
+            # never pruned), then a decayed copy of it rebuilt -- and the
+            # run trains on that copy alone. Deleted again once the run has
+            # finished (`cleanup_decayed`).
+            try:
+                both = combine_and_decay(config, for_run=True)
+            except Exception as exc:                           # noqa: BLE001
+                record("combine", False, str(exc))
+                return {"trigger": trigger, "at": _now().isoformat(timespec="seconds"),
+                        "ok": False, "steps": steps}
+            combined, decayed = both["combined"], both["decayed"]
+            record("combine", True,
+                   f"{combined['copied']} new file(s) into {combined['store']}; "
+                   f"{decayed['copied']} copied into {decayed['folder']} after decay")
+            splits = {"train": decayed["train"], "val": decayed["val"]}
+            yaml_bucket = decayed["bucket"]
+            used = [f"the decayed copy of the central store ({decayed['folder']})"]
         try:
             out = data.write_yaml_in_place(
                 splits=splits, classes=assembled["classes"],
-                bucket=assembled["bucket"], overwrite=assembled["overwrite"],
+                bucket=yaml_bucket, overwrite=assembled["overwrite"],
                 # Every label file, not a sample. Unattended, with GPU
                 # time riding on the answer.
                 label_scan=None, drop_undeclared=drop_undeclared)
@@ -1645,6 +1665,152 @@ def source_selection(config: dict | None = None) -> dict:
         "golden": bool(retention.get("use_golden")),
         "pull": not bool(assemble.get("only")),
     }
+
+
+def combined_enabled(config: dict | None = None) -> bool:
+    """"Train from the combined store" on the Central data store card."""
+    config = config if config is not None else pc.read_config()
+    return bool((config.get("central_store") or {}).get("train_from_combined"))
+
+
+def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None) -> dict:
+    """Copy every TICKED source into the central store, then rebuild its
+    decayed copy. The chain calls it before every run; the card's
+    "Combine data sources" button calls it by hand (`for_run=False`, so
+    the copy it leaves is kept for looking at rather than cleaned up).
+
+    Which sources: the same three ticks the yaml has always been the union
+    of -- Assemble's folders, the golden set, Pull Control's weeks.
+    """
+    from .. import data
+
+    config = config if config is not None else pc.read_config()
+    picks = source_selection(config)
+    assembled = assemble_plan(config)
+    golden = golden_plan(config)
+    root = str(config.get("root") or "").strip("/")
+    week_prefix = str(config.get("week_prefix") or "week_")
+    use_weeks = bool(picks["pull"] and root)
+
+    folders: list = []
+    if picks["folders"] and assembled is not None:
+        folders = ([{**e, "split": "train"} for e in assembled["splits"]["train"]]
+                   + [{**e, "split": "val"} for e in assembled["splits"]["val"]])
+    if not (folders or golden or use_weeks):
+        raise ValueError("Nothing is ticked to combine. Tick at least one of \"Use these "
+                         "folders\", \"Use Pick Golden Set / Edge Cases\" or \"Use Pull Control\".")
+
+    combined = data.combine_store(
+        weeks_root=root if use_weeks else "",
+        weeks_bucket=pc.destination_bucket(config), week_prefix=week_prefix,
+        golden_folder=golden["target_folder"] if golden else "",
+        golden_bucket=golden["target_bucket"] if golden else "",
+        folders=folders, stop=stop)
+    if combined["failed"]:
+        raise ValueError(f"{combined['failed']} file(s) could not be copied into the central "
+                         "store: " + "; ".join(combined["errors"][:3]))
+    retention = {**(config.get("retention") or {}), "week_prefix": week_prefix,
+                 "excluded_weeks": excluded_weeks(config)}
+    decayed = data.rebuild_decayed(
+        retention=retention, use_weeks=use_weeks, use_golden=golden is not None,
+        golden_split=bool(golden["split"]) if golden else True,
+        slugs=combined["slugs"], for_run=for_run, stop=stop)
+    return {"combined": combined, "decayed": decayed}
+
+
+#: What the "Combine data sources" button last did, for the card to show.
+_combine_job: dict = {}
+_combine_lock = threading.Lock()
+#: Set by the card's Stop button; asked before every copy.
+_combine_stop = threading.Event()
+
+
+def combine_job() -> dict:
+    return dict(_combine_job)
+
+
+def start_combine() -> dict:
+    """Run `combine_and_decay` by hand, in the background: thousands of
+    server-side copies outlast a request."""
+    with _combine_lock:
+        if _combine_job.get("running"):
+            raise ValueError("A combine is already running.")
+        _combine_job.clear()
+        _combine_stop.clear()
+        _combine_job.update(running=True, started_at=_now().isoformat(timespec="seconds"))
+
+    def work():
+        try:
+            out = combine_and_decay(for_run=False, stop=_combine_stop.is_set)
+            result = {"ok": True,
+                      "store": out["combined"]["store"], "decayed": out["decayed"]["folder"],
+                      "new_in_store": out["combined"]["copied"],
+                      "already_in_store": out["combined"]["already"],
+                      "in_decayed": out["decayed"]["copied"],
+                      "sources": out["combined"]["sources"]}
+        except Exception as exc:                                   # noqa: BLE001
+            result = {"ok": False, "error": str(exc),
+                      "stopped": type(exc).__name__ == "Stopped"}
+        with _combine_lock:
+            _combine_job.update(running=False, finished_at=_now().isoformat(timespec="seconds"),
+                                **result)
+
+    threading.Thread(target=work, daemon=True, name="combine-store").start()
+    return combine_job()
+
+
+def stop_combine() -> dict:
+    """The card's Stop button. Copies in flight finish (each is whole or
+    absent); the rest are skipped. What reached the store stays -- it is
+    only ever added to, and the next combine carries on from there. A
+    half-built decayed copy is deleted."""
+    with _combine_lock:
+        if not _combine_job.get("running"):
+            raise ValueError("No combine is running.")
+        _combine_stop.set()
+        _combine_job["stopping"] = True
+    return combine_job()
+
+
+#: How long a decayed copy built for a run is left alone before it may be
+#: cleaned up: the chain freezes and queues it after building it, and
+#: until the entry is queued nothing yet refers to it.
+DECAY_GRACE_MINUTES = 10
+
+
+def cleanup_decayed() -> str:
+    """Delete `<store>_decay` once the run it was built for has finished.
+
+    Only a copy the CHAIN built (`for_run`); one made with the button is
+    left for looking at until the next build replaces it. And only when
+    nothing could still read it: no run on the GPU, no queued or running
+    entry naming it, and the grace period since it was built has passed.
+    Called on the app's tick. Returns what it did, for the log.
+    """
+    import json as _json
+
+    from .. import data, training
+
+    if not combined_enabled():
+        return ""
+    marker = data.decay_marker()
+    if not marker or marker.get("status") != "built" or not marker.get("for_run"):
+        return ""
+    try:
+        built = _dt.datetime.fromisoformat(str(marker.get("built_at")))
+    except ValueError:
+        return ""
+    if (_now() - built).total_seconds() < DECAY_GRACE_MINUTES * 60:
+        return ""
+    if training.current_training_reason():
+        return ""
+    _, _, decayed = data.combined_location()
+    snapshot = training.queue_snapshot()
+    waiting = [*snapshot.get("pending", []), *([snapshot["running"]] if snapshot.get("running") else [])]
+    if decayed in _json.dumps(waiting, default=str):
+        return ""
+    removed = data.delete_decayed()
+    return f"deleted {removed} file(s) from {decayed}"
 
 
 def golden_plan(config: dict) -> dict | None:

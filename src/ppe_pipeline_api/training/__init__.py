@@ -16,7 +16,7 @@ __all__ = [
     # the queue and runs -- each trains on a data-side dataset version
     "queue_add", "queue_start", "start_custom_training_run",
     # what the clock (chain/ticker.py, chain/queue_runner.py) drives
-    "restore_queue", "queue_snapshot", "try_advance_queue",
+    "restore_queue", "queue_snapshot", "try_advance_queue", "current_training_reason",
     "reconcile_training_audits", "sweep_idle_endpoint", "check_auto_export",
 ]
 
@@ -30,6 +30,7 @@ queue_start = _through(__name__, "track2_shared", "queue_start")
 start_custom_training_run = _through(__name__, "track2_shared", "start_custom_training_run")
 restore_queue = _through(__name__, "track2_shared", "restore_queue")
 queue_snapshot = _through(__name__, "track2_shared", "queue_snapshot")
+current_training_reason = _through(__name__, "track2_shared", "current_training_reason")
 try_advance_queue = _through(__name__, "track2_shared", "try_advance_queue")
 reconcile_training_audits = _through(__name__, "track2_shared", "reconcile_training_audits")
 sweep_idle_endpoint = _through(__name__, "track2_shared", "sweep_idle_endpoint")

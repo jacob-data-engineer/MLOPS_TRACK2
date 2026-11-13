@@ -178,10 +178,15 @@ DEFAULTS = {
     # and is read live every time, never saved.
     "readiness_flow": {},
     # The CENTRAL DATA STORE (2026-10-29): the one bucket and folder where
-    # all the data and images are meant to be kept. `{bucket, folder}`.
-    # Chosen on its own card on Data Preparation, below the Pull queue,
-    # and saved like every other card's choice -- a setting nobody can
-    # restore is not a setting.
+    # all the data and images are meant to be kept. `{bucket, folder,
+    # train_from_combined}`. Chosen on its own card on Data Preparation,
+    # below the Pull queue, and saved like every other card's choice -- a
+    # setting nobody can restore is not a setting.
+    #
+    # `train_from_combined` (2026-11-13; absent = off): before every run the
+    # chain copies each ticked source into the store (only ever added to),
+    # rebuilds `<folder>_decay` from it through the retention policy, and
+    # trains on that copy alone -- deleting it once the run has finished.
     "central_store": {},
     # Catalog package choices belong in saved settings; uploaded documents do not.
     "catalog_export": {"include_images": True, "include_model": True, "output_type": "complete"},

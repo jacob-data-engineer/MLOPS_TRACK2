@@ -17,5 +17,7 @@ def test_the_lists_are_gone():
         assert gone not in PANEL, gone
 
 
-def test_freezing_still_works_from_here():
-    assert "takeTrack2Snapshot(root, snapshotNote)" in PANEL
+def test_the_freeze_button_is_gone_too():
+    """Repeatable runs removed 2026-11-13. Runs still freeze a snapshot
+    before training while `freeze_on_run` is on (the saved default)."""
+    assert "takeTrack2Snapshot(" not in PANEL

@@ -41,14 +41,27 @@ def test_the_preview_stays_on_training_and_is_the_assemble_cards_own():
     assert "<Track2DatasetAssemblePanel multiSource modelSlug={modelChoice.slug} previewOnly />" in MODELS
 
 
-def test_the_preview_never_writes_the_settings():
-    """The card that edits them is on the other tab. A preview copy that
-    saved what it loaded would race it."""
-    writer = PANEL[PANEL.index("// One writer for the whole card"):PANEL.index("// Check each filled pair")]
-    assert "if (!settingsRead || previewOnly) return;" in writer
+def test_the_classes_are_set_on_multi_auto_training_not_data_preparation():
+    """Moved 2026-11-13: which labelled classes a run trains, and whether
+    undeclared boxes are dropped, are training decisions -- set beside
+    Add to Queue. Data Preparation picks folders only."""
+    assert "{!buildSlot && !onOnlyChange && buildSection}" in PANEL
     preview = PANEL[PANEL.index("const buildSection = ("):]
-    assert "readOnly={previewOnly}" in preview and "disabled={previewOnly}" in preview
-    assert "onNameTheRest={previewOnly ? undefined : nameTheRest}" in PANEL
+    assert "readOnly={previewOnly}" not in preview and "disabled={previewOnly}" not in preview
+    assert "onNameTheRest={nameTheRest}" in PANEL
+
+
+def test_each_tab_writes_only_its_own_fields_onto_the_saved_block():
+    """`write_config` replaces `dataset_assemble` whole, and the two tabs
+    now edit different parts of it. Each starts from what is saved, or the
+    last one to save would put back a stale copy of the other's fields."""
+    folders = PANEL[PANEL.index("// One writer for the whole card"):PANEL.index("// The class fields' writer")]
+    assert "if (!settingsRead || previewOnly) return;" in folders
+    assert "...saved," in folders and "...(onOnlyChange ? {} : {" in folders
+    classes = PANEL[PANEL.index("// The class fields' writer"):PANEL.index("// Check each filled pair")]
+    assert "if (!settingsRead || !previewOnly || !classesTouched.current) return;" in classes
+    assert "...saved," in classes
+    assert "train_sources" not in classes and "folders" not in classes.split("dataset_assemble")[1]
 
 
 def test_every_data_card_that_saves_says_so():

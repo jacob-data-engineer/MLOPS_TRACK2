@@ -187,7 +187,7 @@ def test_the_central_data_store_is_a_saved_data_preparation_setting():
     assert "central_store" in pc.SCOPES["dp"]
     assert "central data store" in pc.DP_CARDS
     panel = (WEB / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
-    assert "saveTrack2PullConfig({ central_store: { bucket, folder } })" in panel
+    assert "saveTrack2PullConfig({ central_store: { bucket, folder, train_from_combined: trainFromCombined } })" in panel
     page = (WEB / "routes" / "Track2DataPrepPage.tsx").read_text(encoding="utf-8")
     assert page.index("<Track2AutoTrainingPanel />") < page.index("<Track2CentralStorePanel />")
 

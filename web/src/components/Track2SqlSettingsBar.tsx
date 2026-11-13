@@ -13,6 +13,10 @@ export type SqlPageSettings = {
   pull_bucket: string; pull_folder: string; train_percent: number;
   show_labels: boolean; with_labels: boolean;
   exploration_hazard: string; exploration_open: boolean; frames_open: boolean;
+  /** File frames into Pull Control's weeks by capture date. */
+  by_week?: boolean;
+  /** After a scheduled pull into the weeks, queue a training run. */
+  train_after?: boolean;
 };
 export const SQL_DEFAULTS: SqlPageSettings = {
   schedule: SQL_SCHEDULE_DEFAULTS,
@@ -24,6 +28,7 @@ export const SQL_DEFAULTS: SqlPageSettings = {
   database: "violation-review", preset_class: "", preset_scope: "resolved",
   pull_bucket: "track2-s3", pull_folder: "", train_percent: 80,
   show_labels: true, with_labels: true, exploration_hazard: "all", exploration_open: true, frames_open: true,
+  by_week: false, train_after: false,
 };
 export type SqlSavedPreset = { name: string; saved_at: string; settings: SqlPageSettings };
 

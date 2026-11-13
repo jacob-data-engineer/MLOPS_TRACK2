@@ -284,7 +284,7 @@ def test_the_filter_checkbox_is_always_visible_not_only_on_a_mismatch():
     # copy -- two controls for one setting is the trap this card has.
     field = FLAT.index('placeholder="0 helmet, 1 gloves, 2 vest, 3 boots"')
     warn = FLAT.index("{undeclared.length > 0 && (")
-    tick = FLAT.index("onChange={(e) => setDropUndeclared(e.target.checked)}")
+    tick = FLAT.index("setDropUndeclared(e.target.checked); }}")
     assert field < tick
     assert FLAT.count('checked={dropUndeclared}') == 1, "one checkbox, not one per place"
     assert "under Label classes above." in FLAT
@@ -302,7 +302,8 @@ def test_name_the_rest_fills_placeholders_without_touching_real_names():
 
 
 def test_the_tick_is_saved_restored_and_sent():
-    assert PANEL.count("drop_undeclared_labels: dropUndeclared,") == 1
+    # Two writers since 2026-11-13 -- see test_labels_must_fit_the_names.
+    assert PANEL.count("drop_undeclared_labels: dropUndeclared,") == 2
     assert "setDropUndeclared(saved.drop_undeclared_labels)" in FLAT
     # Sent with the live preview; the run reads the saved tick itself.
     assert "previewTrack2DatasetYaml(f, classesOf(), true, dropUndeclared," in FLAT

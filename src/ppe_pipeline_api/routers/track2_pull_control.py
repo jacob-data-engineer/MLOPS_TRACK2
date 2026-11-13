@@ -1113,3 +1113,32 @@ def fill_gaps(session=Depends(require_session)) -> dict:
         return pc.create_gap_folders()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not create them: {exc}")
+
+
+@router.post("/central-store/combine")
+def combine_central_store(session=Depends(require_session)) -> dict:
+    """"Combine data sources" on the Central data store card: copy every
+    ticked source into the store (added to, never pruned) and rebuild its
+    decayed copy, in the background. Nothing is queued or trained."""
+    from ..chain import retrain_schedule as rs
+    try:
+        return rs.start_combine()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/central-store/combine/stop")
+def stop_combine_central_store(session=Depends(require_session)) -> dict:
+    """Stop the running combine. What already reached the store stays."""
+    from ..chain import retrain_schedule as rs
+    try:
+        return rs.stop_combine()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.get("/central-store/combine")
+def combine_central_store_status(session=Depends(require_session)) -> dict:
+    """What the last combine did, and whether one is running."""
+    from ..chain import retrain_schedule as rs
+    return rs.combine_job()

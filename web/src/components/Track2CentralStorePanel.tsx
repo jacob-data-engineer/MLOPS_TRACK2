@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   ApiError,
-  createTrack2CatalogSchema,
-  getTrack2CatalogStatus,
+  getTrack2Combine,
   getTrack2PullControl,
+  startTrack2Combine,
+  stopTrack2Combine,
+  type Track2CombineJob,
   saveTrack2PullConfig,
-  syncTrack2Catalog,
-  type Track2CatalogStatus,
 } from "../lib/api";
-import { Link } from "react-router-dom";
 import { formatDayTime } from "../lib/format";
 import { Card } from "./Card";
 import { S3FolderField } from "./S3FolderField";
@@ -28,78 +27,22 @@ import { WRITABLE } from "./Track2PullControlPanel";
 export function Track2CentralStorePanel() {
   const [bucket, setBucket] = useState("");
   const [folder, setFolder] = useState("");
+  /** Train from the decayed copy of the combined store, rebuilt before
+   * every run. Saved with the bucket and folder. */
+  const [trainFromCombined, setTrainFromCombined] = useState(false);
+  const [combine, setCombine] = useState<Track2CombineJob | null>(null);
+  const [combineError, setCombineError] = useState("");
   // The writer must not run before the saved choice is read, or it would
   // save the empty defaults over it.
   const [settingsRead, setSettingsRead] = useState(false);
   const [saved, setSaved] = useState(false);
-  // The catalog: the database that records every file in the store.
-  const [catalog, setCatalog] = useState<Track2CatalogStatus | null>(null);
-  const [catalogBusy, setCatalogBusy] = useState(false);
-  const [catalogError, setCatalogError] = useState("");
-
-  useEffect(() => {
-    getTrack2CatalogStatus().then(setCatalog).catch(() => setCatalog(null));
-  }, []);
-
-  // PostgreSQL record backend: records are written straight to the
-  // catalog, so there is nothing to copy -- only a re-read (UAT-04).
-  const direct = catalog?.record_backend === "postgres";
-  const [refreshed, setRefreshed] = useState("");
-
-  function refresh() {
-    setCatalogBusy(true);
-    setCatalogError("");
-    getTrack2CatalogStatus()
-      .then((s) => { setCatalog(s); setRefreshed(s.checked_at ?? new Date().toISOString()); })
-      .catch((err) => setCatalogError(err instanceof ApiError ? err.detail : "Could not read the catalog."))
-      .finally(() => setCatalogBusy(false));
-  }
-
-  /** DynamoDB backend only: start a copy, then watch it until it has
-   * finished -- every 5 s for up to 5 minutes -- and say how it ended.
-   * One fixed re-read after 5 s used to come back before any copy was done
-   * and leave the old timestamp on screen. */
-  function syncNow() {
-    setCatalogBusy(true);
-    setCatalogError("");
-    const before = catalog?.last_sync?.started_at ?? "";
-    syncTrack2Catalog()
-      .then(async (res) => {
-        if (!res.started) {
-          setCatalogError(res.detail);
-          return;
-        }
-        for (let i = 0; i < 60; i += 1) {
-          await new Promise((r) => window.setTimeout(r, 5000));
-          const s = await getTrack2CatalogStatus();
-          setCatalog(s);
-          const last = s.last_sync;
-          if (last && last.started_at !== before && last.finished_at) {
-            if (!last.ok) setCatalogError(`The copy failed: ${last.error ?? "no reason given"}`);
-            return;
-          }
-        }
-        setCatalogError("Still copying after 5 minutes; the time above updates when it finishes.");
-      })
-      .catch((err) => setCatalogError(err instanceof ApiError ? err.detail : "Could not start it."))
-      .finally(() => setCatalogBusy(false));
-  }
-
-  function createTables() {
-    setCatalogBusy(true);
-    setCatalogError("");
-    createTrack2CatalogSchema()
-      .then(setCatalog)
-      .catch((err) => setCatalogError(err instanceof ApiError ? err.detail : "Could not create them."))
-      .finally(() => setCatalogBusy(false));
-  }
-
   useEffect(() => {
     getTrack2PullControl()
       .then((status) => {
         const store = status.config.central_store || {};
         if (store.bucket) setBucket(store.bucket);
         if (store.folder) setFolder(store.folder);
+        setTrainFromCombined(Boolean(store.train_from_combined));
       })
       .catch(() => undefined)
       .finally(() => setSettingsRead(true));
@@ -109,16 +52,50 @@ export function Track2CentralStorePanel() {
     if (!settingsRead) return;
     setSaved(false);
     const timer = window.setTimeout(() => {
-      void saveTrack2PullConfig({ central_store: { bucket, folder } })
+      void saveTrack2PullConfig({ central_store: { bucket, folder, train_from_combined: trainFromCombined } })
         .then(() => setSaved(true))
         .catch(() => undefined);
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [settingsRead, bucket, folder]);
+  }, [settingsRead, bucket, folder, trainFromCombined]);
+
+  // The last combine, and while one runs, every 5 s until it ends.
+  useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+    const poll = () => {
+      getTrack2Combine()
+        .then((job) => {
+          if (cancelled) return;
+          setCombine(job);
+          if (job.running) timer = window.setTimeout(poll, 5000);
+        })
+        .catch(() => undefined);
+    };
+    if (!combine || combine.running) poll();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [combine?.running]);
+
+  function combineNow() {
+    setCombineError("");
+    startTrack2Combine()
+      .then(setCombine)
+      .catch((err) => setCombineError(err instanceof ApiError ? err.detail : "Could not start it."));
+  }
+
+  function stopCombine() {
+    setCombineError("");
+    stopTrack2Combine()
+      .then(setCombine)
+      .catch((err) => setCombineError(err instanceof ApiError ? err.detail : "Could not stop it."));
+  }
+
 
   const path = bucket
     ? `s3://${bucket}/${folder.replace(/^\/+|\/+$/g, "")}${folder.trim() ? "/" : ""}`
     : "";
+  const decayedPath = path ? `${path.replace(/\/$/, "")}_decay/` : "";
 
   return (
     <Card
@@ -162,73 +139,65 @@ export function Track2CentralStorePanel() {
         </p>
       )}
 
-      {/* ---- the catalog ---- What the store holds is recorded here:
-           every file once, where it came from, its labels, and every
-           dataset version with its split and decay. */}
+      {/* ---- combine (2026-11-13) ---- Every ticked source into the
+           store, which is only ever added to; then a decayed copy of it
+           beside it, which is what training reads. */}
       <div className="mt-4 border-t border-hairline pt-3 text-xs">
-        <p className="mb-1 font-medium text-ink">Catalog</p>
-        {!catalog ? (
-          <p className="text-ink-muted">Reading...</p>
-        ) : !catalog.configured ? (
-          <p className="text-ink-muted">Not set up on this container yet.</p>
-        ) : !catalog.reachable ? (
-          <p className="text-critical">Not reachable: {catalog.error}</p>
-        ) : !catalog.schema_version && Object.keys(catalog.tables).length === 0 ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-ink-secondary">The database is up; its tables are not created yet.</span>
-            <button type="button" onClick={createTables} disabled={catalogBusy}
-                    className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40">
-              {catalogBusy ? "Creating..." : "Create the tables"}
+        <label className="flex items-start gap-1.5 text-ink">
+          <input type="checkbox" className="mt-0.5" checked={trainFromCombined}
+                 onChange={(e) => setTrainFromCombined(e.target.checked)} />
+          <span>
+            Train from the combined store
+            <span className="block text-ink-muted">
+              Before every run, each ticked source (Assemble&apos;s folders, the golden set,
+              Pull Control&apos;s weeks) is copied into the store, then{" "}
+              <span className="tabular">{decayedPath || "<store>_decay/"}</span> is rebuilt from it
+              through the retention policy and the run trains on that alone. It is deleted once
+              the run has finished. The store itself is never pruned or overwritten.
+            </span>
+          </span>
+        </label>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button type="button" onClick={combineNow}
+                  disabled={!path || !!combine?.running}
+                  className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">
+            {combine?.running ? "Combining..." : "Combine data sources"}
+          </button>
+          {combine?.running && (
+            <button type="button" onClick={stopCombine} disabled={!!combine.stopping}
+                    className="rounded-md border border-critical px-3 py-1.5 text-sm font-medium text-critical disabled:opacity-40">
+              {combine.stopping ? "Stopping..." : "Stop"}
             </button>
-          </div>
-        ) : (
-          <>
-            <p className="tabular text-ink-secondary">
-              {Object.entries(catalog.tables).map(([table, rows]) => (
-                <span key={table} className="mr-3">
-                  {table.replace(/_/g, " ")}: <span className="text-ink">{rows.toLocaleString()}</span>
-                </span>
-              ))}
-            </p>
-            {/* How records reach the catalog depends on the backend: written
-                directly (PostgreSQL), or copied from DynamoDB every 5
-                minutes. Each says what is true for it. */}
-            <div className="mt-1 flex flex-wrap items-center gap-3 text-ink-muted">
-              {direct ? (
-                <>
-                  <span>
-                    Records are written straight to PostgreSQL as they happen; there is
-                    nothing to copy.
-                    {refreshed && ` Counts read ${formatDayTime(refreshed)}.`}
-                  </span>
-                  <button type="button" onClick={refresh} disabled={catalogBusy}
-                          className="underline disabled:opacity-40">
-                    {catalogBusy ? "Refreshing..." : "Refresh"}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span>
-                    {catalog.last_sync
-                      ? catalog.last_sync.finished_at
-                        ? `Last copied from DynamoDB ${formatDayTime(catalog.last_sync.finished_at)}`
-                          + (catalog.last_sync.ok ? "" : ` -- failed: ${catalog.last_sync.error}`)
-                        : "Copying from DynamoDB now..."
-                      : "Not copied from DynamoDB yet."}
-                  </span>
-                  <button type="button" onClick={syncNow} disabled={catalogBusy}
-                          className="underline disabled:opacity-40">
-                    {catalogBusy ? "Copying..." : "Sync now"}
-                  </button>
-                </>
-              )}
-              <Link to="/track2/catalog" className="font-medium text-accent underline">
-                View runs, versions and files
-              </Link>
-            </div>
-          </>
+          )}
+          <span className="text-ink-muted">
+            Does the copy and the decay now, without training. The decayed copy is kept until the next run rebuilds it.
+          </span>
+        </div>
+        {combine?.running && (
+          <p className="mt-2 text-ink-secondary" role="status">
+            {combine.stopping
+              ? "Stopping: copies already in flight finish, the rest are skipped."
+              : <>Copying since {formatDayTime(combine.started_at ?? "")}. Large sources take a few minutes.</>}
+          </p>
         )}
-        {catalogError && <p className="mt-1 text-critical">{catalogError}</p>}
+        {combine && !combine.running && combine.finished_at && (
+          combine.ok ? (
+            <p className="tabular mt-2 text-ink-secondary" role="status">
+              {formatDayTime(combine.finished_at)}: {(combine.new_in_store ?? 0).toLocaleString()} new file(s) into{" "}
+              <span className="text-ink">{combine.store}</span>
+              {" "}({(combine.already_in_store ?? 0).toLocaleString()} already there);{" "}
+              {(combine.in_decayed ?? 0).toLocaleString()} into <span className="text-ink">{combine.decayed}</span> after decay.
+            </p>
+          ) : combine.stopped ? (
+            <p className="mt-2 text-ink-secondary" role="status">
+              {formatDayTime(combine.finished_at)}: {combine.error} Files already copied into the store stay
+              there, and the next combine carries on from them. The half-built decayed copy was deleted.
+            </p>
+          ) : (
+            <p className="mt-2 text-critical" role="alert">Combine failed: {combine.error}</p>
+          )
+        )}
+        {combineError && <p className="mt-2 text-critical" role="alert">{combineError}</p>}
       </div>
     </Card>
   );

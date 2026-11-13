@@ -4,16 +4,12 @@ import { useCardOpen } from "../lib/cardState";
 import {
   ApiError,
   buildTrack2DatasetYaml,
-  getTrack2Buckets,
   getTrack2PullControl,
-  saveTrack2PullConfig,
   getTrack2SettingsFiles,
-  takeTrack2Snapshot,
   getTrack2Retention,
   previewTrack2Retention,
   saveTrack2Retention,
   track2RetentionMatrix,
-  type Track2Bucket,
   type Track2DatasetYaml,
   type Track2SettingsFile,
   type Track2RetentionMatrix,
@@ -21,8 +17,6 @@ import {
   type Track2RetentionSettings,
 } from "../lib/api";
 import { Card } from "./Card";
-import { S3FolderField } from "./S3FolderField";
-import { Track2RetentionQuality } from "./Track2RetentionQuality";
 
 /**
  * Recency weighting: older weeks contribute fewer images.
@@ -74,9 +68,7 @@ export function Track2RetentionPanel() {
   const [settings, setSettings] = useState<Track2RetentionSettings | null>(null);
   const [plan, setPlan] = useState<Track2RetentionPlan | null>(null);
   const [open, setOpen] = useCardOpen("retention", false);
-  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [note, setNote] = useState("");
 
   const [enabled, setEnabled] = useState(false);
   // Held as a percentage because that is how it was asked for; the API
@@ -92,10 +84,8 @@ export function Track2RetentionPanel() {
   // Blank means this app's own bucket. The curated sets are not always
   // kept beside the week folders.
   const [goldenBucket, setGoldenBucket] = useState("");
-  const [buckets, setBuckets] = useState<Track2Bucket[]>([]);
   const [useGolden, setUseGolden] = useState(false);
   const [minImages, setMinImages] = useState(25);
-  const [minClassImages, setMinClassImages] = useState(5);
   // Whether the two floors below apply at all. A floor is a judgement --
   // "no week ever falls below a tenth" is a claim about what history is
   // worth -- so it is stated rather than always on underneath.
@@ -123,19 +113,6 @@ export function Track2RetentionPanel() {
   // elsewhere says which file a policy came from.
   const [, setSettingsFiles] = useState<Track2SettingsFile[]>([]);
 
-  // The note typed beside "Freeze this dataset". The frozen list itself
-  // is shown on the run card, under "Use a frozen snapshot".
-  const [snapshotNote, setSnapshotNote] = useState("");
-  // Whether every run freezes its dataset first. Stored in the live
-  // config (`freeze_on_run`), so it travels in the settings file and the
-  // chain reads the same value. Null until read, so the tick never shows
-  // a guess.
-  const [freezeOnRun, setFreezeOnRun] = useState<boolean | null>(null);
-  useEffect(() => {
-    getTrack2PullControl()
-      .then((s) => setFreezeOnRun(s.config.freeze_on_run !== false))
-      .catch(() => undefined);
-  }, []);
 
   // The schedule as a grid: every retrain against every week of data.
 
@@ -179,13 +156,22 @@ export function Track2RetentionPanel() {
       setCurve(got.config.curve);
       setFloor(Math.round(got.config.floor * 100));
       setFullWeeks(Math.max(1, got.config.full_weeks ?? 1));
-      setGoldenRoot((current) => current || got.config.golden_root || "");
-      setGoldenBucket((current) => current || got.config.golden_bucket || "");
+      // The golden folder is the Golden Set card's (step 2) -- the one the
+      // training chain builds and trains on. This card used to keep a
+      // second folder of its own that the run never read (2026-11-13).
+      const golden = await getTrack2PullControl()
+        .then((s) => s.config.golden_set ?? {}).catch(() => null);
+      if (golden) {
+        setGoldenRoot(golden.target_folder || "");
+        setGoldenBucket(golden.target_bucket || "");
+      }
       setUseGolden(Boolean(got.config.use_golden));
       setMinImages(got.config.min_images);
-      setMinClassImages(got.config.min_class_images ?? 5);
       setUseFloor(got.config.use_floor ?? true);
-      setRoot((current) => current || got.suggested_root);
+      // Always Pull Control's root: `retrain_schedule` reads
+      // `config["root"]`, so a root picked here only ever previewed a
+      // different folder from the one the run trains on.
+      setRoot(got.suggested_root);
       // Only now may the auto-save write: before this the controls hold
       // their initial values, and persisting those would overwrite the
       // policy being read in this very call.
@@ -227,13 +213,6 @@ export function Track2RetentionPanel() {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [yamlOpen, root, enabled, policyJson]);
 
-  // Which buckets the stack grants reads to. Mirrors the Golden Set
-  // card, which is where these folders are written in the first place.
-  useEffect(() => {
-    if (!open) return;
-    getTrack2Buckets().then((r) => setBuckets(r.buckets)).catch(() => undefined);
-  }, [open]);
-
   const loadSettingsFiles = useCallback(async () => {
     try {
       const got = await getTrack2SettingsFiles();
@@ -262,7 +241,6 @@ export function Track2RetentionPanel() {
       use_floor: useFloor,
       floor: floor / 100,
       min_images: minImages,
-      min_class_images: minClassImages,
       // use_golden is NOT here. Step 2 owns it, and this panel only read
       // its copy at page load -- writing that copy back on save would
       // silently undo a switch made on the other card. The previews below
@@ -273,18 +251,6 @@ export function Track2RetentionPanel() {
     };
   }
 
-  async function withBusy(label: string, work: () => Promise<void>) {
-    setBusy(label);
-    setError("");
-    setNote("");
-    try {
-      await work();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "That did not work.");
-    } finally {
-      setBusy("");
-    }
-  }
 
   // The grid, redrawn from the controls rather than the saved settings --
   // its whole purpose is to be looked at BEFORE a policy is committed,
@@ -365,12 +331,7 @@ export function Track2RetentionPanel() {
             image list is what makes the decay reach the run at all.
           </p>
           <p className="mt-2">
-            <strong>3. Freeze it</strong> under Repeatable runs, so the same
-            dataset can be trained again later even after the week folders have
-            grown.
-          </p>
-          <p className="mt-2">
-            <strong>4. Let it run.</strong> With{" "}
+            <strong>3. Let it run.</strong> With{" "}
             <em>PULL, BUILD, QUEUE, TRAIN</em> at the top on a schedule (or
             when files arrive), each pull rebuilds the lists and the yaml from
             the ticked sources, queues a run and starts it -- nothing to press.
@@ -382,7 +343,6 @@ export function Track2RetentionPanel() {
           </p>
         </>
       }
-      next="Step 6, Start the training run -- check the two lines and submit. The model itself was chosen back in step 1."
       collapsible={false}
       caption="Older weeks contribute fewer images. Nothing is deleted -- the week folders stay whole and only the assembled dataset is thinned."
       action={
@@ -409,7 +369,6 @@ export function Track2RetentionPanel() {
       ) : (
         <div className="flex flex-col gap-3">
           {error && <p className="text-xs text-critical">{error}</p>}
-          {note && <p className="tabular text-xs text-ink-secondary">{note}</p>}
 
           {/* The one on/off for this card. There used to be a second in
               the header that wrote immediately while this one waited for
@@ -530,94 +489,14 @@ export function Track2RetentionPanel() {
               : "Compounding never reaches zero and reads as a half-life -- at 1% a week, half a week's images are still in play after 69 steps."}
           </p>
 
-          {/* The golden set. Two controls, not one: the folder is
-              remembered while the switch is off, so turning it back on
-              does not mean finding the path again. */}
-          <div className="rounded-md border border-hairline p-3">
-            {/* READ-ONLY here. The on/off moved to Step 2, the card named
-                after the thing, and an editable second copy would be two
-                controls for one `use_golden` -- each panel reads the
-                config on its own, so the two would show different
-                answers the moment one of them changed it. The folder
-                below stays here: WHICH folder is a retention setting,
-                WHETHER to use one is the step's own question. */}
-            <p className="text-xs text-ink-secondary">
-              Golden set:{" "}
-              <span className={useGolden ? "font-medium text-ink" : "text-ink-muted"}>
-                {useGolden ? "in use" : "not in use"}
-              </span>
-              <span className="block text-ink-muted">
-                A curated folder that is always trained on in full. It has no
-                collection week, so it has no age, so the decay never touches
-                it -- the core the detector is not allowed to forget while the
-                recent weeks pull it around.
-              </span>
-              <span className="block text-ink-muted">
-                Turn it on or off in <strong>Step 2, Pick Golden Set / Edge
-                Cases</strong>.
-              </span>
-            </p>
-
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              <label className="block">
-                <span className="mb-1 block text-xs text-ink-muted">Bucket</span>
-                <select
-                  className="w-full rounded-md border border-black/15 bg-page px-3 py-2 text-xs disabled:opacity-40"
-                  value={goldenBucket}
-                  disabled={!useGolden}
-                  onChange={(e) => { setGoldenBucket(e.target.value); setGoldenRoot(""); }}
-                >
-                  <option value="">this app&apos;s bucket</option>
-                  {buckets.map((b) => (
-                    <option key={b.name} value={b.name}>{b.name}</option>
-                  ))}
-                </select>
-              </label>
-              {/* The shared picker, open, like every other folder field.
-                  This was the last one still hiding the browser behind a
-                  "Choose..." toggle beside a text box -- so what you saw
-                  on arriving was a box wanting a path typed into it. */}
-              <div className="sm:col-span-2">
-                <S3FolderField
-                  label="Folder"
-                  hint="(holds the golden set, e.g. golden/ppe-core)"
-                  value={goldenRoot}
-                  onChange={setGoldenRoot}
-                  disabled={!useGolden}
-                />
-              </div>
-            </div>
-
-            <p className="mt-1.5 text-xs text-ink-muted">
-              Its <span className="tabular">images/train</span> split only. The
-              val split is the fixed evaluation set, and training on that would
-              score the detector on images it had just been taught -- the exact
-              leakage a golden set exists to avoid.
-            </p>
-          </div>
-
-
-          {/* One root. The evaluation root and the class list went with
-              "Build dataset", which was the only thing that used them --
-              that button COPIED every chosen image into a new folder, and
-              the data.yaml below does the same job by naming the weeks
-              where they already are. Model Names come from the source
-              dataset's own data.yaml there, which is where the indices in
-              the label files came from, so there was nothing left to pick
-              from a list. */}
-          {/* Browsable, like the golden root two fields up. It was a bare
-              text box, so the path had to be known and typed exactly --
-              and a typo reads as an empty root rather than as a mistake,
-              until a retrain finds nothing in it.
-
-              No <label> wrapper: S3FolderField is one, and a label inside
-              a label is invalid and breaks the click target. */}
-          <S3FolderField
-            label="Training weeks root"
-            hint="(holds the week folders, e.g. retraining)"
-            value={root}
-            onChange={setRoot}
-          />
+          <p className="text-xs text-ink-muted">
+            Weeks from <span className="tabular text-ink-secondary">{root || "(no root set)"}</span>,
+            Pull Control&apos;s root.
+            {useGolden && goldenRoot && (
+              <> Golden set: <span className="tabular text-ink-secondary">{goldenRoot}</span>,
+              set in <strong>Step 2, Pick Golden Set / Edge Cases</strong>.</>
+            )}
+          </p>
 
           {/* The policy as a schedule rather than a snapshot.
               The preview below answers "what would a retrain use today".
@@ -990,13 +869,6 @@ export function Track2RetentionPanel() {
             </div>
           )}
 
-          <label className="text-xs text-ink-secondary">
-            Warn below this many selected images per observed class (per source)
-            <input type="number" min={1} max={100000} value={minClassImages}
-              onChange={(e) => setMinClassImages(Math.max(1, Math.min(100000, Number(e.target.value) || 1)))}
-              className="ml-2 w-20 rounded border border-black/15 bg-page p-1" />
-          </label>
-          <Track2RetentionQuality root={root} config={{ ...currentConfig(), use_golden: useGolden }} />
 
           {/* ------------------------------------------- data.yaml ----- */}
           {/* A PREVIEW, like "What will be built" on Assemble a dataset
@@ -1145,86 +1017,6 @@ export function Track2RetentionPanel() {
               one file, which is how two panels end up disagreeing about
               which file you are in. */}
 
-          {/* --------------------------------------------- snapshots --- */}
-          {/* A saved data.yaml says which FOLDERS to train on. Those keep
-              filling, so the same yaml trains on more images next month.
-              A snapshot also records which FILES -- the difference
-              between a definition you can read again and a run you can
-              repeat. */}
-          <div className="rounded-md border border-hairline p-3">
-            <p className="text-xs font-medium text-ink">
-              Repeatable runs{" "}
-              <span className="font-normal text-ink-muted">
-                (freeze the files, not just the folders)
-              </span>
-            </p>
-            <p className="mt-1 text-xs text-ink-muted">
-              A <span className="tabular">data.yaml</span> can only name
-              directories, and the pull keeps filling them, so the same yaml
-              trains on more images each week. Freezing one records every image
-              and label it selected, so the run can be repeated exactly. Nothing
-              is copied -- the manifest is a list of names.
-            </p>
-
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={!!busy || !root}
-                onClick={() => withBusy("Freezing...", async () => {
-                  const got = await takeTrack2Snapshot(root, snapshotNote);
-                  setSnapshotNote("");
-                  setNote(`Frozen as ${got.snapshot_id} -- `
-                    + `${got.file_count.toLocaleString()} files across `
-                    + `${got.weeks.length} week${got.weeks.length === 1 ? "" : "s"}.`);
-                })}
-                className="rounded-md border border-black/15 px-3 py-1.5 text-xs font-medium text-ink-secondary disabled:opacity-40"
-              >
-                Freeze this dataset
-              </button>
-              <input
-                className="min-w-0 flex-1 rounded-md border border-black/15 bg-page px-3 py-1.5 text-xs"
-                value={snapshotNote}
-                placeholder="note (optional -- why this one matters)"
-                onChange={(e) => setSnapshotNote(e.target.value)}
-              />
-            </div>
-            <label className="mt-2 flex items-start gap-2 text-xs text-ink">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={freezeOnRun ?? true}
-                disabled={freezeOnRun === null}
-                onChange={(e) => {
-                  const on = e.target.checked;
-                  setFreezeOnRun(on);
-                  saveTrack2PullConfig({ freeze_on_run: on }).catch(() => {
-                    setFreezeOnRun(!on);
-                    setError("Could not save the freeze setting.");
-                  });
-                }}
-              />
-              <span>
-                <span className="font-medium">Freeze the dataset on every run</span>
-                <span className="text-ink-muted">
-                  {" "}-- each automatic and queued run records a snapshot before it
-                  trains, so it can be picked again under <em>Use a frozen
-                  snapshot</em>. Off, runs train on exactly the same images but
-                  leave no snapshot. The button above still freezes by hand.
-                </span>
-              </span>
-            </label>
-
-            {/* "Do it automatically" was here -- removed 2026-10-26. The
-                PULL, BUILD, QUEUE, TRAIN strip at the top is the one
-                switch now: a scheduled (or arrival) pull rebuilds, queues
-                and starts a run from the ticked sources by itself. The
-                arrival guards moved onto the strip with it. */}
-
-            {/* The frozen-snapshot list and the list of runs sent were
-                here. Removed 2026-10-20: snapshots are loaded and run from
-                the "Use a frozen snapshot" radio on the run card, and the
-                History card lists what each run was sent. */}
-          </div>
         </div>
       )}
     </Card>

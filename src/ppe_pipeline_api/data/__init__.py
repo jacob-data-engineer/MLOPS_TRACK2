@@ -34,6 +34,9 @@ __all__ = [
     "catalog_configured", "start_catalog_sync", "catalog_sync_slot",
     # the central data store: files of frozen versions, kept for good
     "preserve_catch_up",
+    # ...and every source combined into it, with a decayed copy per run
+    "combine_store", "rebuild_decayed", "delete_decayed", "decay_marker",
+    "combined_location",
 ]
 
 scan_weeks = _through(__name__, "dataset_yaml", "scan_root")
@@ -78,3 +81,8 @@ def __getattr__(name: str):
     if name in _CONSTANTS:
         return _value(__name__, *_CONSTANTS[name])
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+combine_store = _through(__name__, "combined_store", "combine")
+rebuild_decayed = _through(__name__, "combined_store", "rebuild_decayed")
+delete_decayed = _through(__name__, "combined_store", "delete_decayed")
+decay_marker = _through(__name__, "combined_store", "read_marker")
+combined_location = _through(__name__, "combined_store", "location")

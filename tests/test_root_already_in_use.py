@@ -25,14 +25,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from ppe_pipeline_api import pull_control as pc  # noqa: E402
 
-PANEL = (pathlib.Path(__file__).resolve().parents[1]
-         / "web" / "src" / "components" / "Track2PullControlPanel.tsx")
-
-
-def _flat() -> str:
-    return " ".join(PANEL.read_text(encoding="utf-8").split())
-
-
 def _write(tmp_path, name, config):
     """A settings file as `save_settings_file` writes one.
 
@@ -103,50 +95,3 @@ def test_the_listing_carries_them(tmp_path, monkeypatch):
     _write(tmp_path, "a", {"root": "retraining"})
     assert "claims" in pc.list_settings_files()
 
-
-# --- the warning ------------------------------------------------------------------------
-
-def test_the_card_warns_in_the_words_asked_for():
-    assert "A directory already is in use for the following model name" in _flat()
-
-
-def test_it_names_the_model_and_the_file():
-    code = _flat()
-    assert "{c.model || \"no model chosen\"}" in code
-    assert "(saved as {c.name})" in code
-
-
-def test_it_says_what_sharing_actually_costs():
-    """A warning that does not say the consequence is one people learn
-    to click past."""
-    code = _flat()
-    assert "will reshape what that configuration trains on" in code
-    assert "retention will prune" in code
-
-
-def test_there_is_an_override():
-    code = _flat()
-    assert "Use it anyway" in code
-    assert "setRootClashOk(here)" in code
-
-
-def test_the_override_is_per_folder():
-    """Dismissing it for one root must not silence a different clash."""
-    code = _flat()
-    assert "rootClashOk === here" in code
-
-
-def test_a_configuration_cannot_clash_with_itself():
-    code = _flat()
-    assert "c.name !== loadedFile" in code
-
-
-def test_the_loaded_file_comes_from_the_config():
-    code = _flat()
-    assert 'setLoadedFile(String(c.settings_file || ""))' in code
-
-
-def test_the_warning_sits_with_the_field_it_is_about():
-    """Not a banner at the top of the card."""
-    code = _flat()
-    assert code.index('label="Root folder"') < code.index("A directory already is in use")

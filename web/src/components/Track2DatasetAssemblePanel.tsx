@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCardOpen } from "../lib/cardState";
 import { post } from "../lib/bus";
@@ -483,15 +483,27 @@ export function Track2DatasetAssemblePanel({
   // Debounced, because picking a folder changes several of these at once
   // and each keystroke in a prefix box would otherwise be a request.
   useEffect(() => {
-    // A preview-only copy reads the settings and never writes them back.
+    // The preview copy on Multi-Auto Training writes only the class
+    // fields -- see the writer after this one.
     if (!settingsRead || previewOnly) return;
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
+      // `write_config` replaces `dataset_assemble` whole, and the class
+      // fields are edited on the Training tab. Start from what is saved so
+      // this card never writes back a stale copy of them.
+      const saved = await getTrack2PullControl()
+        .then((s) => s.config.dataset_assemble || {}).catch(() => null);
+      if (saved === null) return;
       void saveTrack2PullConfig({
         dataset_assemble: {
+          ...saved,
           only: onOnlyChange ? !!only : savedOnly,
           use: useFolders,
-          label_classes: parseLabelClasses(labelClassesText),
-          drop_undeclared_labels: dropUndeclared,
+          // Owned here only where the class fields are shown on this card
+          // (the standard Training tab). On Data Preparation they are not.
+          ...(onOnlyChange ? {} : {
+            label_classes: parseLabelClasses(labelClassesText),
+            drop_undeclared_labels: dropUndeclared,
+          }),
           train_sources: trainSources,
           eval_sources: evalSources,
           folders,
@@ -511,6 +523,32 @@ export function Track2DatasetAssemblePanel({
     return () => clearTimeout(timer);
   }, [settingsRead, previewOnly, only, onOnlyChange, savedOnly, useFolders, labelClassesText,
       dropUndeclared, trainSources, evalSources, folders, detectorSlug, overwrite, built]);
+
+  // The class fields' writer on Multi-Auto Training (2026-11-13). They
+  // say what the run TRAINS -- which labelled classes the yaml names and
+  // whether undeclared boxes are dropped -- so they sit beside Add to
+  // Queue, not with the folders on Data Preparation. Only these two
+  // fields are written, onto the latest saved block, so the folders the
+  // Data Preparation tab owns are never overwritten from here.
+  const classesTouched = useRef(false);
+  useEffect(() => {
+    if (!settingsRead || !previewOnly || !classesTouched.current) return;
+    const timer = setTimeout(async () => {
+      const saved = await getTrack2PullControl()
+        .then((s) => s.config.dataset_assemble || {}).catch(() => null);
+      if (saved === null) return;
+      void saveTrack2PullConfig({
+        dataset_assemble: {
+          ...saved,
+          label_classes: parseLabelClasses(labelClassesText),
+          drop_undeclared_labels: dropUndeclared,
+        },
+      })
+        .then(() => post("data-sources-changed", { from: "assemble" }))
+        .catch(() => undefined);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [settingsRead, previewOnly, labelClassesText, dropUndeclared]);
 
   // Check each filled pair as it is filled. Debounced, because picking a
   // folder changes a field per click and every keystroke in a prefix box
@@ -677,6 +715,7 @@ export function Track2DatasetAssemblePanel({
   function nameTheRest(indices: number[]) {
     const merged: Record<string, string> = { ...modelClasses(), ...parseLabelClasses(labelClassesText) };
     for (const i of indices) if (!merged[String(i)]) merged[String(i)] = `class_${i}`;
+    classesTouched.current = true;
     setLabelClassesText(formatLabelClasses(merged));
   }
 
@@ -894,10 +933,9 @@ export function Track2DatasetAssemblePanel({
           <input
             type="text"
             value={labelClassesText}
-            onChange={(e) => setLabelClassesText(e.target.value)}
+            onChange={(e) => { classesTouched.current = true; setLabelClassesText(e.target.value); }}
             placeholder="0 helmet, 1 gloves, 2 vest, 3 boots"
-            readOnly={previewOnly}
-            className="tabular mt-1 w-full rounded border border-black/15 bg-page px-2 py-1 text-sm text-ink read-only:opacity-70"
+            className="tabular mt-1 w-full rounded border border-black/15 bg-page px-2 py-1 text-sm text-ink"
           />
         </label>
         {/* ALWAYS VISIBLE, not only when a mismatch has been found. It is
@@ -909,8 +947,7 @@ export function Track2DatasetAssemblePanel({
           <input
             type="checkbox"
             checked={dropUndeclared}
-            onChange={(e) => setDropUndeclared(e.target.checked)}
-            disabled={previewOnly}
+            onChange={(e) => { classesTouched.current = true; setDropUndeclared(e.target.checked); }}
             className="mt-0.5 h-3.5 w-3.5 shrink-0"
           />
           <span>
@@ -994,7 +1031,7 @@ export function Track2DatasetAssemblePanel({
         <YamlPreview
           preview={preview}
           dropUndeclared={dropUndeclared}
-          onNameTheRest={previewOnly ? undefined : nameTheRest}
+          onNameTheRest={nameTheRest}
         />
       )}
 
@@ -1003,8 +1040,8 @@ export function Track2DatasetAssemblePanel({
 
   if (previewOnly) {
     return (
-      <Card title="Preview the data.yaml" collapsible={false}
-            caption="What the run's data.yaml will be, from the sources ticked on the Data Preparation tab. The label classes and the filter are set in Assemble a dataset there. Nothing is written here -- the run builds it at Add to Queue and on the schedule, after the retention policy.">
+      <Card title="Classes and data.yaml" collapsible={false}
+            caption="Which labelled classes this run trains, and the data.yaml it will be built with from the sources ticked on the Data Preparation tab. The label classes and the filter are saved here; the yaml itself is built at Add to Queue and on the schedule, after the retention policy.">
         {buildSection}
       </Card>
     );
@@ -1435,7 +1472,16 @@ export function Track2DatasetAssemblePanel({
         )}
       </div>
 
-      {!buildSlot && buildSection}
+      {/* Data Preparation (the only caller passing `onOnlyChange`) shows
+          no classes or yaml: they are set on Multi-Auto Training, beside
+          Add to Queue, where the run that uses them is started. */}
+      {!buildSlot && !onOnlyChange && buildSection}
+      {onOnlyChange && (
+        <p className="mt-3 text-xs text-ink-muted">
+          Classes, label classes, the class filter and the data.yaml preview are on{" "}
+          <span className="font-medium text-ink-secondary">Multi-Auto Training</span>, beside Add to Queue.
+        </p>
+      )}
       </>
       )}
       {buildSlot && createPortal(

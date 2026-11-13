@@ -2157,7 +2157,7 @@ export interface Track2PullConfig {
   /** The SQL tab's choices, saved so a settings file brings them back. */
   /** The central data store: the one bucket and folder where all the
    * data and images are kept (2026-10-29). */
-  central_store?: { bucket?: string; folder?: string };
+  central_store?: { bucket?: string; folder?: string; train_from_combined?: boolean };
   catalog_export?: { include_images?: boolean; include_model?: boolean; output_type?: string };
   catalog_pt_metadata?: { selected_groups?: string[] };
   catalog_export_destination?: CatalogExportDestination;
@@ -2634,6 +2634,28 @@ export interface Track2RetentionQuality {
     missing_labels: number; unreadable_labels: number; invalid_labels: number; empty_labels: number;
     classes: Array<{ class_id: number; before: number; after: number; low: boolean; lost: boolean }>;
   }>;
+}
+
+/** What "Combine data sources" last did, and whether one is running. */
+export type Track2CombineJob = {
+  running?: boolean; stopping?: boolean; stopped?: boolean;
+  started_at?: string; finished_at?: string;
+  ok?: boolean; error?: string;
+  store?: string; decayed?: string;
+  new_in_store?: number; already_in_store?: number; in_decayed?: number;
+  sources?: Record<string, number>;
+};
+
+export function startTrack2Combine(): Promise<Track2CombineJob> {
+  return apiPost("/track2/pull-control/central-store/combine", {});
+}
+
+export function stopTrack2Combine(): Promise<Track2CombineJob> {
+  return apiPost("/track2/pull-control/central-store/combine/stop", {});
+}
+
+export function getTrack2Combine(): Promise<Track2CombineJob> {
+  return apiGet("/track2/pull-control/central-store/combine");
 }
 
 export function inspectTrack2Retention(root: string, config: Partial<Track2RetentionConfig>): Promise<Track2RetentionQuality> {
@@ -4053,6 +4075,13 @@ export interface Track2SqlPullResult {
   bare_paths_left_out: number;
   /** Frames left out of a labelled pull because a helmet box was missing. */
   left_out_incomplete: number;
+  /** Filed into Pull Control's weeks by capture date. */
+  by_week?: boolean;
+  /** Left out of a week pull: no capture date / no week allows it. */
+  left_out_undated?: number;
+  left_out_no_week?: number;
+  /** Frames filed per week, oldest first. */
+  weeks?: Record<string, number>;
   labels_from: "database" | "source" | "none";
   failed: number;
   errors: string[];
@@ -4072,14 +4101,14 @@ export async function pullTrack2Sql(params: {
   exportMode?: "detection" | "classification"; classNames?: string[];
   database: string; sql: string; bucket: string; folder: string;
   destBucket: string; destFolder: string; trainPercent: number;
-  withLabels: boolean;
+  withLabels: boolean; byWeek?: boolean;
 }, onProgress?: (progress: Track2SqlPullProgress) => void): Promise<Track2SqlPullResult> {
   const payload = {
     database: params.database, sql: params.sql,
     bucket: params.bucket, folder: params.folder,
     dest_bucket: params.destBucket, dest_folder: params.destFolder,
     train_percent: params.trainPercent,
-    with_labels: params.withLabels,
+    with_labels: params.withLabels, by_week: !!params.byWeek,
     export_mode: params.exportMode, class_names: params.classNames,
     class_ids: params.classIds,
   };

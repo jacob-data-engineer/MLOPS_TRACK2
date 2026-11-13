@@ -351,7 +351,6 @@ export function Track2AutoTrainingPanel() {
           </p>
         </>
       }
-      next="Retention, just below -- decide how much of each older week to use, then build the data.yaml."
       caption="One root of week folders, and what each one holds. The dataset itself is built from the data.yaml below."
     >
 

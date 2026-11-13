@@ -5199,6 +5199,12 @@ def pending_submission_overlay(progress: dict | None) -> str | None:
 
 # --- ad-hoc training queue -----------------------------------------------------
 
+def current_training_reason() -> str:
+    """Why a run is occupying the GPU slot right now; "" when none is.
+    The same check `try_advance_queue` makes before it starts anything."""
+    return training_already_running_reason(get_training_progress()) or ""
+
+
 def queue_snapshot() -> dict:
     """Point-in-time copy of the queue state for a response -- copied out
     under the lock so a concurrent poll-loop mutation is never read half-
