@@ -986,7 +986,8 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
             combined, decayed = both["combined"], both["decayed"]
             record("combine", True,
                    f"{combined['copied']} new file(s) into {combined['store']}; "
-                   f"{decayed['copied']} copied into {decayed['folder']} after decay")
+                   f"{decayed['files']} file(s) in {decayed['folder']} after decay "
+                   f"({decayed['copied']} copied, {decayed['removed']} removed)")
             splits = {"train": decayed["train"], "val": decayed["val"]}
             yaml_bucket = decayed["bucket"]
             used = [f"the decayed copy of the central store ({decayed['folder']})"]
@@ -1794,7 +1795,9 @@ def start_combine(*, resumed_from: dict | None = None) -> dict:
                       "store": out["combined"]["store"], "decayed": out["decayed"]["folder"],
                       "new_in_store": out["combined"]["copied"],
                       "already_in_store": out["combined"]["already"],
-                      "in_decayed": out["decayed"]["copied"],
+                      "in_decayed": out["decayed"]["files"],
+                      "decay_copied": out["decayed"]["copied"],
+                      "decay_removed": out["decayed"]["removed"],
                       "sources": out["combined"]["sources"]}
         except Exception as exc:                                   # noqa: BLE001
             result = {"ok": False, "error": str(exc),

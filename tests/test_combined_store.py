@@ -168,6 +168,19 @@ def test_a_rebuild_starts_from_empty(s3):
     assert (B, "central_decay/weeks/week_9/images/train/stale.jpg") not in s3.objects
 
 
+def test_a_rebuild_copies_only_what_is_missing_and_removes_only_what_is_dropped(s3):
+    out = _combine()
+    cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
+    s3.copies.clear()
+    again = cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
+    assert s3.copies == [] and again["copied"] == 0 and again["removed"] == 0, "nothing changed"
+    assert again["files"] > 0
+    # golden unticked: its files go, nothing is recopied
+    gone = cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=False, slugs=out["slugs"])
+    assert s3.copies == [] and gone["removed"] > 0
+    assert not any(k.startswith("central_decay/golden/") for (b, k) in s3.objects)
+
+
 def test_deleting_the_decayed_copy_never_touches_the_store(s3):
     out = _combine()
     cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
@@ -313,4 +326,6 @@ def test_the_ticker_resumes_and_the_card_shows_progress():
     ticker = (ROOT / "src/ppe_pipeline_api/chain/ticker.py").read_text(encoding="utf-8")
     assert "retrain_schedule.resume_combine" in ticker
     card = (ROOT / "web/src/components/Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
-    assert 'role="progressbar"' in card and "<CombineProgress job={combine} />" in card
+    assert 'role="progressbar"' in card
+    assert "<CombineProgress job={combine} store={path} decayed={decayedPath} />" in card
+    assert "<dt className=\"text-ink-muted\">Decayed copy</dt>" in card, "where it is, always shown"

@@ -1,5 +1,12 @@
 # Continue here
 
+`_decay` is now synced IN PLACE, not emptied and recopied (13 Nov):
+`rebuild_decayed` lists what is there, deletes keys the decay no longer
+wants, copies only missing ones (store keys never change, so same result).
+Returns/marker gain `files`, `removed`. Card always shows the Store and
+Decayed copy paths, names the folder per step, and a 409 "already
+running" on the button just shows that job's progress.
+
 Combine progress bar + survives restarts (13 Nov). `combined_store._copy`
 reports `progress(phase, done, total)` -- phases listing/store (step 1),
 clearing/decay (step 2). The button's job is saved to

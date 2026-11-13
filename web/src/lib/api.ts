@@ -2645,6 +2645,7 @@ export type Track2CombineJob = {
   ok?: boolean; error?: string;
   store?: string; decayed?: string;
   new_in_store?: number; already_in_store?: number; in_decayed?: number;
+  decay_copied?: number; decay_removed?: number;
   sources?: Record<string, number>;
 };
 

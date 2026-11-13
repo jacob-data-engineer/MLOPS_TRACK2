@@ -81,7 +81,15 @@ export function Track2CentralStorePanel() {
     setCombineError("");
     startTrack2Combine()
       .then(setCombine)
-      .catch((err) => setCombineError(err instanceof ApiError ? err.detail : "Could not start it."));
+      .catch((err) => {
+        // Already running (pressed before the card had heard): show that
+        // one's progress rather than an error.
+        if (err instanceof ApiError && err.status === 409) {
+          getTrack2Combine().then(setCombine).catch(() => undefined);
+          return;
+        }
+        setCombineError(err instanceof ApiError ? err.detail : "Could not start it.");
+      });
   }
 
   function stopCombine() {
@@ -170,17 +178,27 @@ export function Track2CentralStorePanel() {
             </button>
           )}
           <span className="text-ink-muted">
-            Does the copy and the decay now, without training. The decayed copy is kept until the next run rebuilds it.
+            Does the copy and the decay now, without training. The decayed copy is brought up to date, not
+            rebuilt from empty: only files the decay no longer keeps are removed, only missing ones copied.
           </span>
         </div>
-        {combine?.running && <CombineProgress job={combine} />}
+        {path && (
+          <dl className="tabular mt-2 grid grid-cols-[auto_1fr] gap-x-2 text-ink-secondary">
+            <dt className="text-ink-muted">Store</dt>
+            <dd className="break-all text-ink">{path}</dd>
+            <dt className="text-ink-muted">Decayed copy</dt>
+            <dd className="break-all text-ink">{decayedPath}</dd>
+          </dl>
+        )}
+        {combine?.running && <CombineProgress job={combine} store={path} decayed={decayedPath} />}
         {combine && !combine.running && combine.finished_at && (
           combine.ok ? (
             <p className="tabular mt-2 text-ink-secondary" role="status">
               {formatDayTime(combine.finished_at)}: {(combine.new_in_store ?? 0).toLocaleString()} new file(s) into{" "}
               <span className="text-ink">{combine.store}</span>
               {" "}({(combine.already_in_store ?? 0).toLocaleString()} already there);{" "}
-              {(combine.in_decayed ?? 0).toLocaleString()} into <span className="text-ink">{combine.decayed}</span> after decay.
+              {(combine.in_decayed ?? 0).toLocaleString()} file(s) in <span className="text-ink">{combine.decayed}</span> after decay
+              {" "}({(combine.decay_copied ?? 0).toLocaleString()} copied, {(combine.decay_removed ?? 0).toLocaleString()} removed).
             </p>
           ) : combine.stopped ? (
             <p className="mt-2 text-ink-secondary" role="status">
@@ -203,25 +221,28 @@ export function Track2CentralStorePanel() {
 const PHASES: Record<string, { step: number; label: string }> = {
   listing: { step: 1, label: "Listing the sources and the store" },
   store: { step: 1, label: "Copying into the store" },
-  clearing: { step: 2, label: "Clearing the old decayed copy" },
+  clearing: { step: 2, label: "Removing files the decay no longer keeps" },
   decay: { step: 2, label: "Building the decayed copy" },
 };
 
-function CombineProgress({ job }: { job: Track2CombineJob }) {
+function CombineProgress({ job, store, decayed }: { job: Track2CombineJob; store: string; decayed: string }) {
   const phase = PHASES[job.phase ?? "listing"] ?? PHASES.listing;
+  const into = phase.step === 1 ? store : decayed;
   const total = job.total ?? 0;
   const done = job.done ?? 0;
-  const counted = (job.phase === "store" || job.phase === "decay") && total > 0;
+  const counting = job.phase === "store" || job.phase === "decay" || job.phase === "clearing";
+  const counted = counting && total > 0;
   const pct = counted ? Math.min(100, Math.round((done / total) * 100)) : 0;
   return (
     <div className="mt-2" role="status">
       <div className="flex flex-wrap items-baseline justify-between gap-2 text-ink-secondary">
         <span>
           Step {phase.step} of 2: {job.stopping ? "stopping -- copies in flight finish, the rest are skipped" : phase.label}
+          {into && <> -- <span className="tabular text-ink">{into}</span></>}
         </span>
         <span className="tabular">
           {counted ? `${done.toLocaleString()} / ${total.toLocaleString()} (${pct}%)`
-            : job.phase === "store" || job.phase === "decay" ? "nothing new to copy" : "..."}
+            : counting ? (job.phase === "clearing" ? "nothing to remove" : "nothing new to copy") : "..."}
         </span>
       </div>
       <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-black/10"
