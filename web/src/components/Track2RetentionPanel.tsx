@@ -168,6 +168,8 @@ export function Track2RetentionPanel() {
       setUseGolden(Boolean(got.config.use_golden));
       setMinImages(got.config.min_images);
       setUseFloor(got.config.use_floor ?? true);
+      if (typeof got.config.forecast_weeks === "number") setAhead(got.config.forecast_weeks);
+      setAsImages(Boolean(got.config.forecast_as_images));
       // Always Pull Control's root: `retrain_schedule` reads
       // `config["root"]`, so a root picked here only ever previewed a
       // different folder from the one the run trains on.
@@ -248,6 +250,10 @@ export function Track2RetentionPanel() {
       golden_root: goldenRoot,
       golden_bucket: goldenBucket,
       root,
+      // The forecast table's choices: saved, so a settings file brings the
+      // table back the way it was being read.
+      forecast_weeks: ahead,
+      forecast_as_images: asImages,
     };
   }
 

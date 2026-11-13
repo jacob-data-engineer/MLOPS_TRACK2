@@ -45,6 +45,9 @@ class RetentionConfig(BaseModel):
     floor: float | None = None
     min_images: int | None = None
     min_class_images: int | None = Field(default=None, ge=1, le=100000)
+    #: The card's forecast table: retrains ahead, and images vs shares.
+    forecast_weeks: int | None = Field(default=None, ge=0, le=26)
+    forecast_as_images: bool | None = None
     root: str | None = None
     eval_root: str | None = None
 

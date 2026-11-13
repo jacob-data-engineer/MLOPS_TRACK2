@@ -171,7 +171,9 @@ DEFAULTS = {
     # The SQL tab's choices: which database, the bucket and folder that
     # narrow the images, and the query last typed. `{database, bucket,
     # folder, sql}`. A setting like any other card's, so a settings file
-    # brings the query back with everything else.
+    # brings the query back with everything else. Also (2026-11-13) the
+    # pull's `by_week`, `train_after` and the label `class_ids`, so the
+    # Data Preparation file holds the whole SQL page.
     "sql_explorer": {},
     # The SQL tab's Readiness flow card (2026-11-05): which class it shows,
     # `{hazard}`. A choice, so it is saved; the flow itself is a result
@@ -188,6 +190,11 @@ DEFAULTS = {
     # rebuilds `<folder>_decay` from it through the retention policy, and
     # trains on that copy alone -- deleting it once the run has finished.
     "central_store": {},
+    # Pull Control's weeks table (2026-11-13): `{watching, show_all_weeks}`
+    # -- whether it re-reads the weeks on its own while open, and whether
+    # it lists every week or only the recent window. How the card is read,
+    # saved like its open/closed state so a loaded file puts it back.
+    "pull_control_view": {},
     # Catalog package choices belong in saved settings; uploaded documents do not.
     "catalog_export": {"include_images": True, "include_model": True, "output_type": "complete"},
     "catalog_export_destination": {},  # Destination shared by all catalog export modes.
@@ -3055,7 +3062,7 @@ SCOPES = {
         "auto_create_weeks", "first_week_takes_all", "week_by",
         "image_extensions", "label_extensions", "overwrite",
         "retention", "golden_set", "dataset_assemble", "auto_training",
-        "sql_explorer", "readiness_flow", "central_store", "catalog_export", "catalog_pt_metadata", "catalog_export_destination",
+        "sql_explorer", "readiness_flow", "central_store", "pull_control_view", "catalog_export", "catalog_pt_metadata", "catalog_export_destination",
     ),
     "at": (
         "mode", "schedule_expression", "schedule_every_days", "schedule_from",

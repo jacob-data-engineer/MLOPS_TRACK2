@@ -402,6 +402,9 @@ export function Track2PullControlPanel({
     if (c.destination_bucket !== undefined) setDestBucket(c.destination_bucket);
     if (c.week_cutoff !== undefined) setAnchorText(isoToAnchor(c.week_cutoff));
     if (c.mode !== undefined) setWantedMode(c.mode as TriggerMode);
+    const view = c.pull_control_view ?? {};
+    if (typeof view.watching === "boolean") setWatching(view.watching);
+    if (typeof view.show_all_weeks === "boolean") setShowAllWeeks(view.show_all_weeks);
   }, []);
 
   const load = useCallback(async () => {
@@ -786,6 +789,18 @@ export function Track2PullControlPanel({
    * first render cannot write the values it has just read back over the
    * ones it read them from.
    */
+  // The weeks table's two view choices, saved on their own: they are not
+  // pull settings, and the guarded writer below must not start sending a
+  // whole pull config because somebody ticked "show all weeks".
+  useEffect(() => {
+    if (!loadedConfig || viewing) return;
+    const timer = window.setTimeout(() => {
+      void saveTrack2PullConfig({ pull_control_view: { watching, show_all_weeks: showAllWeeks } })
+        .catch(() => undefined);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [loadedConfig, viewing, watching, showAllWeeks]);
+
   const configJson = JSON.stringify(currentConfig());
   const latestConfigRef = useRef(configJson);
   latestConfigRef.current = configJson;

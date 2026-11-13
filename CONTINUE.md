@@ -1,5 +1,17 @@
 # Continue here
 
+Settings-file audit, SQL page + Data Preparation (13 Nov). SQL `_sql`
+files already held every control; the bar's false alarm in
+test_card_settings_are_saved is now an exemption (its state is file
+name/messages). Gaps fixed: Retention forecast `forecast_weeks` /
+`forecast_as_images` (in retention DEFAULTS + RetentionConfig); Pull
+Control's weeks-table `watching` / `show_all_weeks` as new top-level
+`pull_control_view` (DEFAULTS, ConfigRequest, SCOPES["dp"]; own writer,
+skipped while viewing another file); `sql_explorer` (the DP file's copy of
+the SQL page) gains by_week, train_after, class_ids. Pinned by
+tests/test_settings_files_hold_every_choice.py. Suite: 2 pre-existing
+failures left (side_boundaries, uat_wording).
+
 `_decay` is now synced IN PLACE, not emptied and recopied (13 Nov):
 `rebuild_decayed` lists what is there, deletes keys the decay no longer
 wants, copies only missing ones (store keys never change, so same result).

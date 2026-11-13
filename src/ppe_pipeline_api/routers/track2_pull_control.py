@@ -109,6 +109,8 @@ class ConfigRequest(BaseModel):
     readiness_flow: dict | None = None
     # The central data store's bucket and folder (2026-10-29).
     central_store: dict | None = None
+    # Pull Control's weeks table: `{watching, show_all_weeks}`.
+    pull_control_view: dict | None = None
     catalog_export: dict | None = None
     catalog_export_destination: dict | None = None
     catalog_pt_metadata: dict | None = None

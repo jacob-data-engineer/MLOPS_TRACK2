@@ -2158,6 +2158,8 @@ export interface Track2PullConfig {
   /** The central data store: the one bucket and folder where all the
    * data and images are kept (2026-10-29). */
   central_store?: { bucket?: string; folder?: string; train_from_combined?: boolean };
+  /** Pull Control's weeks table: auto re-read, and all weeks vs recent. */
+  pull_control_view?: { watching?: boolean; show_all_weeks?: boolean };
   catalog_export?: { include_images?: boolean; include_model?: boolean; output_type?: string };
   catalog_pt_metadata?: { selected_groups?: string[] };
   catalog_export_destination?: CatalogExportDestination;
@@ -2175,6 +2177,9 @@ export interface Track2PullConfig {
     train_percent?: number;
     show_labels?: boolean;
     with_labels?: boolean;
+    by_week?: boolean;
+    train_after?: boolean;
+    class_ids?: Record<string, number>;
   };
   /** The SQL tab's Readiness flow card: which class it shows. */
   readiness_flow?: { hazard?: string };
@@ -2536,6 +2541,9 @@ export function getTrack2PullSchedule(): Promise<{
 export interface Track2RetentionConfig {
   /** Coverage warning only; never changes the sampling selection. */
   min_class_images?: number;
+  /** The forecast table: retrains ahead, and images vs shares. */
+  forecast_weeks?: number;
+  forecast_as_images?: boolean;
   enabled: boolean;
   /** How many of the newest weeks count in full before decay starts.
    * 1 is the original behaviour: only the newest week is untouched. */

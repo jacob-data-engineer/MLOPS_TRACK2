@@ -106,6 +106,10 @@ NO_SETTINGS_OF_THEIR_OWN = {
     # Saved through their own endpoints, not the pull-control config.
     "Track2ExportSettingsBar.tsx": "saveTrack2ExportSettings",
     "Track2MetricsExportCard.tsx": "arm/disarm + export settings endpoints",
+    # Its state is the file name, the list and messages. The page's
+    # settings it is handed are written by /track2/sql/settings/save, the
+    # SQL page's own named files (checked in test_settings_files_hold_every_choice).
+    "Track2SqlSettingsBar.tsx": "saves the SQL page's named settings files",
 }
 
 #: A panel with at least this many pieces of state is making choices.

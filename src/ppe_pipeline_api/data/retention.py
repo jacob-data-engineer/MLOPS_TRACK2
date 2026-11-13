@@ -68,6 +68,12 @@ DEFAULTS = {
     "min_images": 25,
     # Warning threshold only. Does not silently exempt classes from decay.
     "min_class_images": 5,
+    # The card's forecast table (2026-11-13): how many future retrains it
+    # projects, and whether it counts images or shows shares. Choices made
+    # on the card, so they travel in the settings file with the curve they
+    # are looking at. Neither changes what is selected for training.
+    "forecast_weeks": 10,
+    "forecast_as_images": False,
 }
 
 

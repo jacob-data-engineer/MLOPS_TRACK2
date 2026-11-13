@@ -138,6 +138,9 @@ export function Track2SqlPage() {
         if (typeof saved.train_percent === "number") setTrainPercent(saved.train_percent);
         if (typeof saved.show_labels === "boolean") setShowLabels(saved.show_labels);
         if (typeof saved.with_labels === "boolean") setWithLabels(saved.with_labels);
+        if (typeof saved.by_week === "boolean") setByWeek(saved.by_week);
+        if (typeof saved.train_after === "boolean") setTrainAfter(saved.train_after);
+        if (saved.class_ids && typeof saved.class_ids === "object") setClassIds(saved.class_ids);
         // Named EC2 files take precedence over the last auto-saved working state.
         // Finish restoring them before enabling queries or auto-save.
         const listed = await apiGet<{files: {name: string}[]}>("/track2/sql/settings");
@@ -170,11 +173,14 @@ export function Track2SqlPage() {
         preset_class: presetClass, preset_scope: presetScope,
         pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
         show_labels: showLabels, with_labels: withLabels,
+        // The rest of the page's choices, so a Data Preparation file holds
+        // the whole SQL page and not just the query (2026-11-13).
+        by_week: byWeek, train_after: trainAfter && byWeek, class_ids: classIds,
       } }).catch(() => undefined);
     }, 700);
     return () => window.clearTimeout(timer);
   }, [settingsRead, explorationHazard, database, bucket, folder, sql, presetClass, presetScope,
-      pullBucket, pullFolder, trainPercent, showLabels, withLabels]);
+      pullBucket, pullFolder, trainPercent, showLabels, withLabels, byWeek, trainAfter, classIds]);
 
   // ...and different classes. Read live, so a new class shows up here
   // without a change to the app. Only once the database is running: a
