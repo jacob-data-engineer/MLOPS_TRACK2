@@ -33,6 +33,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from .. import pull_control as pc
@@ -53,6 +54,14 @@ YAML_NAME = "data.yaml"
 class Stopped(Exception):
     """The operator pressed Stop. Copies already made stay; none is half
     made -- each S3 copy is whole or absent."""
+
+
+def _report(progress, phase: str, done: int, total: int) -> None:
+    if progress is not None:
+        try:
+            progress(phase, done, total)
+        except Exception:                                           # noqa: BLE001
+            pass   # a progress display never stops a copy
 
 
 def _check(stop) -> None:
@@ -125,14 +134,26 @@ def _split_of(images_prefix: str, declared: str) -> str:
     return "val" if declared == "val" else "train"
 
 
-def _copy(pairs: list, dest_bucket: str, *, skip_existing: set, stop=None) -> dict:
+def _copy(pairs: list, dest_bucket: str, *, skip_existing: set, stop=None,
+          progress=None, phase: str = "") -> dict:
     """Server-side copies of `(src_bucket, src_key, dest_key)`. A dest key
     already in `skip_existing` is left alone -- never overwritten.
 
     `stop`, when given, is asked before every copy; once it answers True
-    the copies not yet started are skipped and `Stopped` is raised."""
+    the copies not yet started are skipped and `Stopped` is raised.
+
+    `progress(phase, done, total)`, when given, hears after every copy."""
     todo = [p for p in pairs if p[2] not in skip_existing]
     skipped = object()
+    count = {"done": 0}
+    count_lock = threading.Lock()
+    _report(progress, phase, 0, len(todo))
+
+    def tick():
+        with count_lock:
+            count["done"] += 1
+            done = count["done"]
+        _report(progress, phase, done, len(todo))
 
     def one(pair):
         if stop is not None and stop():
@@ -144,6 +165,8 @@ def _copy(pairs: list, dest_bucket: str, *, skip_existing: set, stop=None) -> di
             return None
         except Exception as exc:                                    # noqa: BLE001
             return f"{src_key}: {exc}"
+        finally:
+            tick()
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         outcomes = list(pool.map(one, todo))
@@ -161,13 +184,14 @@ def _copy(pairs: list, dest_bucket: str, *, skip_existing: set, stop=None) -> di
 
 def combine(*, weeks_root: str = "", weeks_bucket: str = "", week_prefix: str = "week_",
             golden_folder: str = "", golden_bucket: str = "",
-            folders: list | None = None, stop=None) -> dict:
+            folders: list | None = None, stop=None, progress=None) -> dict:
     """Copy every file of every ticked source into the store. Adds only.
 
     `folders` are the Assemble card's entries, each `{"images", "labels",
     "split"}`. Returns per-source counts and the slugs the folders went to.
     """
     bucket, store, _ = location()
+    _report(progress, "listing", 0, 0)
     existing = set(_keys(bucket, store))
     pairs: list = []
     report: dict = {}
@@ -220,7 +244,8 @@ def combine(*, weeks_root: str = "", weeks_bucket: str = "", week_prefix: str = 
         add(f"folders/{slug}/{split}", new)
 
     _check(stop)
-    result = _copy(pairs, bucket, skip_existing=existing, stop=stop)
+    result = _copy(pairs, bucket, skip_existing=existing, stop=stop,
+                   progress=progress, phase="store")
     return {"bucket": bucket, "store": store, "sources": report,
             "slugs": {k: sorted(v) for k, v in slugs.items()}, **result}
 
@@ -257,7 +282,7 @@ def delete_decayed() -> int:
 
 def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
                     golden_split: bool = True, slugs: dict | None = None,
-                    for_run: bool = False, stop=None) -> dict:
+                    for_run: bool = False, stop=None, progress=None) -> dict:
     """Empty `<store>_decay`, then copy into it what a run trains on.
 
     Weeks through the retention policy (`retained_lists.select`, the same
@@ -266,6 +291,7 @@ def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
     """
     bucket, store, decayed = location()
     now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    _report(progress, "clearing", 0, 0)
     delete_decayed()
     _write_marker(bucket, decayed, status="building", started_at=now, for_run=for_run)
 
@@ -318,7 +344,8 @@ def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
 
     try:
         _check(stop)
-        result = _copy(pairs, bucket, skip_existing=set(), stop=stop)
+        result = _copy(pairs, bucket, skip_existing=set(), stop=stop,
+                       progress=progress, phase="decay")
     except Stopped:
         # A half-built decayed copy is a dataset nobody chose. Remove it.
         delete_decayed()
@@ -331,3 +358,27 @@ def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
                          + "; ".join(result["errors"][:3]))
     return {"bucket": bucket, "folder": decayed, "train": train, "val": val,
             "weeks": weeks_report, **result}
+
+
+# --------------------------------------------------------------------------
+# 3. the button's job, saved so it outlives the container
+# --------------------------------------------------------------------------
+
+#: Where the "Combine data sources" job is written while it runs. Not in the
+#: store (never written to but by a combine) and not in `_decay` (emptied by
+#: every rebuild). A deploy replaces the container; this is what lets the
+#: new one see a combine was running and carry it on.
+JOB_KEY = "_pull_state/combine_job.json"
+
+
+def save_job(job: dict) -> None:
+    storage.s3.put_object(Bucket=storage.BUCKET, Key=JOB_KEY,
+                          Body=json.dumps(job, default=str).encode(),
+                          ContentType="application/json")
+
+
+def load_job() -> dict:
+    try:
+        return json.loads(storage.s3.get_object(Bucket=storage.BUCKET, Key=JOB_KEY)["Body"].read())
+    except Exception:                                               # noqa: BLE001
+        return {}

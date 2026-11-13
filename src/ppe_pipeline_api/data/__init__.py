@@ -36,7 +36,7 @@ __all__ = [
     "preserve_catch_up",
     # ...and every source combined into it, with a decayed copy per run
     "combine_store", "rebuild_decayed", "delete_decayed", "decay_marker",
-    "combined_location",
+    "combined_location", "save_combine_job", "load_combine_job",
 ]
 
 scan_weeks = _through(__name__, "dataset_yaml", "scan_root")
@@ -86,3 +86,5 @@ rebuild_decayed = _through(__name__, "combined_store", "rebuild_decayed")
 delete_decayed = _through(__name__, "combined_store", "delete_decayed")
 decay_marker = _through(__name__, "combined_store", "read_marker")
 combined_location = _through(__name__, "combined_store", "location")
+save_combine_job = _through(__name__, "combined_store", "save_job")
+load_combine_job = _through(__name__, "combined_store", "load_job")

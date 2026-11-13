@@ -257,3 +257,60 @@ def test_the_stop_button_is_wired():
     card = (ROOT / "web/src/components/Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
     assert "onClick={stopCombine}" in card
     assert "Catalog" not in card, "the catalog section left this card"
+
+
+# --- progress, and outliving the page and the container ---------------------------
+
+def test_progress_is_reported_for_each_copy(s3):
+    seen = []
+    cs.combine(weeks_root="retraining", weeks_bucket=B,
+               progress=lambda phase, done, total: seen.append((phase, done, total)))
+    copies = [s for s in seen if s[0] == "store"]
+    assert copies[0][1] == 0 and copies[-1][1] == copies[-1][2] > 0
+
+
+def test_a_broken_progress_display_never_stops_a_copy(s3):
+    def boom(*a):
+        raise RuntimeError("display gone")
+    assert cs.combine(weeks_root="retraining", weeks_bucket=B, progress=boom)["copied"] > 0
+
+
+def _resume_setup(monkeypatch, saved):
+    from ppe_pipeline_api.chain import retrain_schedule as rs
+    from ppe_pipeline_api import data
+    started, written = [], []
+    monkeypatch.setattr(rs, "_combine_job", {})
+    monkeypatch.setattr(rs, "_combine_resume_checked", [False])
+    monkeypatch.setattr(rs, "start_combine", lambda **kw: started.append(kw))
+    monkeypatch.setattr(data, "load_combine_job", lambda: saved)
+    monkeypatch.setattr(data, "save_combine_job", lambda job: written.append(job))
+    monkeypatch.setattr(data, "decay_marker", lambda: {"status": "building"})
+    monkeypatch.setattr(data, "delete_decayed", lambda: 0)
+    monkeypatch.setenv("APP_ROLE", "dev")
+    return rs, started, written
+
+
+def test_a_restart_carries_on_a_running_combine(monkeypatch):
+    rs, started, _ = _resume_setup(monkeypatch, {"running": True, "owner": "dev", "started_at": "t0"})
+    assert rs.resume_combine().startswith("resumed")
+    assert started == [{"resumed_from": {"running": True, "owner": "dev", "started_at": "t0"}}]
+    assert rs.resume_combine() == "", "once per process"
+
+
+@pytest.mark.parametrize("saved", [{"running": False}, {"running": True, "owner": "stable"}])
+def test_nothing_to_carry_on(monkeypatch, saved):
+    rs, started, _ = _resume_setup(monkeypatch, saved)
+    assert rs.resume_combine() == "" and not started
+
+
+def test_a_combine_being_stopped_is_finished_as_stopped(monkeypatch):
+    rs, started, written = _resume_setup(monkeypatch, {"running": True, "owner": "dev", "stopping": True})
+    rs.resume_combine()
+    assert not started and written[-1]["stopped"] and not written[-1]["running"]
+
+
+def test_the_ticker_resumes_and_the_card_shows_progress():
+    ticker = (ROOT / "src/ppe_pipeline_api/chain/ticker.py").read_text(encoding="utf-8")
+    assert "retrain_schedule.resume_combine" in ticker
+    card = (ROOT / "web/src/components/Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
+    assert 'role="progressbar"' in card and "<CombineProgress job={combine} />" in card

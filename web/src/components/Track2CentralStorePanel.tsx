@@ -173,13 +173,7 @@ export function Track2CentralStorePanel() {
             Does the copy and the decay now, without training. The decayed copy is kept until the next run rebuilds it.
           </span>
         </div>
-        {combine?.running && (
-          <p className="mt-2 text-ink-secondary" role="status">
-            {combine.stopping
-              ? "Stopping: copies already in flight finish, the rest are skipped."
-              : <>Copying since {formatDayTime(combine.started_at ?? "")}. Large sources take a few minutes.</>}
-          </p>
-        )}
+        {combine?.running && <CombineProgress job={combine} />}
         {combine && !combine.running && combine.finished_at && (
           combine.ok ? (
             <p className="tabular mt-2 text-ink-secondary" role="status">
@@ -200,5 +194,46 @@ export function Track2CentralStorePanel() {
         {combineError && <p className="mt-2 text-critical" role="alert">{combineError}</p>}
       </div>
     </Card>
+  );
+}
+
+/** Where a running combine has got to: which of its two copies, and how
+ * far through it. Read from the server every 5 s, so it is right after the
+ * page is closed and opened again -- the combine runs on the server. */
+const PHASES: Record<string, { step: number; label: string }> = {
+  listing: { step: 1, label: "Listing the sources and the store" },
+  store: { step: 1, label: "Copying into the store" },
+  clearing: { step: 2, label: "Clearing the old decayed copy" },
+  decay: { step: 2, label: "Building the decayed copy" },
+};
+
+function CombineProgress({ job }: { job: Track2CombineJob }) {
+  const phase = PHASES[job.phase ?? "listing"] ?? PHASES.listing;
+  const total = job.total ?? 0;
+  const done = job.done ?? 0;
+  const counted = (job.phase === "store" || job.phase === "decay") && total > 0;
+  const pct = counted ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  return (
+    <div className="mt-2" role="status">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 text-ink-secondary">
+        <span>
+          Step {phase.step} of 2: {job.stopping ? "stopping -- copies in flight finish, the rest are skipped" : phase.label}
+        </span>
+        <span className="tabular">
+          {counted ? `${done.toLocaleString()} / ${total.toLocaleString()} (${pct}%)`
+            : job.phase === "store" || job.phase === "decay" ? "nothing new to copy" : "..."}
+        </span>
+      </div>
+      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-black/10"
+           role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        <div className={`h-full rounded-full bg-accent transition-all duration-500 ${counted ? "" : "animate-pulse"}`}
+             style={{ width: counted ? `${pct}%` : "100%", opacity: counted ? 1 : 0.3 }} />
+      </div>
+      <p className="mt-1 text-ink-muted">
+        Started {formatDayTime(job.started_at ?? "")}
+        {job.resumed_at && `, carried on after a restart at ${formatDayTime(job.resumed_at)}`}.
+        It runs on the server: you can close this page, and it carries on.
+      </p>
+    </div>
   );
 }

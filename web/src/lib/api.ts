@@ -2639,6 +2639,8 @@ export interface Track2RetentionQuality {
 /** What "Combine data sources" last did, and whether one is running. */
 export type Track2CombineJob = {
   running?: boolean; stopping?: boolean; stopped?: boolean;
+  /** listing | store | clearing | decay -- and how far through it. */
+  phase?: string; done?: number; total?: number; resumed_at?: string;
   started_at?: string; finished_at?: string;
   ok?: boolean; error?: string;
   store?: string; decayed?: string;

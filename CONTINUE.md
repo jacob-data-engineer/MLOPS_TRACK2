@@ -1,5 +1,15 @@
 # Continue here
 
+Combine progress bar + survives restarts (13 Nov). `combined_store._copy`
+reports `progress(phase, done, total)` -- phases listing/store (step 1),
+clearing/decay (step 2). The button's job is saved to
+`s3://track2-s3/_pull_state/combine_job.json` (every 5 s and at each
+end), `owner` = APP_ROLE. `retrain_schedule.resume_combine` runs once per
+process on the ticker: a saved running job owned by this role is started
+again (safe: store copies skip existing, decay rebuilds from empty); one
+that was stopping is finished as stopped. Closing the page never stopped
+it -- it was always a server thread; a deploy did.
+
 Stop button for Combine data sources + Catalog section removed from the
 Central data store card (13 Nov). `POST .../central-store/combine/stop`
 sets `retrain_schedule._combine_stop`; `combined_store._copy` asks it

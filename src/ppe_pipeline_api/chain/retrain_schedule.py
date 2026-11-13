@@ -1673,7 +1673,8 @@ def combined_enabled(config: dict | None = None) -> bool:
     return bool((config.get("central_store") or {}).get("train_from_combined"))
 
 
-def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None) -> dict:
+def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None,
+                      progress=None) -> dict:
     """Copy every TICKED source into the central store, then rebuild its
     decayed copy. The chain calls it before every run; the card's
     "Combine data sources" button calls it by hand (`for_run=False`, so
@@ -1705,7 +1706,7 @@ def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None) -
         weeks_bucket=pc.destination_bucket(config), week_prefix=week_prefix,
         golden_folder=golden["target_folder"] if golden else "",
         golden_bucket=golden["target_bucket"] if golden else "",
-        folders=folders, stop=stop)
+        folders=folders, stop=stop, progress=progress)
     if combined["failed"]:
         raise ValueError(f"{combined['failed']} file(s) could not be copied into the central "
                          "store: " + "; ".join(combined["errors"][:3]))
@@ -1714,7 +1715,7 @@ def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None) -
     decayed = data.rebuild_decayed(
         retention=retention, use_weeks=use_weeks, use_golden=golden is not None,
         golden_split=bool(golden["split"]) if golden else True,
-        slugs=combined["slugs"], for_run=for_run, stop=stop)
+        slugs=combined["slugs"], for_run=for_run, stop=stop, progress=progress)
     return {"combined": combined, "decayed": decayed}
 
 
@@ -1725,23 +1726,70 @@ _combine_lock = threading.Lock()
 _combine_stop = threading.Event()
 
 
+#: Seconds between saves of the job's progress to S3 while it runs.
+COMBINE_SAVE_SECONDS = 5
+_combine_saved_at = [0.0]
+_combine_resume_checked = [False]
+
+
+def _owner() -> str:
+    """Which container started it: dev and stable share the bucket, and only
+    the one that started a combine carries it on after a restart."""
+    import os
+    return os.environ.get("APP_ROLE", "") or "default"
+
+
+def _save_combine_job(force: bool = False) -> None:
+    import time
+    from .. import data
+    if not force and time.monotonic() - _combine_saved_at[0] < COMBINE_SAVE_SECONDS:
+        return
+    _combine_saved_at[0] = time.monotonic()
+    try:
+        data.save_combine_job(dict(_combine_job))
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"Could not save the combine job: {exc}")
+
+
 def combine_job() -> dict:
-    return dict(_combine_job)
+    """The job in this process; else the saved one -- after a restart, or
+    when the other container started it."""
+    if _combine_job:
+        return dict(_combine_job)
+    from .. import data
+    try:
+        return data.load_combine_job()
+    except Exception:                                              # noqa: BLE001
+        return {}
 
 
-def start_combine() -> dict:
+def _combine_progress(phase: str, done: int, total: int) -> None:
+    with _combine_lock:
+        _combine_job.update(phase=phase, done=done, total=total)
+    _save_combine_job(force=(done == total))
+
+
+def start_combine(*, resumed_from: dict | None = None) -> dict:
     """Run `combine_and_decay` by hand, in the background: thousands of
-    server-side copies outlast a request."""
+    server-side copies outlast a request. It runs on the server, so closing
+    the page does not stop it; and it is saved to S3 as it goes, so a
+    container restart carries it on (`resume_combine`)."""
     with _combine_lock:
         if _combine_job.get("running"):
             raise ValueError("A combine is already running.")
         _combine_job.clear()
         _combine_stop.clear()
-        _combine_job.update(running=True, started_at=_now().isoformat(timespec="seconds"))
+        _combine_job.update(running=True, owner=_owner(), phase="listing", done=0, total=0,
+                            started_at=(resumed_from or {}).get("started_at")
+                            or _now().isoformat(timespec="seconds"))
+        if resumed_from:
+            _combine_job["resumed_at"] = _now().isoformat(timespec="seconds")
+    _save_combine_job(force=True)
 
     def work():
         try:
-            out = combine_and_decay(for_run=False, stop=_combine_stop.is_set)
+            out = combine_and_decay(for_run=False, stop=_combine_stop.is_set,
+                                    progress=_combine_progress)
             result = {"ok": True,
                       "store": out["combined"]["store"], "decayed": out["decayed"]["folder"],
                       "new_in_store": out["combined"]["copied"],
@@ -1754,6 +1802,7 @@ def start_combine() -> dict:
         with _combine_lock:
             _combine_job.update(running=False, finished_at=_now().isoformat(timespec="seconds"),
                                 **result)
+        _save_combine_job(force=True)
 
     threading.Thread(target=work, daemon=True, name="combine-store").start()
     return combine_job()
@@ -1769,7 +1818,36 @@ def stop_combine() -> dict:
             raise ValueError("No combine is running.")
         _combine_stop.set()
         _combine_job["stopping"] = True
+    _save_combine_job(force=True)
     return combine_job()
+
+
+def resume_combine() -> str:
+    """Once per process, on the tick: carry on a combine the previous
+    container was running when it was replaced. Safe to repeat from the
+    start -- copying into the store skips what is already there, and the
+    decayed copy is rebuilt from empty every time. A combine that was
+    being stopped is finished as stopped instead."""
+    from .. import data
+
+    if _combine_resume_checked[0]:
+        return ""
+    _combine_resume_checked[0] = True
+    if _combine_job.get("running"):
+        return ""
+    saved = data.load_combine_job()
+    if not saved.get("running") or saved.get("owner", "default") != _owner():
+        return ""
+    if saved.get("stopping"):
+        marker = data.decay_marker() or {}
+        if marker.get("status") == "building":
+            data.delete_decayed()
+        data.save_combine_job({**saved, "running": False, "stopping": False, "stopped": True,
+                               "ok": False, "finished_at": _now().isoformat(timespec="seconds"),
+                               "error": "Stopped by hand (the app restarted while it was stopping)."})
+        return "finished a stopped combine"
+    start_combine(resumed_from=saved)
+    return f"resumed the combine started {saved.get('started_at')}"
 
 
 #: How long a decayed copy built for a run is left alone before it may be

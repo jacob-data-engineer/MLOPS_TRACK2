@@ -43,6 +43,13 @@ async def queue_poll_loop() -> None:
             print(f"SQL file sensor tick failed: {exc}")
         try:
             from . import retrain_schedule
+            resumed = await asyncio.to_thread(retrain_schedule.resume_combine)
+            if resumed:
+                print(f"Combine data sources: {resumed}")
+        except Exception as exc:
+            print(f"Combine resume failed: {exc}")
+        try:
+            from . import retrain_schedule
             done = await asyncio.to_thread(retrain_schedule.cleanup_decayed)
             if done:
                 print(f"Decayed copy cleaned up: {done}")
