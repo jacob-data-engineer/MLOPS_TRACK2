@@ -29,6 +29,7 @@ FULL = {
     "train_sources": [{"images": "ds/images/train", "labels": ""}],
     "eval_sources": [{"images": "ds/images/val", "labels": ""}],
     "detector_slug": "fakecad-it",
+    "label_classes": {"0": "helmet", "1": "gloves", "2": "person"},
 }
 CLASSES = {0: "helmet", 1: "gloves", 2: "person"}
 
@@ -77,13 +78,12 @@ def test_the_tick_turns_it_on(detector):
 
 # --- what it reads ---------------------------------------------------------------
 
-def test_the_classes_come_from_the_model_name_not_the_card(detector):
-    """The card saves a slug, never a copy of the names. A corrected
-    class list has to reach the schedule without the card being
-    reopened -- the yaml is the only place those names exist, so nothing
-    downstream could notice they were stale."""
+def test_dataset_classes_do_not_require_a_model_lookup(monkeypatch):
+    import ppe_pipeline_api.track2_shared as t2
+    monkeypatch.setattr(t2, "get_detector", lambda slug: pytest.fail("Preparation must not read model classes"))
     plan = rs.assemble_plan({"dataset_assemble": FULL})
     assert plan["classes"] == CLASSES
+    assert not plan["problems"]
 
 
 def test_the_folders_come_across(detector):
@@ -119,27 +119,21 @@ def test_no_evaluation_folder_blocks(detector):
     assert "no evaluation folder" in _blocking(plan["problems"]).lower()
 
 
-def test_no_model_name_blocks(detector):
+def test_no_model_name_is_needed_for_preparation():
     plan = rs.assemble_plan({"dataset_assemble": {**FULL, "detector_slug": ""}})
-    assert "model name" in _blocking(plan["problems"]).lower()
+    assert not plan["problems"]
+    assert plan["classes"] == CLASSES
 
 
-def test_a_model_name_that_no_longer_exists_blocks(monkeypatch):
-    import ppe_pipeline_api.track2_shared as t2
-
-    def gone(slug):
-        raise ValueError("No detector " + repr(slug) + ".")
-
-    monkeypatch.setattr(t2, "get_detector", gone)
-    plan = rs.assemble_plan({"dataset_assemble": FULL})
-    assert "could not be read" in _blocking(plan["problems"])
+def test_a_retired_model_does_not_block_preparation():
+    plan = rs.assemble_plan({"dataset_assemble": {**FULL, "detector_slug": "gone"}})
+    assert not plan["problems"]
 
 
-def test_a_model_name_with_no_classes_blocks(monkeypatch):
-    import ppe_pipeline_api.track2_shared as t2
-    monkeypatch.setattr(t2, "get_detector", lambda slug: {"slug": slug, "classes": {}})
-    plan = rs.assemble_plan({"dataset_assemble": FULL})
-    assert "no classes" in _blocking(plan["problems"])
+def test_missing_dataset_classes_block_instead_of_using_model_classes():
+    plan = rs.assemble_plan({"dataset_assemble": {**FULL, "label_classes": {}}})
+    assert "Label classes" in _blocking(plan["problems"])
+    assert plan["classes"] == {}
 
 
 # --- preflight -------------------------------------------------------------------

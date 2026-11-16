@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCardOpen } from "../lib/cardState";
 import { post } from "../lib/bus";
@@ -8,7 +8,6 @@ import {
   previewTrack2DatasetYaml,
   checkTrack2Pairing,
   getTrack2DatasetLayout,
-  getTrack2Detectors,
   getTrack2Models,
   getTrack2Buckets,
   listTrack2Folders,
@@ -20,7 +19,6 @@ import {
   type Track2Pairing,
   type Track2DatasetRequest,
   type Track2DatasetYamlInPlace,
-  type Track2Detector,
 } from "../lib/api";
 import { Card } from "./Card";
 import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
@@ -174,7 +172,7 @@ function YamlPreview({
             <span>
               {dropUndeclared
                 ? "The filter is on: the run drops these boxes itself."
-                : <>or tick <span className="font-medium">Filter undeclared classes</span> under Label classes above.</>}
+                : <>Enter the correct names for every class in Label classes above before training.</>}
             </span>
           </div>
         </div>
@@ -274,7 +272,6 @@ export function Track2DatasetAssemblePanel({
   multiSource = false,
   only,
   onOnlyChange,
-  modelSlug = "",
   previewOnly = false,
 }: {
   /** Several folders per split, merged into one dataset. A site's images
@@ -289,15 +286,6 @@ export function Track2DatasetAssemblePanel({
    * nothing off. */
   only?: boolean;
   onOnlyChange?: (on: boolean) => void;
-  /** The Model Name chosen in "Your Model Names", passed down rather
-   * than asked again.
-   *
-   * The classes written into data.yaml are the DATASET's, and the only
-   * record of what index 0 means is a Model Name's class list -- so the
-   * one already chosen for the run IS the answer, and a second dropdown
-   * here was the same question with a second answer that could differ.
-   * Only one of the two ever reached the yaml, and nothing said which. */
-  modelSlug?: string;
   /** Show ONLY "Preview the data.yaml", built from the SAVED settings.
    *
    * The data/training split (2026-10-28) put this card on the Data
@@ -342,8 +330,6 @@ export function Track2DatasetAssemblePanel({
   // Shown while a preview request is in flight, so the panel reads as
   // live rather than as a stale answer to the previous pick.
   const [previewing, setPreviewing] = useState(false);
-  const [detectors, setDetectors] = useState<Track2Detector[]>([]);
-  const [detectorSlug, setDetectorSlug] = useState("");
   // `scheduled` is gone. The Training data radios in step 6 decide
   // what a scheduled run builds from, and "Enabled for scheduling"
   // beside them turns it on -- so a copy of that answer here could only
@@ -393,15 +379,10 @@ export function Track2DatasetAssemblePanel({
    * three ticks did was using its folders, and a default of false
    * would quietly empty their training set on the next run. */
   const [useFolders, setUseFolders] = useState(true);
-  /** What the LABEL FILES mean, as typed: every class in index order.
-   * Distinct from the Model Name, which is what to TRAIN. When this is
-   * set and contains the Model Name's class by name, the yaml declares
-   * it and the run filters at load time, keeping every image. */
+  /** Complete dataset taxonomy, independent of the model trained later. */
   const [labelClassesText, setLabelClassesText] = useState("");
-  /** The filter tick: boxes whose class the yaml does not name are dropped
-   * by the training container from its downloaded copy. Saved like every
-   * other setting; the chain reads it. Off by default. */
-  const [dropUndeclared, setDropUndeclared] = useState(false);
+  /** Preparation refuses missing classes instead of discarding boxes. */
+  const dropUndeclared = false; // Legacy preparation filters no longer discard dataset classes.
   /** Where the yaml build renders: a slot the page places just above
    * "Start the training run". Read after mount, once the page's DOM exists. */
   const [buildSlot, setBuildSlot] = useState<HTMLElement | null>(null);
@@ -435,12 +416,6 @@ export function Track2DatasetAssemblePanel({
         if (saved.train_sources?.length) setTrainSources(saved.train_sources);
         if (saved.eval_sources?.length) setEvalSources(saved.eval_sources);
         if (saved.folders) setFolders(saved.folders);
-        // Only as a starting value, and only until the page says
-        // otherwise: the effect below keeps this following the Model
-        // Name card, including a change made after this card mounted.
-        const inherited = String(status.config.default_detector?.slug || "");
-        if (inherited) setDetectorSlug(inherited);
-        else if (saved.detector_slug) setDetectorSlug(saved.detector_slug);
         if (typeof saved.overwrite === "boolean") setOverwrite(saved.overwrite);
         if (typeof saved.use === "boolean") setUseFolders(saved.use);
         if (saved.built?.folder) setBuilt(saved.built);
@@ -453,9 +428,7 @@ export function Track2DatasetAssemblePanel({
         if (saved.label_classes && typeof saved.label_classes === "object") {
           setLabelClassesText(formatLabelClasses(saved.label_classes));
         }
-        if (typeof saved.drop_undeclared_labels === "boolean") {
-          setDropUndeclared(saved.drop_undeclared_labels);
-        }
+
       })
       .catch(() => undefined)
       .finally(() => setSettingsRead(true));
@@ -483,13 +456,10 @@ export function Track2DatasetAssemblePanel({
   // Debounced, because picking a folder changes several of these at once
   // and each keystroke in a prefix box would otherwise be a request.
   useEffect(() => {
-    // The preview copy on Multi-Auto Training writes only the class
-    // fields -- see the writer after this one.
+    // Auto Training only previews the dataset recipe.
     if (!settingsRead || previewOnly) return;
     const timer = setTimeout(async () => {
-      // `write_config` replaces `dataset_assemble` whole, and the class
-      // fields are edited on the Training tab. Start from what is saved so
-      // this card never writes back a stale copy of them.
+      // Merge the dataset recipe with unrelated saved card settings.
       const saved = await getTrack2PullControl()
         .then((s) => s.config.dataset_assemble || {}).catch(() => null);
       if (saved === null) return;
@@ -498,16 +468,11 @@ export function Track2DatasetAssemblePanel({
           ...saved,
           only: onOnlyChange ? !!only : savedOnly,
           use: useFolders,
-          // Owned here only where the class fields are shown on this card
-          // (the standard Training tab). On Data Preparation they are not.
-          ...(onOnlyChange ? {} : {
-            label_classes: parseLabelClasses(labelClassesText),
-            drop_undeclared_labels: dropUndeclared,
-          }),
+          label_classes: parseLabelClasses(labelClassesText),
+          drop_undeclared_labels: false,
           train_sources: trainSources,
           eval_sources: evalSources,
           folders,
-          detector_slug: detectorSlug,
           overwrite,
           // Carried through the writer rather than written separately:
           // this effect sends the whole `dataset_assemble` object, so a
@@ -522,33 +487,7 @@ export function Track2DatasetAssemblePanel({
     }, 600);
     return () => clearTimeout(timer);
   }, [settingsRead, previewOnly, only, onOnlyChange, savedOnly, useFolders, labelClassesText,
-      dropUndeclared, trainSources, evalSources, folders, detectorSlug, overwrite, built]);
-
-  // The class fields' writer on Multi-Auto Training (2026-11-13). They
-  // say what the run TRAINS -- which labelled classes the yaml names and
-  // whether undeclared boxes are dropped -- so they sit beside Add to
-  // Queue, not with the folders on Data Preparation. Only these two
-  // fields are written, onto the latest saved block, so the folders the
-  // Data Preparation tab owns are never overwritten from here.
-  const classesTouched = useRef(false);
-  useEffect(() => {
-    if (!settingsRead || !previewOnly || !classesTouched.current) return;
-    const timer = setTimeout(async () => {
-      const saved = await getTrack2PullControl()
-        .then((s) => s.config.dataset_assemble || {}).catch(() => null);
-      if (saved === null) return;
-      void saveTrack2PullConfig({
-        dataset_assemble: {
-          ...saved,
-          label_classes: parseLabelClasses(labelClassesText),
-          drop_undeclared_labels: dropUndeclared,
-        },
-      })
-        .then(() => post("data-sources-changed", { from: "assemble" }))
-        .catch(() => undefined);
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [settingsRead, previewOnly, labelClassesText, dropUndeclared]);
+      dropUndeclared, trainSources, evalSources, folders, overwrite, built]);
 
   // Check each filled pair as it is filled. Debounced, because picking a
   // folder changes a field per click and every keystroke in a prefix box
@@ -585,18 +524,6 @@ export function Track2DatasetAssemblePanel({
     }, 700);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [trainSources, evalSources]);
-
-  useEffect(() => {
-    // The built-in PPE list is filtered out here as it is everywhere
-    // else -- "Your Model Names" filters it the same way, so the slug
-    // this card is handed can never be a built-in one and the two lists
-    // agree. Kept as a LOOKUP now rather than a dropdown's options: the
-    // classes are shown, not chosen, and this is what resolves the slug
-    // into the names the yaml declares.
-    getTrack2Detectors()
-      .then((res) => setDetectors(res.detectors.filter((d) => !d.builtin)))
-      .catch(() => undefined);
-  }, []);
 
   // Each picker lists its own prefix. The browse endpoint takes two
   // prefixes per call, so the four are fetched as two calls.
@@ -657,55 +584,9 @@ export function Track2DatasetAssemblePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folders, trainSources, evalSources, multiSource, hasTraining]);
 
-  // The Model Name card is on this same page, so its choice can change
-  // while this card is open. Without this the classes here would be
-  // whatever was chosen when the card mounted -- stale, and silently so,
-  // because a class list that is merely wrong still looks like a list.
-  useEffect(() => {
-    if (modelSlug) setDetectorSlug(modelSlug);
-  }, [modelSlug]);
-
-  const chosen = detectors.find((d) => d.slug === detectorSlug);
-
-  /** The class names as the API wants them, from the chosen Model Name. */
-  /** The Model Name's own list, as `{index: name}`. */
-  function modelClasses(): Record<string, string> {
-    return Object.fromEntries(
-      Object.entries(chosen?.classes ?? {}).map(([index, name]) => [String(index), name]),
-    );
-  }
-
-  /** The label taxonomy, when it has been typed AND carries the Model
-   * Name's class by name; otherwise the Model Name's list. Without the
-   * name check a typo would silently produce a yaml with nothing to
-   * filter to -- the chain refuses that case server-side as well. */
-  function labelledClasses(): Record<string, string> | null {
-    const typed = parseLabelClasses(labelClassesText);
-    if (!Object.keys(typed).length) return null;
-    const own = Object.values(modelClasses());
-    const have = new Set(Object.values(typed));
-    return own.every((n) => have.has(n)) ? typed : null;
-  }
-
-  /** What the yaml declares.
-   *
-   * Two genuine alternatives, not a layering:
-   *
-   *   filter OFF -- the yaml must name every class the label files use,
-   *                 or Ultralytics drops every image holding a box it
-   *                 has no name for. Label classes wins when it covers
-   *                 the Model Name's class.
-   *   filter ON  -- the yaml names ONLY what the model trains, and the
-   *                 training container drops every other box from its
-   *                 downloaded copy. Label classes is not read.
-   *
-   * It was a layering at first: six names typed AND the filter ticked
-   * gave a six-name yaml with nothing left to filter, and the tick looked
-   * like it did nothing. "Why does the yaml show six when I asked for
-   * helmet" is the right question, and this is the answer. */
+  // The YAML describes every dataset class, irrespective of the training model.
   function classesOf(): Record<string, string> {
-    if (dropUndeclared) return modelClasses();
-    return labelledClasses() ?? modelClasses();
+    return parseLabelClasses(labelClassesText);
   }
 
   /** "Name the rest": every undeclared index gets a placeholder name so
@@ -713,9 +594,8 @@ export function Track2DatasetAssemblePanel({
    * are honest -- `class_4` says it is one -- and can be typed over any
    * time. The Model Name's own classes keep their names. */
   function nameTheRest(indices: number[]) {
-    const merged: Record<string, string> = { ...modelClasses(), ...parseLabelClasses(labelClassesText) };
+    const merged: Record<string, string> = { ...parseLabelClasses(labelClassesText) };
     for (const i of indices) if (!merged[String(i)]) merged[String(i)] = `class_${i}`;
-    classesTouched.current = true;
     setLabelClassesText(formatLabelClasses(merged));
   }
 
@@ -723,13 +603,13 @@ export function Track2DatasetAssemblePanel({
    * the run builds the data.yaml itself at Add to Queue and on the
    * schedule, from these saved settings, so pressing one here only wrote
    * a file nothing trained on. This reads /dataset-yaml-preview, which
-   * writes nothing, whenever the folders, classes or filter change.
+   * writes nothing, whenever the folders or dataset classes change.
    *
    * `overwrite` is sent true because the chain sends it true: the run
    * replaces the yaml it wrote last time, so the preview must not raise
    * a "replace this file?" question the run never asks. */
   useEffect(() => {
-    if (!chosen || !complete) {
+    if (!Object.keys(classesOf()).length || !complete) {
       setPreview(null);
       setError("");
       return;
@@ -758,7 +638,7 @@ export function Track2DatasetAssemblePanel({
     }, 700);
     return () => { cancelled = true; window.clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chosen, complete, trainSources, evalSources, folders, multiSource, useGolden,
+  }, [complete, trainSources, evalSources, folders, multiSource, useGolden,
       useFolders, labelClassesText, dropUndeclared, only, savedOnly, previewOnly]);
 
   useEffect(() => {
@@ -884,106 +764,19 @@ export function Track2DatasetAssemblePanel({
    * Rendered in place when the page offers no slot. */
   const buildSection = (
     <>
-      {/* Shown, not asked. The Model Name card above is where this is
-          decided; a dropdown here was the same question twice, and only
-          one of the two answers ever reached the yaml. */}
       <div className="mt-3">
-        <span className="mb-1 block text-xs text-ink-muted">
-          Classes{" "}
-          <span className="text-ink-muted/70">
-            (from your Model Name, in index order)
-          </span>
-        </span>
-        {chosen ? (
-          <p className="tabular text-sm text-ink-secondary">
-            <span className="text-ink">{chosen.label}</span> detects{" "}
-            {Object.entries(chosen.classes)
-              .sort((a, b) => Number(a[0]) - Number(b[0]))
-              .map(([index, name], i) => (
-                <span key={index}>
-                  {i > 0 && ", "}
-                  <span className="text-ink-muted">{index}:</span>
-                  {name}
-                </span>
-              ))}
-          </p>
-        ) : (
-          <p className="text-sm text-info">
-            Pick a Model Name in <strong>Your Model Names</strong> above &mdash;
-            its class list is what this{" "}
-            <span className="tabular">data.yaml</span> declares.
-          </p>
-        )}
-
-        {/* WHAT THE LABEL FILES MEAN, when that is more than the Model
-            Name trains. A site dataset is labelled once with everything
-            on it; a helmet Model Name has one class. Writing the one
-            class into the yaml made Ultralytics drop every image with a
-            box it had no name for -- silently on the training side,
-            and a refusal to start on validation. Said here, under the
-            Model Name's list, because this is the other half of the
-            same question: that list is what to TRAIN, this is what was
-            LABELLED. */}
-        <label className="mt-2 block text-xs text-ink-muted">
-          Label classes{" "}
-          <span className="text-ink-muted/70">
-            (every class the label files use, in index order &mdash; leave
-            blank if they are exactly the Model Name&apos;s)
-          </span>
-          <input
-            type="text"
-            value={labelClassesText}
-            onChange={(e) => { classesTouched.current = true; setLabelClassesText(e.target.value); }}
-            placeholder="0 helmet, 1 gloves, 2 vest, 3 boots"
-            className="tabular mt-1 w-full rounded border border-black/15 bg-page px-2 py-1 text-sm text-ink"
-          />
+        <label className="block text-xs text-ink-muted">
+          Label classes (all classes in the data, in index order)
+          <input type="text" value={labelClassesText}
+            readOnly={previewOnly} onChange={(e) => setLabelClassesText(e.target.value)}
+            placeholder="0 helmet, 1 gloves, 2 person"
+            className="tabular mt-1 w-full rounded border border-black/15 bg-page px-2 py-1 text-sm text-ink" />
         </label>
-        {/* ALWAYS VISIBLE, not only when a mismatch has been found. It is
-            a saved setting, and a setting that only shows itself after a
-            preview on a dataset that happens to need it is one nobody can
-            find on a dataset that does not. The warning in the preview
-            points here. */}
-        <label className="mt-1.5 flex items-start gap-1.5 text-xs text-ink-secondary">
-          <input
-            type="checkbox"
-            checked={dropUndeclared}
-            onChange={(e) => { classesTouched.current = true; setDropUndeclared(e.target.checked); }}
-            className="mt-0.5 h-3.5 w-3.5 shrink-0"
-          />
-          <span>
-            <span className="text-ink">Filter undeclared classes in the training container</span>{" "}
-            <span className="text-ink-muted">(label files in S3 unchanged)</span>. Boxes whose
-            class the yaml does not name are dropped from the run&apos;s downloaded copy of
-            each label file before Ultralytics reads it. Off, a yaml naming fewer classes
-            than the labels use is refused instead.
-          </span>
-        </label>
-        {dropUndeclared && chosen && (
-          <p className="mt-1 text-xs text-ink-secondary">
-            Filter on: the yaml declares only{" "}
-            <span className="text-ink">{Object.values(modelClasses()).join(", ")}</span>;
-            every other box is dropped from the run&apos;s downloaded label files
-            before Ultralytics reads them. Label classes is not used while this
-            is ticked.
-          </p>
-        )}
-        {!dropUndeclared && labelClassesText.trim() && chosen && (
-          labelledClasses() ? (
-            <p className="mt-1 text-xs text-ink-secondary">
-              The yaml declares {Object.keys(labelledClasses() ?? {}).length} classes;
-              the run keeps every image and trains only{" "}
-              <span className="text-ink">{Object.values(modelClasses()).join(", ")}</span>,
-              filtered at load time.
-            </p>
-          ) : (
-            <p className="mt-1 text-xs text-critical">
-              These do not include{" "}
-              {Object.values(modelClasses()).join(", ")} by name, so the run
-              would have nothing to filter to. Add it at the index the label
-              files use for it.
-            </p>
-          )
-        )}
+        <p className="mt-2 text-xs text-ink-secondary">
+          Data Preparation saves all dataset classes in data.yaml. Select the model's
+          classes later in Auto Training; that selection does not change this dataset.
+          Include every source class here. Missing classes block the build instead of dropping boxes.
+        </p>
       </div>
 
       <p className="mt-2 text-xs text-ink-muted">
@@ -1006,7 +799,7 @@ export function Track2DatasetAssemblePanel({
           above. The run builds the real one. */}
       <p className="mt-3 text-xs text-ink-muted">
         <span className="font-medium text-ink-secondary">Preview only -- nothing is written.</span>{" "}
-        It updates as you change the folders, classes or filter. The data.yaml
+        It updates as you change the folders or dataset classes. The data.yaml
         a run trains on is built when you press <em>Add to Queue</em> in step 6,
         and each time the schedule runs &mdash; after the retention policy has
         been applied, when Pull Control&apos;s week folders are one of the
@@ -1014,9 +807,9 @@ export function Track2DatasetAssemblePanel({
         {busy && <span className="ml-1">Checking...</span>}
       </p>
       {error && <p className="mt-2 text-xs text-critical">{error}</p>}
-      {!detectorSlug && complete && (
+      {!Object.keys(classesOf()).length && complete && (
         <p className="mt-1 text-xs text-info">
-          Pick a Model Name above &mdash; its classes are what the yaml declares.
+          Enter all dataset Label classes to preview the YAML.
         </p>
       )}
       {!complete && (
@@ -1031,7 +824,7 @@ export function Track2DatasetAssemblePanel({
         <YamlPreview
           preview={preview}
           dropUndeclared={dropUndeclared}
-          onNameTheRest={nameTheRest}
+          onNameTheRest={previewOnly ? undefined : nameTheRest}
         />
       )}
 
@@ -1041,7 +834,7 @@ export function Track2DatasetAssemblePanel({
   if (previewOnly) {
     return (
       <Card title="Classes and data.yaml" collapsible={false}
-            caption="Which labelled classes this run trains, and the data.yaml it will be built with from the sources ticked on the Data Preparation tab. The label classes and the filter are saved here; the yaml itself is built at Add to Queue and on the schedule, after the retention policy.">
+            caption="All classes in the prepared dataset and its data.yaml. The model selection in Auto Training is applied later; it does not narrow this class list.">
         {buildSection}
       </Card>
     );
@@ -1431,7 +1224,7 @@ export function Track2DatasetAssemblePanel({
             <LayoutTree
               layout={layout}
               destination={preview?.folder ?? ""}
-              classes={chosen ? Object.values(chosen.classes).join(", ") : ""}
+              classes={Object.values(classesOf()).join(", ")}
             />
 
             {/* One row per SOURCE. A single total would hide an empty
@@ -1472,16 +1265,8 @@ export function Track2DatasetAssemblePanel({
         )}
       </div>
 
-      {/* Data Preparation (the only caller passing `onOnlyChange`) shows
-          no classes or yaml: they are set on Multi-Auto Training, beside
-          Add to Queue, where the run that uses them is started. */}
-      {!buildSlot && !onOnlyChange && buildSection}
-      {onOnlyChange && (
-        <p className="mt-3 text-xs text-ink-muted">
-          Classes, label classes, the class filter and the data.yaml preview are on{" "}
-          <span className="font-medium text-ink-secondary">Multi-Auto Training</span>, beside Add to Queue.
-        </p>
-      )}
+      {/* Dataset classes belong to Data Preparation; Training previews them. */}
+      {!buildSlot && buildSection}
       </>
       )}
       {buildSlot && createPortal(

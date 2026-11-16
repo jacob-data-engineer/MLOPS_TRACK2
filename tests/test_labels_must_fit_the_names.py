@@ -195,7 +195,7 @@ def test_label_classes_become_the_yamls_names(monkeypatch):
     assert not [p for p in plan["problems"] if p["level"] == "blocking"]
 
 
-def test_without_label_classes_the_model_names_list_is_used(monkeypatch):
+def test_without_label_classes_preparation_requires_the_dataset_taxonomy(monkeypatch):
     """Every configuration written before this existed."""
     monkeypatch.setattr(rs, "data_source", lambda c: "assembled")
     from ppe_pipeline_api import track2_shared as t2
@@ -207,10 +207,11 @@ def test_without_label_classes_the_model_names_list_is_used(monkeypatch):
         "train_sources": [{"images": "ds/images/train", "labels": "ds/labels/train"}],
         "eval_sources": [{"images": "ds/images/val", "labels": "ds/labels/val"}],
     }}
-    assert rs.assemble_plan(cfg)["classes"] == {0: "helmet"}
+    assert rs.assemble_plan(cfg)["classes"] == {}
+    assert rs.assemble_plan(cfg)["problems"]
 
 
-def test_label_classes_missing_the_model_names_class_are_refused(monkeypatch):
+def test_dataset_classes_are_independent_of_the_model_selected_later(monkeypatch):
     """A list with nothing to filter to would train on nothing, silently."""
     monkeypatch.setattr(rs, "data_source", lambda c: "assembled")
     from ppe_pipeline_api import track2_shared as t2
@@ -225,8 +226,8 @@ def test_label_classes_missing_the_model_names_class_are_refused(monkeypatch):
     }}
     plan = rs.assemble_plan(cfg)
     blocking = [p["text"] for p in plan["problems"] if p["level"] == "blocking"]
-    assert any("do not include helmet" in t for t in blocking)
-    assert plan["classes"] == {0: "helmet"}
+    assert not blocking
+    assert plan["classes"] == {0: "person", 1: "gloves"}
 
 
 def test_junk_keys_in_label_classes_are_dropped_not_fatal(monkeypatch):
@@ -271,33 +272,27 @@ def test_the_client_type_declares_it():
 # --- the card -----------------------------------------------------------------------
 
 def test_the_card_has_the_field_under_the_model_names_classes():
-    assert "Label classes" in FLAT
-    # Anchor on the field's own hint: the words "Label classes" also appear
-    # earlier, in the preview's warning that points at this field.
-    assert FLAT.index("(from your Model Name, in index order)") < FLAT.index("(every class the label files use, in index order")
-    assert 'placeholder="0 helmet, 1 gloves, 2 vest, 3 boots"' in FLAT
+    assert "Label classes (all classes in the data, in index order)" in FLAT
 
 
 def test_it_is_saved_in_both_writers_and_restored_on_load():
     # Two writers since 2026-11-13: the standard tab's whole-card writer and
     # the class-fields writer on Multi-Auto Training. Data Preparation has none.
-    assert PANEL.count("label_classes: parseLabelClasses(labelClassesText),") == 2
+    assert PANEL.count("label_classes: parseLabelClasses(labelClassesText),") == 1
     assert "setLabelClassesText(formatLabelClasses(saved.label_classes));" in FLAT
     assert "labelClassesText," in FLAT  # in the debounced writer's deps
 
 
 def test_the_yaml_is_sent_the_labels_taxonomy_when_it_covers_the_model_name():
-    assert "return labelledClasses() ?? modelClasses();" in FLAT
-    assert "return own.every((n) => have.has(n)) ? typed : null;" in FLAT
+    assert "return parseLabelClasses(labelClassesText);" in FLAT
 
 
 def test_the_card_says_what_will_actually_train():
-    assert "keeps every image and trains only" in FLAT
-    assert "filtered at load time." in FLAT
+    assert "Select the model's classes later in Auto Training" in FLAT
 
 
 def test_a_list_missing_the_model_names_class_is_called_out_on_the_card():
-    assert "would have nothing to filter to" in FLAT
+    assert "Missing classes block the build instead of dropping boxes." in FLAT
 
 
 def test_the_parser_is_forgiving_about_punctuation():

@@ -351,10 +351,8 @@ def assemble_plan(config: dict) -> dict | None:
     this existed, so the root-and-week-folders path stays the default and
     an existing settings file cannot start building in place by surprise.
 
-    The classes come from the chosen Model Name, not from a copy saved in
-    the card. A detector whose class list was corrected would otherwise
-    keep training against the stale names here, and the yaml is the only
-    place those names exist -- nothing downstream could disagree.
+    The classes come from Data Preparation's complete label taxonomy.
+    Model selection is applied later by the training submission path.
     """
     # THE RADIO DECIDES, not a second tick on the card.
     #
@@ -391,84 +389,25 @@ def assemble_plan(config: dict) -> dict | None:
                     "reports metrics that are not held out.",
         })
 
-    slug = str(saved.get("detector_slug") or "").strip()
+    # Dataset taxonomy is independent of the model selected later for training.
+    # Ignore the retired filter flag in older preparation files.
     classes: dict = {}
-    if not slug:
-        problems.append({
-            "level": "blocking",
-            "text": "Assemble is set to run on a schedule, but no Model Name "
-                    "is chosen in it, so the yaml would declare no classes.",
-        })
-    else:
+    for key, value in (saved.get("label_classes") or {}).items():
         try:
-            from .. import training
-
-            detector = training.get_detector(slug)
-            classes = {int(k): str(v)
-                       for k, v in (detector.get("classes") or {}).items()}
-        except Exception as exc:                               # noqa: BLE001
-            problems.append({
-                "level": "blocking",
-                "text": f"Assemble's Model Name '{slug}' could not be read: {exc}",
-            })
-        if slug and not classes:
-            problems.append({
-                "level": "blocking",
-                "text": f"Model Name '{slug}' has no classes, so the yaml "
-                        "would declare nothing.",
-            })
-
-    # WHAT THE LABEL FILES MEAN, when that is more than the Model Name
-    # trains.
-    #
-    # The Model Name says what to TRAIN -- `helmet`, one class, one
-    # registry group. The label files say what was LABELLED, and on this
-    # bucket that was four classes. Writing the first into the yaml over
-    # the second made Ultralytics drop every image holding a box it had
-    # no name for: the whole image, silently, on the training side; a
-    # refusal to start, on the validation side.
-    #
-    # So the yaml declares the labels' taxonomy when the card has been
-    # told it, and `class_filter_for` does what it was built for: a
-    # one-class Model Name present in a wider yaml becomes `classes=` plus
-    # `single_cls=` at load time. Every image is kept; only the Model
-    # Name's boxes train. The Model Name's class must appear in the list
-    # BY NAME, or there is nothing to filter to.
-    labelled_raw = saved.get("label_classes") or {}
-    labelled: dict = {}
-    if isinstance(labelled_raw, dict):
-        for key, value in labelled_raw.items():
-            try:
-                if str(value).strip():
-                    labelled[int(key)] = str(value).strip()
-            except (TypeError, ValueError):
-                continue
-    # Filter ON means the yaml declares what the model TRAINS and the
-    # training container drops every other box -- so Label classes is
-    # not read. Two alternatives, not a layering: six names AND the
-    # filter gave a six-name yaml with nothing left to filter, and the
-    # tick looked like it did nothing.
-    if saved.get("drop_undeclared_labels"):
-        labelled = {}
-    if labelled and classes:
-        missing = [name for name in classes.values() if name not in labelled.values()]
-        if missing:
-            problems.append({
-                "level": "blocking",
-                "text": "Label classes on the Assemble card do not include "
-                        f"{', '.join(missing)} -- the Model Name's own class. "
-                        "Add it at the index the label files use for it, or "
-                        "the run has nothing to filter to.",
-            })
-        else:
-            classes = labelled
+            if str(value).strip() and int(key) >= 0:
+                classes[int(key)] = str(value).strip()
+        except (TypeError, ValueError):
+            continue
+    if not classes:
+        problems.append({"level": "blocking", "text":
+            "Enter all dataset Label classes in Data Preparation. "
+            "Model classes are selected separately in Auto Training."})
 
     return {
         "splits": splits,
         "classes": classes,
-        # Tick on the Assemble card: boxes whose class the yaml does not
-        # name are dropped by the training container, S3 untouched.
-        "drop_undeclared": bool(saved.get("drop_undeclared_labels")),
+        # Incomplete dataset taxonomies must be corrected, never filtered.
+        "drop_undeclared": False,
         "bucket": str(saved.get("bucket") or ""),
         # Unattended, so it may replace the file it wrote last time --
         # that is the whole point of running weekly. `write_in_place`
@@ -880,10 +819,8 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
     # not where any image is -- so the card needs the yaml's own entries.
     composed_train: list = []
     composed_val: list = []
-    # The Assemble card's filter tick, read once for every branch below:
-    # it decides whether a label the yaml cannot name is a refusal or a
-    # box the training container drops.
-    drop_undeclared = bool((config.get("dataset_assemble") or {}).get("drop_undeclared_labels"))
+    # Legacy preparation filter flags must not narrow the dataset.
+    drop_undeclared = False  # Preparation always preserves the complete dataset taxonomy.
     # A frozen source is trained AS IT WAS FROZEN: no rebuild, no
     # re-freeze. See `frozen_plan`.
     frozen = frozen_plan(config)
@@ -1127,10 +1064,6 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
                     val_entries = []
 
                 labelled_raw = (config.get("dataset_assemble") or {}).get("label_classes") or {}
-                if drop_undeclared:
-                    # Same rule as the assembled path: the filter means the
-                    # yaml names what the model trains, nothing more.
-                    labelled_raw = {}
                 names: dict = {}
                 if isinstance(labelled_raw, dict):
                     for key, value in labelled_raw.items():
@@ -1139,13 +1072,6 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
                                 names[int(key)] = str(value).strip()
                         except (TypeError, ValueError):
                             continue
-                if not names and drop_undeclared:
-                    try:
-                        names = {int(k): str(v) for k, v in
-                                 (t2_module().get_detector(str(plan["detector_slug"]))
-                                  .get("classes") or {}).items()}
-                    except Exception:                          # noqa: BLE001
-                        names = {}
                 if not names:
                     names = (data.find_classes(class_sources,
                                              bucket=config.get("source_bucket") or "")
@@ -1788,7 +1714,7 @@ def preview_training_yaml(config: dict) -> dict:
         splits = {"train": planned["train"], "val": planned["val"]}
         bucket = planned["bucket"]
         combined_into = planned["folder"]
-    drop_undeclared = bool((config.get("dataset_assemble") or {}).get("drop_undeclared_labels"))
+    drop_undeclared = False  # Preparation always preserves the complete dataset taxonomy.
     out = data.build_yaml_in_place(splits=splits, classes=assembled["classes"], bucket=bucket,
                                    overwrite=True, label_scan=200, drop_undeclared=drop_undeclared)
     return {"text": out.get("text", ""), "key": out.get("key", ""), "bucket": bucket,

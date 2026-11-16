@@ -58,4 +58,4 @@ def test_the_debounced_writer_is_still_there():
     assert "setTimeout(() => {" in code
     # Two since 2026-11-13: the card's writer and the class-fields writer
     # on Multi-Auto Training.
-    assert code.count("saveTrack2PullConfig({") == 2
+    assert code.count("saveTrack2PullConfig({") == 1

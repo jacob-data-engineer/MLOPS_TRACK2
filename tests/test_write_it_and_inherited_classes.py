@@ -33,7 +33,7 @@ def test_write_it_is_gated_on_the_same_things_the_preview_is():
     """Complete inputs and a Model Name -- the two questions the card
     actually asks."""
     code = _flat()
-    assert "if (!chosen || !complete) {" in code
+    assert "if (!Object.keys(classesOf()).length || !complete) {" in code
 
 
 def test_the_card_says_why_the_button_is_off():
@@ -45,7 +45,7 @@ def test_the_card_says_why_the_button_is_off():
     # The classes are no longer asked for here -- they follow the Model
     # Name card -- so the missing answer points there rather than at a
     # control on this card that no longer exists.
-    assert "Pick a Model Name above" in code
+    assert "Enter all dataset Label classes" in code
 
 
 def test_the_inline_overwrite_checkbox_is_gone():
@@ -59,7 +59,7 @@ def test_the_inline_overwrite_checkbox_is_gone():
 
 def test_the_card_reads_the_model_chosen_for_the_run():
     code = _code()
-    assert "status.config.default_detector?.slug" in code
+    assert "status.config.default_detector?.slug" not in code
 
 
 def test_the_model_wins_over_anything_saved_here():
@@ -73,8 +73,8 @@ def test_the_model_wins_over_anything_saved_here():
     choice made yet.
     """
     code = _code()
-    assert "if (inherited) setDetectorSlug(inherited);" in code
-    assert "else if (saved.detector_slug) setDetectorSlug(saved.detector_slug);" in code
+    assert "setDetectorSlug" not in code
+    assert "setLabelClassesText(formatLabelClasses(saved.label_classes))" in code
 
 
 def test_there_is_no_way_to_disagree_with_the_model_any_more():
@@ -84,7 +84,7 @@ def test_there_is_no_way_to_disagree_with_the_model_any_more():
 
 def test_the_classes_are_displayed_rather_than_asked_for():
     code = " ".join(_code().split())
-    assert "(from your Model Name, in index order)" in code
+    assert "(all classes in the data, in index order)" in code
 
 
 # --- what must not have broken -----------------------------------------------------
@@ -116,6 +116,6 @@ def test_the_scheduled_key_is_declared_client_side():
 
 def test_the_card_still_saves_everything_it_did_before():
     code = _code()
-    for key in ("train_sources", "eval_sources", "folders", "detector_slug",
+    for key in ("train_sources", "eval_sources", "folders", "label_classes",
                 "overwrite", "built"):
         assert f"{key}," in code or f"{key}:" in code, key

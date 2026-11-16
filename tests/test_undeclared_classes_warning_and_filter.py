@@ -132,7 +132,7 @@ def test_the_scan_still_runs_before_the_yaml_is_shaped():
 
 def test_the_chain_reads_the_tick_once_for_every_branch():
     code = " ".join(inspect.getsource(rs._run_chain_body).split())
-    assert 'drop_undeclared = bool((config.get("dataset_assemble") or {}).get("drop_undeclared_labels"))' in code
+    assert 'drop_undeclared = False' in code
     assert code.count("drop_undeclared=drop_undeclared)") == 2
 
 
@@ -148,7 +148,7 @@ def test_assemble_plan_exposes_it(monkeypatch):
     cfg = {"dataset_assemble": {"detector_slug": "helmet",
                                 "train_sources": [{"images": "x/images/train", "labels": ""}],
                                 "drop_undeclared_labels": True}}
-    assert rs.assemble_plan(cfg)["drop_undeclared"] is True
+    assert rs.assemble_plan(cfg)["drop_undeclared"] is False
 
 
 def test_the_parameter_is_sent_only_when_on():
@@ -271,24 +271,13 @@ def test_it_reaches_both_containers():
 def test_the_warning_sits_in_the_preview_with_both_answers():
     assert "Labels use classes the yaml does not name." in FLAT
     assert "Name the rest as class_" in FLAT
-    assert "Filter undeclared classes in the training container" in FLAT
-    assert "(label files in S3 unchanged)" in FLAT
+    assert "Missing classes block the build instead of dropping boxes." in FLAT
 
 
-def test_the_filter_checkbox_is_always_visible_not_only_on_a_mismatch():
-    """It is a saved setting. One that only renders after a preview on a
-    dataset that happens to need it cannot be found on a dataset that
-    does not -- which is exactly how it was first shipped."""
-    # The checkbox sits under Label classes, outside the `undeclared`
-    # block, and the warning points at it rather than carrying a second
-    # copy -- two controls for one setting is the trap this card has.
-    field = FLAT.index('placeholder="0 helmet, 1 gloves, 2 vest, 3 boots"')
-    warn = FLAT.index("{undeclared.length > 0 && (")
-    tick = FLAT.index("setDropUndeclared(e.target.checked); }}")
-    assert field < tick
-    assert FLAT.count('checked={dropUndeclared}') == 1, "one checkbox, not one per place"
-    assert "under Label classes above." in FLAT
-    assert warn < FLAT.index("under Label classes above.")
+def test_preparation_has_no_model_class_filter_checkbox():
+    assert 'checked={dropUndeclared}' not in FLAT
+    assert 'const dropUndeclared = false;' in FLAT
+    assert 'all classes in the data' in FLAT
 
 
 def test_it_says_what_ultralytics_does():
@@ -298,13 +287,13 @@ def test_it_says_what_ultralytics_does():
 def test_name_the_rest_fills_placeholders_without_touching_real_names():
     assert "function nameTheRest(indices: number[])" in FLAT
     assert "merged[String(i)] = `class_${i}`" in FLAT
-    assert "{ ...modelClasses(), ...parseLabelClasses(labelClassesText) }" in FLAT
+    assert "{ ...parseLabelClasses(labelClassesText) }" in FLAT
 
 
 def test_the_tick_is_saved_restored_and_sent():
     # Two writers since 2026-11-13 -- see test_labels_must_fit_the_names.
-    assert PANEL.count("drop_undeclared_labels: dropUndeclared,") == 2
-    assert "setDropUndeclared(saved.drop_undeclared_labels)" in FLAT
+    assert PANEL.count("drop_undeclared_labels: false,") == 1
+    assert "setDropUndeclared(saved.drop_undeclared_labels)" not in FLAT
     # Sent with the live preview; the run reads the saved tick itself.
     assert "previewTrack2DatasetYaml(f, classesOf(), true, dropUndeclared," in FLAT
 
@@ -317,7 +306,7 @@ def test_the_client_declares_the_new_shapes():
 
 # --- the filter and Label classes are alternatives, not a layering -----------------
 
-def test_with_the_filter_on_the_yaml_declares_the_model_names_classes(monkeypatch):
+def test_legacy_filter_flag_does_not_narrow_dataset_classes(monkeypatch):
     """Six names typed AND the filter ticked gave a six-name yaml with
     nothing left to filter, and the tick looked like it did nothing.
     "Why does the yaml show six when I asked for helmet" was the right
@@ -332,7 +321,7 @@ def test_with_the_filter_on_the_yaml_declares_the_model_names_classes(monkeypatc
         "label_classes": {"0": "helmet", "1": "gloves", "2": "person"},
         "drop_undeclared_labels": True,
     }}
-    assert rs.assemble_plan(cfg)["classes"] == {0: "helmet"}
+    assert rs.assemble_plan(cfg)["classes"] == {0: "helmet", 1: "gloves", 2: "person"}
 
 
 def test_with_the_filter_off_label_classes_still_win(monkeypatch):
@@ -349,13 +338,12 @@ def test_with_the_filter_off_label_classes_still_win(monkeypatch):
     assert rs.assemble_plan(cfg)["classes"] == {0: "helmet", 1: "gloves", 2: "person"}
 
 
-def test_the_pull_golden_path_applies_the_same_rule():
-    code = " ".join(inspect.getsource(rs._run_chain_body).split())
-    assert "if drop_undeclared: # Same rule as the assembled path" in code
-    assert "if not names and drop_undeclared:" in code
+def test_the_pull_golden_path_preserves_dataset_classes():
+    code = inspect.getsource(rs._run_chain_body)
+    assert 'if not names and drop_undeclared:' not in code
+    assert 'drop_undeclared = False' in code
 
 
-def test_the_card_sends_the_model_names_classes_when_the_filter_is_on():
-    assert "if (dropUndeclared) return modelClasses();" in FLAT
-    assert "Label classes is not used while this is ticked." in FLAT
-    assert "Filter on: the yaml declares only" in FLAT
+def test_the_card_uses_dataset_classes_without_model_fallback():
+    assert "return parseLabelClasses(labelClassesText);" in FLAT
+    assert "modelClasses()" not in FLAT

@@ -376,7 +376,7 @@ function readAssembleSaved(saved: Track2PullConfig["dataset_assemble"]) {
     configured: Boolean(saved?.train_sources?.length || saved?.eval_sources?.length),
     slug: String(saved?.detector_slug ?? "").trim(),
     labelClasses,
-    dropUndeclared: Boolean(saved?.drop_undeclared_labels),
+    dropUndeclared: false,
   };
 }
 
@@ -566,22 +566,10 @@ function TrainingForm({
   // WHICH yaml to compare against depends on the radio. A snapshot or a
   // pull trains the folder's yaml as it stands, so that file is read. The
   // assembled source does NOT: Add to Queue rebuilds the yaml from the
-  // Assemble card's saved settings first, so the classes that run will
-  // see are the ones `assemble_plan` derives -- the Assemble card's Model
-  // Name, or its Label classes when the filter is off and they contain
-  // that Model Name's names. Same rule, mirrored here.
+  // saved dataset taxonomy. Model compatibility is checked separately below.
   const assembledBuild = (() => {
     if (dataSource !== "assembled" || !assembleSaved?.configured) return null;
-    const assembleDetector = detectors.find((d) => d.slug === assembleSaved.slug);
-    if (!assembleDetector) return { detector: null, classes: null };
-    const labelled = assembleSaved.dropUndeclared ? {} : assembleSaved.labelClasses;
-    const labelledNames = Object.values(labelled);
-    const useLabelled = labelledNames.length > 0
-      && Object.values(assembleDetector.classes).every((n) => labelledNames.includes(n));
-    return {
-      detector: assembleDetector,
-      classes: useLabelled ? labelled : assembleDetector.classes,
-    };
+    return { classes: assembleSaved.labelClasses };
   })();
   const checkedClasses: Record<string, string> | null = assembledBuild
     ? assembledBuild.classes
@@ -815,13 +803,12 @@ function TrainingForm({
         text: "No Model Name chosen -- the model lands in the shared open registry, "
           + "where version numbers are not per model type.",
       });
-    } else if (assembledBuild && !assembledBuild.detector) {
+    } else if (assembledBuild && !Object.keys(assembledBuild.classes).length) {
       // The server refuses this too (`assemble_plan`), so it blocks here.
       blocking = true;
       lines.push({
         tone: "bad",
-        text: "No Model Name is chosen in Assemble a dataset, so the data.yaml "
-          + "Add to Queue writes would declare no classes.",
+        text: "Enter all dataset Label classes in Data Preparation before queueing training.",
       });
     } else if (checkedClasses) {
       if (absentClasses.length > 0) {
@@ -830,17 +817,8 @@ function TrainingForm({
         // a class LIST, and no .txt label file is opened to decide this.
         lines.push({
           tone: "bad",
-          text: assembledBuild?.detector
-            ? `The data.yaml Add to Queue writes declares `
-              + `${datasetNames.join(", ") || "nothing"} -- the classes of `
-              + `${assembledBuild.detector.label}, the Model Name chosen in `
-              + `Assemble a dataset. It does not declare ${absentClasses.join(", ")}, `
-              + `so a ${chosenDetector.label} model cannot be trained from it. `
-              + "Choose the same Model Name in both places."
-            : `${datasetFolder}/data.yaml does not declare `
-              + `${absentClasses.join(", ")}, so a ${chosenDetector.label} model `
-              + `cannot be trained from it. It declares `
-              + `${datasetNames.join(", ") || "nothing"}.`,
+          text: `The prepared dataset declares ${datasetNames.join(", ") || "nothing"}. `
+            + `It does not declare ${absentClasses.join(", ")}, so a ${chosenDetector.label} model cannot train from it.`,
         });
       } else if (willFilter) {
         lines.push({
@@ -2214,7 +2192,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               multiSource={multi}
               // The Model Name chosen in step 1, so the classes written
               // into data.yaml are the ones the run registers under.
-              modelSlug={modelChoice.slug}
+
             />
           )}
 
@@ -2234,7 +2212,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               cannot disagree. */}
           {multi
             ? <>
-                <Track2DatasetAssemblePanel multiSource modelSlug={modelChoice.slug} previewOnly />
+                <Track2DatasetAssemblePanel multiSource previewOnly />
                 {/* Moved off Data Preparation's Retention card (2026-11-13). */}
                 <Track2CoverageCard />
               </>

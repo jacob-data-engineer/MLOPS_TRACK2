@@ -107,10 +107,7 @@ function TrainingDataPreview({ name, preview, busy, error }: {
                 <tbody>{saved.map(([id, n]) => <tr key={id}><td className={cell}>{id}</td><td className={cell}>{n}</td></tr>)}</tbody>
               </table>
             ) : <p className="mt-1 text-xs text-ink-muted">No class list is saved in this file.</p>}
-            <p className="mt-1 text-xs text-ink-muted">
-              Model Name: <span className="tabular text-ink">{preview.detector_slug || "none chosen"}</span>
-              {" · "}drop labels not in the list: <span className="text-ink">{preview.drop_undeclared ? "on" : "off"}</span>
-            </p>
+
           </div>
           <div>
             <p className="text-xs font-medium text-ink">Classes the run&apos;s data.yaml declares</p>
@@ -120,13 +117,10 @@ function TrainingDataPreview({ name, preview, busy, error }: {
                 <tbody>{declared.map(([id, n]) => <tr key={id}><td className={cell}>{id}</td><td className={cell}>{n}</td></tr>)}</tbody>
               </table>
             ) : <p className="mt-1 text-xs text-ink-muted">{yaml ? "None." : "No data.yaml could be built (below)."}</p>}
-            {yaml && preview.drop_undeclared && (
-              <p className="mt-1 text-xs text-ink-secondary">
-                &ldquo;Drop labels not in the list&rdquo; is on, so the yaml declares only the Model
-                Name&apos;s class(es) and every other box is dropped at training. The saved list
-                on the left is used only when that tick is off.
-              </p>
-            )}
+            <p className="mt-1 text-xs text-ink-secondary">
+              The YAML keeps all dataset classes. Choose the model's classes separately
+              in Auto Training; that choice is applied only to the training run.
+            </p>
           </div>
         </div>
       )}

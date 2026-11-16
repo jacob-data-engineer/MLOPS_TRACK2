@@ -26,10 +26,8 @@ def test_assembled_source_compares_against_the_saved_build():
 
 
 def test_mirrors_assemble_plan_label_classes_rule():
-    # Filter ON: label classes are not read (assemble_plan clears them).
-    assert "assembleSaved.dropUndeclared ? {} : assembleSaved.labelClasses" in SRC
-    # Label classes win only when they contain every Model Name class.
-    assert ".every((n) => labelledNames.includes(n))" in SRC
+    assert "return { classes: assembleSaved.labelClasses };" in SRC
+    assert "assembleSaved.dropUndeclared ? {}" not in SRC
 
 
 def test_the_refusal_does_not_say_no_labels():

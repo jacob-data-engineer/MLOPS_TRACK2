@@ -651,7 +651,7 @@ def dataset_yaml_preview(payload: DatasetYamlInPlaceRequest,
             splits=splits,
             classes=payload.classes,
             overwrite=payload.overwrite,
-            drop_undeclared=payload.drop_undeclared,
+            drop_undeclared=False,  # Dataset preparation must retain every class.
         )
         if retained:
             # The list file holds whatever the LAST build wrote; the run
@@ -681,7 +681,7 @@ def dataset_yaml_write(payload: DatasetYamlInPlaceRequest,
             splits=_splits_of(payload),
             classes=payload.classes,
             overwrite=payload.overwrite,
-            drop_undeclared=payload.drop_undeclared,
+            drop_undeclared=False,  # Dataset preparation must retain every class.
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

@@ -148,7 +148,7 @@ def test_the_classes_are_shown_in_index_order():
 
 def test_the_card_takes_the_model_as_a_prop():
     code = _panel()
-    assert "modelSlug?: string;" in code
+    assert "modelSlug?: string;" not in code
 
 
 def test_the_prop_is_actually_destructured():
@@ -161,25 +161,25 @@ def test_the_prop_is_actually_destructured():
     code = _panel()
     head = code.split("export function Track2DatasetAssemblePanel({")[1]
     head = head[:head.index("}: {")]
-    assert "modelSlug" in head
+    assert "modelSlug" not in head
 
 
 def test_it_follows_a_change_made_after_it_mounted():
     """The Model Name card is on the same page. A class list fixed at
     mount would be stale and silently so."""
     code = " ".join(_panel().split())
-    assert "if (modelSlug) setDetectorSlug(modelSlug); }, [modelSlug]);" in code
+    assert "setDetectorSlug" not in code
 
 
 def test_the_page_passes_it_to_both_copies_of_the_card():
     """Standard and multi tabs render the same component; passing it to
     one is how the two tabs drift."""
-    assert PAGE.read_text(encoding="utf-8").count("modelSlug={modelChoice.slug}") == 2
+    assert PAGE.read_text(encoding="utf-8").count("modelSlug={modelChoice.slug}") == 0
 
 
 def test_it_says_where_to_go_when_no_model_is_chosen():
     code = " ".join(_panel().split())
-    assert "Pick a Model Name in <strong>Your Model Names</strong> above" in code
+    assert "Enter all dataset Label classes" in code
 
 
 # --- what must not have broken ----------------------------------------------------
@@ -189,11 +189,11 @@ def test_the_slug_is_still_saved_for_the_schedule():
     run. A displayed-only value that was never written would leave the
     schedule with no classes at all."""
     code = _panel()
-    assert "detector_slug: detectorSlug," in code
+    assert "detector_slug: detectorSlug," not in code
 
 
 def test_the_buttons_are_still_gated_on_having_one():
     code = " ".join(_panel().split())
     # The preview runs only once the card is complete and a Model Name
     # is chosen -- the gate the button had.
-    assert "if (!chosen || !complete) {" in code
+    assert "if (!Object.keys(classesOf()).length || !complete) {" in code

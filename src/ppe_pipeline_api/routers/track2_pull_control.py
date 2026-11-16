@@ -829,7 +829,7 @@ def preview_training_data_file(payload: SettingsRequest,
     out = {"name": recipe["name"], "saved_at": recipe["saved_at"],
            "created_at": recipe.get("created_at", ""),
            "label_classes": assemble.get("label_classes") or {},
-           "drop_undeclared": bool(assemble.get("drop_undeclared_labels")),
+           "drop_undeclared": False,
            "detector_slug": assemble.get("detector_slug") or "",
            "yaml": None, "yaml_error": ""}
     config = {**pc.read_config(), **recipe["config"], "data_source": "assembled"}
