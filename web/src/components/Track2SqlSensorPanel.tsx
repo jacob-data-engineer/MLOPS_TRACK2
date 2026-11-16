@@ -14,9 +14,8 @@ type Run = {
 type Status = { config: Config; next_at: string | null; running: boolean; saved_at?: string; last_run?: Run; history: Run[] };
 const stamp = (value?: string | null) => value ? new Date(value).toLocaleString("en-SG", { timeZone: "Asia/Singapore" }) : "—";
 
-export function Track2SqlSensorPanel({ schedule, onChange, byWeek, trainAfter, onTrainAfter }: {
+export function Track2SqlSensorPanel({ schedule, onChange }: {
   schedule: SqlSchedule; onChange: (value: SqlSchedule) => void;
-  byWeek: boolean; trainAfter: boolean; onTrainAfter: (value: boolean) => void;
 }) {
   const [status, setStatus] = useState<Status | null>(null);
   const { enabled, every_days: everyDays, at, from_date: fromDate } = schedule;
@@ -56,22 +55,13 @@ export function Track2SqlSensorPanel({ schedule, onChange, byWeek, trainAfter, o
   const button = "rounded border border-hairline px-3 py-1.5 text-xs disabled:opacity-40";
   return <section className="space-y-1" aria-label="New frames sensor">
     <h4 className="text-sm font-semibold">New frames sensor</h4>
-    <p className="mt-1 text-xs text-ink-muted">Checks the database for eligible frames and automatically pulls missing images and labels using the saved sensor settings. {trainAfter && byWeek ? "After a scheduled pull that brings in new frames, a training run is queued." : "No training job is started."}</p>
+    <p className="mt-1 text-xs text-ink-muted">Checks the database for eligible frames and automatically pulls missing images and labels using the saved sensor settings. No training job is started.</p>
     <fieldset disabled={locked} className="mt-3 flex flex-wrap items-end gap-4 text-xs">
       <label className="flex items-center gap-2"><input type="checkbox" checked={enabled} onChange={e => onChange({ ...schedule, enabled: e.target.checked })} />Enable scheduled pulls</label>
       <label>Every <input aria-label="Sensor interval in days" type="number" min={1} max={365} value={everyDays}
         onChange={e => onChange({ ...schedule, every_days: Number(e.target.value) })} className="mx-2 w-16 rounded border border-hairline bg-page px-2 py-1" />day(s)</label>
       <label>At (Singapore time)<input aria-label="Sensor time" type="time" value={at} onChange={e => onChange({ ...schedule, at: e.target.value })} className="ml-2 rounded border border-hairline bg-page px-2 py-1" /></label>
       <label>Start date (optional)<input type="date" aria-label="Sensor start date" value={fromDate} onChange={e => onChange({ ...schedule, from_date: e.target.value })} className="ml-2 rounded border border-hairline bg-page px-2 py-1" /></label>
-      <label className="flex items-start gap-2">
-        <input type="checkbox" className="mt-0.5" checked={trainAfter && byWeek} disabled={!byWeek}
-               onChange={e => onTrainAfter(e.target.checked)} />
-        <span>Start training after each scheduled pull
-          <span className="block text-ink-muted">{byWeek
-            ? "Rebuilds the retained lists and data.yaml, freezes a dataset version and queues a run when the pull copied at least the Multi-Auto Training batch size. Check now never starts training. Each run uses a GPU."
-            : "Needs \u201cSort into weeks by capture date\u201d on, so the run trains from the decayed weeks."}</span>
-        </span>
-      </label>
     </fieldset>
     <p className="mt-2 text-xs text-ink-muted">Checks every {everyDays} day(s) at {at || "the selected time"} Singapore time. Saving after that time schedules the next occurrence. Use Save above to save the schedule and all page settings together. Load restores the file for editing; Save applies it to scheduled checks.</p>
     <div className="mt-3 flex flex-wrap gap-2">

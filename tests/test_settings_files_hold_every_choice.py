@@ -41,8 +41,8 @@ def test_the_page_restores_every_field_it_saves():
     loader = page[page.index("function loadPageSettings"):]
     loader = loader[:loader.index("\n  }\n")]
     for field in sql_settings.SqlSettings.model_fields:
-        if field in ("export_mode", "detector_names", "classifier_names"):
-            continue  # fixed on this page; no control sets them
+        if field in ("export_mode", "detector_names", "classifier_names", "train_after"):
+            continue  # fixed on this page; no control sets them (train_after retired)
         assert f"next.{field}" in loader, f"{field} is saved but never loaded back"
 
 
@@ -74,7 +74,7 @@ def test_the_pull_control_view_choices_are_saved_with_data_preparation():
 
 def test_the_data_preparation_copy_of_the_sql_page_is_whole():
     page = _read("routes/Track2SqlPage.tsx")
-    assert "by_week: byWeek, train_after: trainAfter && byWeek, class_ids: classIds," in page
+    assert "by_week: byWeek, train_after: false, class_ids: classIds," in page
     assert "setClassIds(saved.class_ids)" in page
 
 

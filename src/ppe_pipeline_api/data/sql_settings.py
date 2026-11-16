@@ -53,10 +53,16 @@ class SqlSettings(BaseModel):
     # so Retention decays SQL frames like any other week. Off: the flat
     # pull_folder layout, exactly as before.
     by_week: bool = False
-    # After a SCHEDULED pull that copied something, run the training chain
-    # (lists -> data.yaml -> dataset version -> queue). Off by default: each
-    # firing is a GPU run. Only meaningful with by_week.
+    # RETIRED 2026-11-16: the option to run the training chain after a
+    # scheduled pull was removed from the page. Kept as a field so files
+    # saved with it still load, and forced off so one of them can never
+    # turn GPU runs back on with no control left on screen to stop them.
     train_after: bool = False
+
+    @field_validator("train_after")
+    @classmethod
+    def retired(cls, value):
+        return False
 
 
 def directory() -> Path:

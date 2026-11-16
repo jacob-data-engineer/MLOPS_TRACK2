@@ -99,7 +99,6 @@ export function Track2SqlPage() {
   // File into Pull Control's weeks by capture date instead of one folder,
   // so Retention decays SQL frames with everything else.
   const [byWeek, setByWeek] = useState(false);
-  const [trainAfter, setTrainAfter] = useState(false);
   // Where week folders live: Pull Control's root. Read, never edited here.
   const [weekRoot, setWeekRoot] = useState<{ bucket: string; root: string; cutoff: string; days: number } | null>(null);
   const [pullProgress, setPullProgress] = useState<Track2SqlPullProgress | null>(null);
@@ -139,7 +138,6 @@ export function Track2SqlPage() {
         if (typeof saved.show_labels === "boolean") setShowLabels(saved.show_labels);
         if (typeof saved.with_labels === "boolean") setWithLabels(saved.with_labels);
         if (typeof saved.by_week === "boolean") setByWeek(saved.by_week);
-        if (typeof saved.train_after === "boolean") setTrainAfter(saved.train_after);
         if (saved.class_ids && typeof saved.class_ids === "object") setClassIds(saved.class_ids);
         // Named EC2 files take precedence over the last auto-saved working state.
         // Finish restoring them before enabling queries or auto-save.
@@ -175,12 +173,13 @@ export function Track2SqlPage() {
         show_labels: showLabels, with_labels: withLabels,
         // The rest of the page's choices, so a Data Preparation file holds
         // the whole SQL page and not just the query (2026-11-13).
-        by_week: byWeek, train_after: trainAfter && byWeek, class_ids: classIds,
+        // Training after a scheduled pull was removed (2026-11-16): always off.
+        by_week: byWeek, train_after: false, class_ids: classIds,
       } }).catch(() => undefined);
     }, 700);
     return () => window.clearTimeout(timer);
   }, [settingsRead, explorationHazard, database, bucket, folder, sql, presetClass, presetScope,
-      pullBucket, pullFolder, trainPercent, showLabels, withLabels, byWeek, trainAfter, classIds]);
+      pullBucket, pullFolder, trainPercent, showLabels, withLabels, byWeek, classIds]);
 
   // ...and different classes. Read live, so a new class shows up here
   // without a change to the app. Only once the database is running: a
@@ -336,7 +335,7 @@ export function Track2SqlPage() {
     setDatabase(next.database); setPresetClass(next.preset_class); setPresetScope(next.preset_scope);
     setPullBucket(next.pull_bucket); setPullFolder(next.pull_folder); setTrainPercent(next.train_percent);
     setShowLabels(next.show_labels); setWithLabels(next.with_labels);
-    setByWeek(!!next.by_week); setTrainAfter(!!next.train_after);
+    setByWeek(!!next.by_week);
     setClassIds(next.class_ids ?? SQL_DEFAULTS.class_ids);
     setExplorationHazard(next.exploration_hazard); setExplorationOpen(next.exploration_open); setFramesOpen(next.frames_open);
     setSettingsRevision(v => v + 1);
@@ -392,7 +391,7 @@ export function Track2SqlPage() {
     schedule,
     database, preset_class: presetClass, preset_scope: presetScope,
     pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
-    show_labels: showLabels, with_labels: withLabels, by_week: byWeek, train_after: trainAfter && byWeek,
+    show_labels: showLabels, with_labels: withLabels, by_week: byWeek, train_after: false,
     exploration_hazard: explorationHazard, exploration_open: explorationOpen, frames_open: framesOpen,
     class_ids: result ? selectedClassIds : classIds, export_mode: "detection",
     detector_names: SQL_DEFAULTS.detector_names, classifier_names: SQL_DEFAULTS.classifier_names,
@@ -415,7 +414,7 @@ export function Track2SqlPage() {
       <Track2SqlSettingsBar initialPreset={initialPreset} disabled={!settingsRead || pulling} onLoad={loadPageSettings}
         settings={pageSettings} />
       <Track2SqlSensorPanel schedule={schedule} onChange={setSchedule}
-        byWeek={byWeek} trainAfter={trainAfter} onTrainAfter={setTrainAfter} />
+ />
       </Card>
       </div>
       <div className="flex flex-col gap-5">
@@ -686,20 +685,13 @@ export function Track2SqlPage() {
                       </span>
                     </span>
                   </label>
-                  {withLabels && <fieldset disabled={pulling} className="mt-3 rounded border border-hairline p-3">
-                    <legend className="px-1 text-sm font-medium">Available labels and class IDs</legend>
-                    <div className="flex flex-wrap gap-6">
-                      {availableLabels.map(({name}) => <label key={name} className="flex items-center gap-2 text-xs">
-                        {name}<input aria-label={`${name} class ID`} type="number" min={0} max={99}
-                          value={selectedClassIds[name]} onChange={e => setClassIds(previous => ({...previous, [name]: Number(e.target.value)}))}
-                          className="w-20 rounded border border-hairline bg-page px-2 py-1" />
-                      </label>)}
-                    </div>
-                    {availableLabels.length === 0 && <p className="text-xs text-ink-muted">No box labels are available to map.</p>}
-                    <p className="mt-2 text-xs text-ink-muted">Labels come from all selected frames, not just this page. Hazard names and detections from other video moments are not frame labels.</p>
-                    <p className="mt-2 text-xs text-ink-muted">These numbers are used in the label files and data.yaml. IDs must be different. Gaps are reserved as unused IDs in data.yaml.</p>
-                    {invalidClassIds && <p role="alert" className="mt-1 text-xs text-critical">Use a different whole number from 0 to 99 for each available label.</p>}
-                  </fieldset>}
+                  {/* "Available labels and class IDs" removed (2026-11-16). The IDs
+                      are the saved ones (class_ids, default helmet 0, person 2);
+                      if two labels ever land on one number the pull is blocked,
+                      so say why here rather than leaving a dead button. */}
+                  {withLabels && invalidClassIds && <p role="alert" className="mt-3 text-xs text-critical">
+                    Two labels in these frames share a class ID ({Object.entries(selectedClassIds).map(([n, id]) => `${n} ${id}`).join(", ")}), so the pull is blocked. Fix class_ids in the saved SQL settings file.
+                  </p>}
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
                       type="button"

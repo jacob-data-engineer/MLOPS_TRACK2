@@ -1,5 +1,18 @@
 # Continue here
 
+"Start training after each scheduled pull" REMOVED from the SQL sensor
+card (16 Nov, dev only). `SqlSettings.train_after` kept for old files but
+a validator forces it False, so `sql_sensor` never calls `chain_after`;
+the page always sends false. No saved file had it on (checked dev + prod).
+The chain hook (`after_sql_pull`) is now dead code, left in place.
+
+PROMOTED 16 Nov: production 8501 now runs `20261113-095814` (was
+`20261026-124922`), record backend dynamodb as designed; shared router
+Lambda updated. One start-up race in the log: two threads applied catalog
+migration 8 at once, the second's `INSERT INTO schema_version` hit the
+pkey (catalog.ensure_schema line ~307 has no ON CONFLICT). Next sync was
+ok (82 versions, 58 runs). Fix if wanted: ON CONFLICT DO NOTHING + a lock.
+
 Settings-file audit, SQL page + Data Preparation (13 Nov). SQL `_sql`
 files already held every control; the bar's false alarm in
 test_card_settings_are_saved is now an exemption (its state is file

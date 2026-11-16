@@ -13,6 +13,7 @@ and `judged_at` are the REVIEW time and must not be read as it.
 import datetime as dt
 import io
 import json
+import pathlib
 
 import pytest
 
@@ -166,17 +167,18 @@ def test_no_root_means_no_week_pull(monkeypatch):
 
 # --- saved with the page, and the chain stays opt-in ------------------------------
 
-def test_both_choices_are_saved_settings_and_off_by_default():
+def test_by_week_is_saved_and_off_by_default():
     settings = SqlSettings()
-    assert settings.by_week is False and settings.train_after is False
-    assert SqlSettings(by_week=True, train_after=True).model_dump()["train_after"] is True
+    assert settings.by_week is False
+    assert SqlSettings(by_week=True).model_dump()["by_week"] is True
 
 
-def test_training_after_a_pull_needs_the_weeks(monkeypatch):
-    config = sql_sensor.SensorConfig(enabled=True, settings=SqlSettings(
-        database="violation-review", preset_class="no_helmet", pull_folder="x", train_after=True))
-    with pytest.raises(ValueError, match="Sort into weeks"):
-        sql_sensor.validate_selection(config)
+def test_training_after_a_pull_is_retired():
+    """Removed from the page 2026-11-16. A file saved with it on still
+    loads -- with it off, so nothing can start GPU runs unseen."""
+    assert SqlSettings(by_week=True, train_after=True).train_after is False
+    page = (pathlib.Path(__file__).resolve().parents[1] / "web/src/components/Track2SqlSensorPanel.tsx")
+    assert "Start training after each scheduled pull" not in page.read_text(encoding="utf-8")
 
 
 def test_a_small_pull_does_not_start_a_gpu_run(monkeypatch):
