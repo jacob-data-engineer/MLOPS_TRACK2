@@ -203,7 +203,7 @@ const TRAINING_STEPS: StepList = [
         <span className="block">
           &bull; <strong>Use Pull Control</strong> on step 3 &mdash; the
           week folders the pull fills. Unticking it switches Pull Control,
-          Auto Training and Retention off together.
+          Selection weeks and Retention off together.
         </span>
         <span className="mt-1 block">
           The Assemble card reads them back as &ldquo;data.yaml will be built
@@ -269,7 +269,7 @@ const TRAINING_STEPS: StepList = [
     title: "Check the weeks and the retention curve",
     body: (
       <>
-        Step 4, <strong>Auto Training</strong>, shows what each week folder
+        Step 4, <strong>Selection weeks</strong>, shows what each week folder
         holds; it follows Pull Control&rsquo;s root, which is the root the
         unattended chain trains from. Every week is included unless you tick
         it out. <strong>Retention</strong> (4b) decides how much of each

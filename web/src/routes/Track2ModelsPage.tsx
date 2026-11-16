@@ -1052,7 +1052,7 @@ function TrainingForm({
         <p className="tabular text-ink-muted">
           Training data{" "}
           <span className="text-ink-muted/70">
-            (from <em>Assemble a dataset</em> above, from Auto Training,
+            (from <em>Assemble a dataset</em> above, from Selection weeks,
             &ldquo;Use for training&rdquo; on a data.yaml, or pick one here)
           </span>
         </p>

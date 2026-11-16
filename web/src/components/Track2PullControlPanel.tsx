@@ -863,7 +863,7 @@ export function Track2PullControlPanel({
           </p>
         </>
       }
-      next="Step 4, Auto Training -- point at the week folders and decide how much of each to use."
+      next="Step 4, Selection weeks -- point at the week folders and decide how much of each to use."
       collapsible={false}
       titleAside={onOnlyChange ? (
         // Beside the title, where the card's own name is -- the same

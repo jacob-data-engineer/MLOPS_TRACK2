@@ -3296,16 +3296,25 @@ def save_settings_file(*, name: str = "pull_control", config: dict | None = None
             f"folder, before saving this one."
         )
     os.makedirs(SETTINGS_DIR, exist_ok=True)
+    # When the file was FIRST written (2026-11-16). Carried over on every
+    # re-save, set only when the file is new. A file saved before this
+    # was recorded keeps none -- saying "created" with the date of a
+    # later re-save would be wrong.
+    created_at = file_created_at(name)
+    if created_at is None:
+        created_at = _now().isoformat()
     temporary = path + ".tmp"
     with open(temporary, "w", encoding="utf-8") as handle:
         document = {"saved_at": _now().isoformat(), "config": body}
+        if created_at:
+            document["created_at"] = created_at
         if scope:
             document["scope"] = scope
         # Unknown top-level keys are ignored by `load_settings_file`,
         # which reads `config` only -- so a file written with sections
         # still loads on a build that predates them.
         for key, value in (sections or {}).items():
-            if key not in ("saved_at", "config"):
+            if key not in ("saved_at", "created_at", "config"):
                 document[key] = value
         json.dump(document, handle, indent=2)
     os.replace(temporary, path)
@@ -3415,6 +3424,19 @@ TRAINING_DATA_KEYS = (
 )
 
 
+def file_created_at(name: str) -> str | None:
+    """When a settings file was first written: its `created_at`; "" when
+    it exists but predates that being recorded; None when there is no
+    such file yet."""
+    try:
+        with open(_settings_path(name), encoding="utf-8") as handle:
+            return str((json.load(handle) or {}).get("created_at") or "")
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return ""
+
+
 def load_training_data_file(*, name: str, apply: bool = False) -> dict:
     """Import a preparation recipe without touching schedules or starting jobs."""
     from copy import deepcopy
@@ -3431,12 +3453,17 @@ def load_training_data_file(*, name: str, apply: bool = False) -> dict:
     recipe["dataset_assemble"] = assemble
     if recipe.get("picked"):
         recipe["sources"] = sources_from_picked({**DEFAULTS, **recipe})
+    created_at = file_created_at(name) or ""
+    loaded_at = _now().isoformat() if apply else ""
     if apply:
+        # `loaded_at`: when it was loaded for training, shown beside when
+        # the file was created and last saved.
         write_config({**recipe, "data_source": "assembled",
                       "training_data_preparation": {"name": name,
-                          "saved_at": saved.get("saved_at", ""), "config": recipe}})
-    return {"name": name, "saved_at": saved.get("saved_at", ""),
-            "config": recipe, "applied": apply}
+                          "saved_at": saved.get("saved_at", ""), "created_at": created_at,
+                          "loaded_at": loaded_at, "config": recipe}})
+    return {"name": name, "saved_at": saved.get("saved_at", ""), "created_at": created_at,
+            "loaded_at": loaded_at, "config": recipe, "applied": apply}
 
 
 def load_settings_file(*, name: str = "pull_control", apply: bool = True,

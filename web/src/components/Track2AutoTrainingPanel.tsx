@@ -329,7 +329,10 @@ export function Track2AutoTrainingPanel() {
 
   return (
     <Card
-      title="Auto Training"
+      title="Selection weeks"
+      // Renamed from "Auto Training" (2026-11-16); the key stays so the
+      // saved open/closed state and the DP settings files still find it.
+      stateKey="auto training"
       step="4"
       help={
         <>

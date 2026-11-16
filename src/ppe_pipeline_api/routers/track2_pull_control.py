@@ -813,6 +813,33 @@ def save_settings(payload: SettingsRequest, session=Depends(require_session)) ->
         )
 
 
+@router.post("/settings/training-data/preview")
+def preview_training_data_file(payload: SettingsRequest,
+                               session=Depends(require_session)) -> dict:
+    """What a saved Data Preparation file holds for training: its class
+    list, and the data.yaml a run would build from it -- built the way a
+    run builds it, from the bucket as it is now. Nothing is loaded,
+    copied or written."""
+    from ..chain import retrain_schedule as rs
+    try:
+        recipe = pc.load_training_data_file(name=payload.name, apply=False)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    assemble = recipe["config"].get("dataset_assemble") or {}
+    out = {"name": recipe["name"], "saved_at": recipe["saved_at"],
+           "created_at": recipe.get("created_at", ""),
+           "label_classes": assemble.get("label_classes") or {},
+           "drop_undeclared": bool(assemble.get("drop_undeclared_labels")),
+           "detector_slug": assemble.get("detector_slug") or "",
+           "yaml": None, "yaml_error": ""}
+    config = {**pc.read_config(), **recipe["config"], "data_source": "assembled"}
+    try:
+        out["yaml"] = rs.preview_training_yaml(config)
+    except Exception as exc:                                       # noqa: BLE001
+        out["yaml_error"] = str(exc)
+    return out
+
+
 @router.post("/settings/training-data")
 def load_training_data(payload: SettingsRequest, session=Depends(require_session)) -> dict:
     try:

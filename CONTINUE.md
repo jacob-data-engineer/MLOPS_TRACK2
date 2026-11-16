@@ -1,5 +1,18 @@
 # Continue here
 
+"Data Preparation file for training" card (Multi-Auto Training) now shows,
+for the chosen/loaded _DP file: its saved class list, the classes the
+run's data.yaml declares, and that data.yaml (16 Nov, dev). Route
+`POST /settings/training-data/preview`; `retrain_schedule.preview_training_yaml`
+mirrors the assembled branch with no writes (`pull_train_entries(write=False)`,
+`combined_store.plan_decayed` -- split out of `rebuild_decayed` as
+`_decay_plan`), then `dataset_yaml.build_in_place`. Store location now
+takes a config so a file previews with ITS store. FINDING: with
+"drop labels not in the list" on (helmet_sit_DP), the yaml declares only
+the Model Name's class (helmet) -- label_classes is ignored by design
+(assemble_plan). Card says so. "Auto Training" card renamed "Selection
+weeks" (stateKey kept "auto training").
+
 "Start training after each scheduled pull" REMOVED from the SQL sensor
 card (16 Nov, dev only). `SqlSettings.train_after` kept for old files but
 a validator forces it False, so `sql_sensor` never calls `chain_after`;

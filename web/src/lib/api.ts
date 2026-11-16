@@ -2241,7 +2241,13 @@ export interface Track2PullConfig {
    * saved (2026-10-29). */
   settings_file_dp?: string;
   settings_file_at?: string;
-  training_data_preparation?: { name: string; saved_at: string; config: Record<string, unknown> };
+  training_data_preparation?: {
+    name: string; saved_at: string; config: Record<string, unknown>;
+    /** When the file was first written ("" when it predates that being recorded). */
+    created_at?: string;
+    /** When it was loaded for training. */
+    loaded_at?: string;
+  };
   default_dataset?: {
     folder?: string; snapshot_id?: string; files?: number;
     set_by?: string;
@@ -4155,6 +4161,24 @@ export async function pullTrack2Sql(params: {
     }
     throw new ApiError(500, "Progress connection ended before completion. Some files may have copied; check the destination before retrying.");
   } finally { reader.releaseLock(); }
+}
+
+/** A Data Preparation file's classes, and the data.yaml a run would build
+ * from it -- built the way a run builds it, nothing written. */
+export type Track2TrainingDataPreview = {
+  name: string; saved_at: string; created_at?: string;
+  label_classes: Record<string, string>; drop_undeclared: boolean; detector_slug: string;
+  yaml: null | {
+    text: string; key: string; bucket: string; names: Record<string, string>;
+    image_counts?: { train?: { total?: number }; val?: { total?: number } } | null;
+    undeclared: { text: string; indices?: number[] }[]; drop_undeclared: boolean; no_val: boolean;
+    combined_into: string; problems: { text: string }[];
+  };
+  yaml_error: string;
+};
+
+export function previewTrack2TrainingData(name: string): Promise<Track2TrainingDataPreview> {
+  return apiPost("/track2/pull-control/settings/training-data/preview", { name });
 }
 
 export function loadTrack2TrainingData(name: string, apply = false): Promise<{

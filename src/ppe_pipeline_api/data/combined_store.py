@@ -69,14 +69,15 @@ def _check(stop) -> None:
         raise Stopped("Stopped by hand.")
 
 
-def location() -> tuple[str, str, str]:
+def location(config: dict | None = None) -> tuple[str, str, str]:
     """`(bucket, store, decayed)` from the Central data store card.
 
     The decayed copy is what a run downloads as its one prefix, and a run
     reads its dataset from this app's bucket -- so the store must be in it.
     Said now, not discovered when a run cannot find its images.
     """
-    bucket, store = central_store.location()
+    bucket, store = (central_store.location(config) if config is not None
+                     else central_store.location())
     if bucket != storage.BUCKET:
         raise ValueError(
             f"The central store is in {bucket}; combining for training needs it in "
@@ -302,7 +303,30 @@ def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
     marker_key = f"{decayed}/{MARKER}"
     there = set(_keys(bucket, decayed)) - {marker_key}
     _write_marker(bucket, decayed, status="building", started_at=now, for_run=for_run)
+    pairs, train, val, weeks_report = _decay_plan(
+        bucket, store, decayed, retention=retention, use_weeks=use_weeks,
+        use_golden=use_golden, golden_split=golden_split, slugs=slugs)
+    return _apply_decay_plan(bucket, decayed, there, pairs, train, val, weeks_report,
+                             now=now, for_run=for_run, stop=stop, progress=progress)
 
+
+def plan_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
+                 golden_split: bool = True, slugs: dict | None = None,
+                 config: dict | None = None) -> dict:
+    """What `rebuild_decayed` would name, from the store as it is now --
+    nothing copied, removed or written. For previewing a run's data.yaml.
+    `config`: whose store -- a settings file's, when previewing one."""
+    bucket, store, decayed = location(config)
+    pairs, train, val, _ = _decay_plan(
+        bucket, store, decayed, retention=retention, use_weeks=use_weeks,
+        use_golden=use_golden, golden_split=golden_split, slugs=slugs)
+    return {"bucket": bucket, "folder": decayed, "train": train, "val": val,
+            "files": len({dest for (_, _, dest) in pairs})}
+
+
+def _decay_plan(bucket: str, store: str, decayed: str, *, retention: dict, use_weeks: bool,
+                use_golden: bool, golden_split: bool, slugs: dict | None):
+    """Which store files the decayed copy holds, and the yaml entries naming them."""
     pairs: list = []
     train: list = []
     val: list = []
@@ -349,7 +373,11 @@ def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
                           f"{decayed}/folders/{slug}/{YAML_NAME}"))
         except Exception:                                           # noqa: BLE001
             pass
+    return pairs, train, val, weeks_report
 
+
+def _apply_decay_plan(bucket, decayed, there, pairs, train, val, weeks_report, *,
+                      now, for_run, stop, progress) -> dict:
     # What the decay no longer keeps -- an older week thinned further, a
     # source unticked -- goes first, so nothing stale is trained on.
     wanted = {dest for (_, _, dest) in pairs}

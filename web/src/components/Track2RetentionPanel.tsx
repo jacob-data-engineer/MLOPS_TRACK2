@@ -344,7 +344,7 @@ export function Track2RetentionPanel() {
           </p>
           <p className="mt-2">
             <em>Save settings</em> near the bottom saves every card&apos;s
-            choices -- this one, the pull control and Auto Training -- into one
+            choices -- this one, the pull control and Selection weeks -- into one
             named file you can load back.
           </p>
         </>

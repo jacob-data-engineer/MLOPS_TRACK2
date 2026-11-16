@@ -329,3 +329,38 @@ def test_the_ticker_resumes_and_the_card_shows_progress():
     assert 'role="progressbar"' in card
     assert "<CombineProgress job={combine} store={path} decayed={decayedPath} />" in card
     assert "<dt className=\"text-ink-muted\">Decayed copy</dt>" in card, "where it is, always shown"
+
+
+# --- a Data Preparation file's data.yaml, previewed (2026-11-16) ------------------
+
+def test_planning_the_decayed_copy_writes_nothing(s3):
+    out = _combine()
+    before = dict(s3.objects)
+    planned = cs.plan_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
+    assert s3.objects == before, "a preview copies, removes and marks nothing"
+    assert {"images": "central_decay/golden/images/val", "labels": ""} in planned["val"]
+    assert planned["files"] > 0
+
+
+def test_the_plan_matches_what_a_rebuild_names(s3):
+    out = _combine()
+    planned = cs.plan_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
+    built = cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
+    assert planned["train"] == built["train"] and planned["val"] == built["val"]
+    assert planned["files"] == built["files"]
+
+
+def test_a_file_is_previewed_with_its_own_store(monkeypatch):
+    seen = []
+    monkeypatch.setattr(central_store, "location", lambda config=None: seen.append(config) or (B, "x"))
+    monkeypatch.setattr(storage, "BUCKET", B)
+    cs.location({"central_store": {"bucket": B, "folder": "from-the-file"}})
+    assert seen and seen[0]["central_store"]["folder"] == "from-the-file"
+
+
+def test_the_preview_route_and_card():
+    from ppe_pipeline_api.main import app
+    assert "/track2/pull-control/settings/training-data/preview" in app.openapi()["paths"]
+    card = (ROOT / "web/src/components/Track2TrainingDataFile.tsx").read_text(encoding="utf-8")
+    assert "Classes saved in the file" in card and "Classes the run&apos;s data.yaml declares" in card
+    assert "previewTrack2TrainingData(shown)" in card

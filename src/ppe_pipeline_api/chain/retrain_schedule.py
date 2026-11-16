@@ -1720,6 +1720,84 @@ def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None,
     return {"combined": combined, "decayed": decayed}
 
 
+def preview_training_yaml(config: dict) -> dict:
+    """The data.yaml a run would write with `config`, assembled the way
+    `_run_chain_body` assembles it -- but nothing copied, frozen, queued
+    or written. For showing a Data Preparation file's yaml before it is
+    loaded (2026-11-16).
+
+    Built from the bucket as it is NOW. A run builds its own at its start,
+    after the store and its decayed copy are brought up to date, so a
+    source that has grown since will show more images then.
+    """
+    from .. import data
+
+    assembled = assemble_plan(config)
+    if assembled is None:
+        raise ValueError(
+            "This file does not train from the assembled sources: Multi-Auto "
+            "Training's data source is not 'Assembled', or Assemble has no "
+            "folders. There is no data.yaml to build from it.")
+    problems = list(assembled.get("problems") or [])
+    picks = source_selection(config)
+    golden = golden_plan(config)
+    root = str(preflight(config).get("root") or "").strip("/")
+    golden_train = golden_val = ""
+    if golden is not None:
+        if golden["split"]:
+            golden_train = f"{golden['target_folder']}/images/train"
+            golden_val = f"{golden['target_folder']}/images/val"
+        else:
+            golden_train = f"{golden['target_folder']}/images"
+
+    train_entries: list = []
+    if picks["folders"]:
+        train_entries += list(assembled["splits"]["train"])
+    if golden_train:
+        train_entries.append({"images": golden_train, "labels": ""})
+    if picks["pull"] and root:
+        train_entries += pull_train_entries(config, root, write=False)["entries"]
+    if not train_entries:
+        raise ValueError("Nothing is ticked to train on in this file: none of "
+                         "\"Use these folders\", the golden set or \"Use Pull Control\".")
+    splits = {**assembled["splits"], "train": train_entries}
+    if golden_val:
+        kept = list(splits.get("val") or []) if picks["folders"] else []
+        splits["val"] = kept + [{"images": golden_val, "labels": ""}]
+    elif not picks["folders"]:
+        splits["val"] = []
+    bucket = assembled["bucket"]
+    combined_into = ""
+    if combined_enabled(config):
+        # The decayed copy, as it would be planned from the store now.
+        week_prefix = str(config.get("week_prefix") or "week_")
+        slugs: dict = {}
+        if picks["folders"]:
+            for side, entries in (("train", assembled["splits"]["train"]),
+                                  ("val", assembled["splits"]["val"])):
+                for entry in entries:
+                    images = str(entry.get("images") or "")
+                    if images:
+                        slugs.setdefault(data.combined_slug(images), set()).add(side)
+        planned = data.plan_decayed(
+            retention={**(config.get("retention") or {}), "week_prefix": week_prefix,
+                       "excluded_weeks": excluded_weeks(config)},
+            use_weeks=bool(picks["pull"] and root), use_golden=golden is not None,
+            golden_split=bool(golden["split"]) if golden else True,
+            slugs={k: sorted(v) for k, v in slugs.items()}, config=config)
+        splits = {"train": planned["train"], "val": planned["val"]}
+        bucket = planned["bucket"]
+        combined_into = planned["folder"]
+    drop_undeclared = bool((config.get("dataset_assemble") or {}).get("drop_undeclared_labels"))
+    out = data.build_yaml_in_place(splits=splits, classes=assembled["classes"], bucket=bucket,
+                                   overwrite=True, label_scan=200, drop_undeclared=drop_undeclared)
+    return {"text": out.get("text", ""), "key": out.get("key", ""), "bucket": bucket,
+            "names": out.get("names") or {}, "image_counts": out.get("image_counts"),
+            "undeclared": out.get("undeclared") or [], "drop_undeclared": drop_undeclared,
+            "no_val": bool(out.get("no_val")), "combined_into": combined_into,
+            "problems": [p for p in problems if p.get("level") == "blocking"]}
+
+
 #: What the "Combine data sources" button last did, for the card to show.
 _combine_job: dict = {}
 _combine_lock = threading.Lock()

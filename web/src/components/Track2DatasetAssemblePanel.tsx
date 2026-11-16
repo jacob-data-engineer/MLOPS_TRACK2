@@ -1110,7 +1110,7 @@ export function Track2DatasetAssemblePanel({
       {only && onOnlyChange && (
         <p className="mb-3 rounded-md border border-accent/40 bg-accent-subtle px-3 py-2 text-xs text-ink-secondary">
           This run takes its data from the folders on this card.{" "}
-          <span className="font-medium text-ink">Pull Control, Auto Training
+          <span className="font-medium text-ink">Pull Control, Selection weeks
           and Retention are switched off</span> while that is ticked &mdash;
           they are the other way of deciding where training data comes from,
           and two answers to that question is one too many. Tick{" "}

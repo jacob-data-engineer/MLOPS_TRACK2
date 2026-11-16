@@ -110,6 +110,9 @@ NO_SETTINGS_OF_THEIR_OWN = {
     # settings it is handed are written by /track2/sql/settings/save, the
     # SQL page's own named files (checked in test_settings_files_hold_every_choice).
     "Track2SqlSettingsBar.tsx": "saves the SQL page's named settings files",
+    # Its state is a file choice and a live preview (a result, never
+    # saved); Load writes the file into `training_data_preparation`.
+    "Track2TrainingDataFile.tsx": "loads a _DP file server-side; preview is a result",
 }
 
 #: A panel with at least this many pieces of state is making choices.

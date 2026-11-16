@@ -47,9 +47,10 @@ _running: set[str] = set()
 _lock = threading.Lock()
 
 
-def location() -> tuple[str, str]:
-    """(bucket, folder) of the central data store."""
-    store = pc.read_config().get("central_store") or {}
+def location(config: dict | None = None) -> tuple[str, str]:
+    """(bucket, folder) of the central data store -- of `config` when
+    given (a settings file being previewed), else the live one."""
+    store = (config if config is not None else pc.read_config()).get("central_store") or {}
     bucket = str(store.get("bucket") or storage.BUCKET or "track2-s3")
     folder = str(store.get("folder") or "").strip("/") or DEFAULT_FOLDER
     return bucket, folder
