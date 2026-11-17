@@ -365,3 +365,29 @@ def test_the_preview_route_and_card():
     assert "Classes saved in the file" in card
     assert "Classes the run&apos;s data.yaml declares" not in card
     assert "previewTrack2TrainingData(shown)" in card
+
+
+def test_original_taxonomy_survives_combine_and_repeated_decay(s3, monkeypatch):
+    from ppe_pipeline_api.data import dataset_yaml
+
+    original = b"names: {0: helmet, 1: gloves, 2: person}"
+    generated = (dataset_yaml.IN_PLACE_MARKER + "\nnames: {0: helmet}\n").encode()
+    for root in ("retraining", "golden", "sets/one"):
+        s3.objects[(B, f"{root}/data.yaml")] = generated
+        s3.objects[(B, f"{root}/data.source.yaml")] = original
+    monkeypatch.setattr(pc, "s3", s3)
+    out = _combine()
+    for _ in range(2):
+        cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
+        for sub in ("weeks", "golden", "folders/sets__one"):
+            assert s3.objects[(B, f"central/{sub}/data.source.yaml")] == original
+            root = f"central_decay/{sub}"
+            assert s3.objects[(B, f"{root}/data.source.yaml")] == original
+            names, error = dataset_yaml._source_taxonomy(B, root, {0: "helmet", 1: "gloves", 2: "person"})
+            assert not error
+            assert names == {0: "helmet", 1: "gloves", 2: "person"}
+
+    # The central store still keeps its original bytes if an upstream file changes.
+    s3.objects[(B, "sets/one/data.source.yaml")] = b"names: {0: changed}"
+    _combine()
+    assert s3.objects[(B, "central/folders/sets__one/data.source.yaml")] == original

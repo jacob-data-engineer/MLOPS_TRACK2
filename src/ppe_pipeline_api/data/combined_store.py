@@ -23,9 +23,9 @@ decayed folder because the training chain has never trained or scored on
 it (the Assemble card's val folders and the golden set's val are the
 evaluation set); copying it would change nothing but the bill.
 
-Each source's own `data.yaml` is copied beside its files, once: it is the
-only record of what that source's label numbers mean, and the yaml
-builder reads it from there exactly as it would from the original.
+Each source's `data.yaml` and preserved `data.source.yaml` are copied
+beside its files, once. The preserved original records what the label
+numbers mean even when Assemble has replaced data.yaml with a run YAML.
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ DECAY_SUFFIX = "_decay"
 MARKER = "_decay.json"
 LABEL_EXTENSIONS = (".txt",)
 YAML_NAME = "data.yaml"
+TAXONOMY_FILES = (YAML_NAME, "data.source.yaml")
 
 
 class Stopped(Exception):
@@ -207,7 +208,7 @@ def combine(*, weeks_root: str = "", weeks_bucket: str = "", week_prefix: str = 
         for key in _keys(wb, root):
             rel = key[len(root) + 1:]
             first = rel.split("/", 1)[0]
-            if (first.startswith(week_prefix) and _is_data(key)) or rel == YAML_NAME:
+            if (first.startswith(week_prefix) and _is_data(key)) or rel in TAXONOMY_FILES:
                 new.append((wb, key, f"{store}/weeks/{rel}"))
         add("weeks", new)
 
@@ -215,7 +216,7 @@ def combine(*, weeks_root: str = "", weeks_bucket: str = "", week_prefix: str = 
         gb, gf = _split_uri(golden_folder, golden_bucket or storage.BUCKET)
         new = [(gb, key, f"{store}/golden/{key[len(gf) + 1:]}")
                for key in _keys(gb, gf)
-               if _is_data(key) or key == f"{gf}/{YAML_NAME}"]
+               if _is_data(key) or key in {f"{gf}/{name}" for name in TAXONOMY_FILES}]
         add("golden", new)
 
     slugs: dict = {}
@@ -237,11 +238,12 @@ def combine(*, weeks_root: str = "", weeks_bucket: str = "", week_prefix: str = 
         # The source's own numbering, when it has one.
         root = re.split(r"/images(?:/|$)", ik, maxsplit=1)[0]
         if root and root != ik:
-            try:
-                storage.s3.head_object(Bucket=ib, Key=f"{root}/{YAML_NAME}")
-                new.append((ib, f"{root}/{YAML_NAME}", f"{base}/{YAML_NAME}"))
-            except Exception:                                       # noqa: BLE001
-                pass
+            for name in TAXONOMY_FILES:
+                try:
+                    storage.s3.head_object(Bucket=ib, Key=f"{root}/{name}")
+                    new.append((ib, f"{root}/{name}", f"{base}/{name}"))
+                except Exception:                                   # noqa: BLE001
+                    pass
         add(f"folders/{slug}/{split}", new)
 
     _check(stop)
@@ -343,8 +345,10 @@ def _decay_plan(bucket: str, store: str, decayed: str, *, retention: dict, use_w
             if label:
                 pairs.append((bucket, label, f"{decayed}/weeks/{label[len(store) + 7:]}"))
             kept_weeks.add(rel.split("/", 1)[0])
-        if f"{store}/weeks/{YAML_NAME}" in set(_keys(bucket, f"{store}/weeks")):
-            pairs.append((bucket, f"{store}/weeks/{YAML_NAME}", f"{decayed}/weeks/{YAML_NAME}"))
+        week_keys = set(_keys(bucket, f"{store}/weeks"))
+        for name in TAXONOMY_FILES:
+            if f"{store}/weeks/{name}" in week_keys:
+                pairs.append((bucket, f"{store}/weeks/{name}", f"{decayed}/weeks/{name}"))
         train += [{"images": f"{decayed}/weeks/{w}/images/train", "labels": ""}
                   for w in sorted(kept_weeks, key=lambda n: int(re.sub(r"\D", "", n) or 0))]
         weeks_report = chosen.get("weeks") or []
@@ -367,12 +371,13 @@ def _decay_plan(bucket: str, store: str, decayed: str, *, retention: dict, use_w
             whole(f"folders/{slug}/labels/{split}")
             (val if split == "val" else train).append(
                 {"images": f"{decayed}/folders/{slug}/images/{split}", "labels": ""})
-        try:
-            storage.s3.head_object(Bucket=bucket, Key=f"{store}/folders/{slug}/{YAML_NAME}")
-            pairs.append((bucket, f"{store}/folders/{slug}/{YAML_NAME}",
-                          f"{decayed}/folders/{slug}/{YAML_NAME}"))
-        except Exception:                                           # noqa: BLE001
-            pass
+        for name in TAXONOMY_FILES:
+            try:
+                storage.s3.head_object(Bucket=bucket, Key=f"{store}/folders/{slug}/{name}")
+                pairs.append((bucket, f"{store}/folders/{slug}/{name}",
+                              f"{decayed}/folders/{slug}/{name}"))
+            except Exception:                                       # noqa: BLE001
+                pass
     return pairs, train, val, weeks_report
 
 
