@@ -10,7 +10,6 @@ import { Track2DatasetVersionsPanel } from "../components/Track2DatasetVersionsP
 import { ProgressBar } from "../components/ProgressBar";
 import { StatTile } from "../components/StatTile";
 import { Track2DatasetAssemblePanel } from "../components/Track2DatasetAssemblePanel";
-import { Track2CoverageCard } from "../components/Track2RetentionQuality";
 import { Track2DetectorsPanel } from "../components/Track2DetectorsPanel";
 import { Track2BaseModelPicker } from "../components/Track2BaseModelPicker";
 import { Track2ImportCheckpointPanel } from "../components/Track2ImportCheckpointPanel";
@@ -2211,11 +2210,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               preview from the saved settings -- the same code, so the two
               cannot disagree. */}
           {multi
-            ? <>
-                <Track2DatasetAssemblePanel multiSource previewOnly />
-                {/* Moved off Data Preparation's Retention card (2026-11-13). */}
-                <Track2CoverageCard />
-              </>
+            ? <Track2DatasetAssemblePanel multiSource previewOnly />
             : <div id="track2-yaml-build-slot" />}
 
           <TrainingForm
