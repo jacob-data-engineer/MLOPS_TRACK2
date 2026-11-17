@@ -197,7 +197,7 @@ def test_the_caption_no_longer_claims_it_does_not_start():
 def test_the_card_explains_background_prepared_training():
     """Automatic SQL runs preserve the prepared data and start without a browser."""
     code = _flat()
-    assert "Switched on and off by <strong>PULL, BUILD, QUEUE, TRAIN</strong>" in code
+    assert "Switched on and off by <strong>TRAINING SCHEDULE</strong>" in code
     assert "queues the run and starts it" in code
     assert "decayed dataset, then queues the run and starts it, even when this page is closed." in code
 

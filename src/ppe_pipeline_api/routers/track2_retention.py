@@ -194,6 +194,7 @@ class RetrainScheduleRequest(BaseModel):
     trigger: str | None = None
     every_days: int | None = None
     at: str | None = None
+    from_date: str | None = None
     detector_slug: str | None = None
     architecture: str | None = None
     epochs: int | None = None
@@ -240,6 +241,9 @@ def get_retrain(session=Depends(require_session)) -> dict:
 def save_retrain(payload: RetrainScheduleRequest,
                  session=Depends(require_session)) -> dict:
     patch = payload.model_dump(exclude_none=True)
+    from .. import record_store
+    if record_store.enabled() and 'enabled' in patch and 'trigger' not in patch:
+        patch['trigger'] = 'clock' if patch['enabled'] else 'off'
     if "trigger" in patch:
         try:
             patch.update(rs.trigger_fields(str(patch["trigger"]).strip().lower()))
@@ -247,6 +251,13 @@ def save_retrain(payload: RetrainScheduleRequest,
             raise HTTPException(status_code=400, detail=str(exc))
     current = rs.settings()
     merged = {**current, **patch}
+    if not rs._valid_time(str(merged.get('at') or '')):
+        raise HTTPException(status_code=400, detail='Choose a valid Singapore time (HH:MM).')
+    if merged.get('from_date'):
+        try:
+            _dt.date.fromisoformat(merged['from_date'])
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Choose a valid start date (YYYY-MM-DD).')
     if int(merged.get("every_days") or 0) < 1:
         raise HTTPException(
             status_code=400,
@@ -259,7 +270,12 @@ def save_retrain(payload: RetrainScheduleRequest,
     # the epochs does not move the next run (see `rs.with_anchor`).
     merged = rs.with_anchor(current, merged)
     try:
-        pc.write_config({"retrain_schedule": merged})
+        changes = {'retrain_schedule': merged}
+        if record_store.enabled():
+            if merged.get('trigger') == 'pull':
+                raise ValueError('Pulls follow the training schedule. Choose Off or On a schedule.')
+            changes.update(mode='off', sql_next_pull_at='')
+        pc.write_config(changes)
     except Exception as exc:                                   # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not save: {exc}")
     config = pc.read_config()
@@ -277,7 +293,7 @@ def save_retrain(payload: RetrainScheduleRequest,
     # The fresh anchor already puts the first slot ahead of now; this
     # still matters on an operator-chosen `from_date` grid, which wins
     # over the anchor and may have a slot minutes behind.
-    if patch.get("enabled") and not current.get("enabled"):
+    if merged.get('enabled') and any(current.get(k) != merged.get(k) for k in ('enabled', 'at', 'every_days', 'from_date')):
         slot = rs.due_training_run(config)
         if slot:
             pc.claim_once("training_schedule", slot)

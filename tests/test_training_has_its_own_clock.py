@@ -282,4 +282,4 @@ def test_switching_it_on_claims_the_slot_that_already_passed():
 
     code = inspect.getsource(r.save_retrain)
     assert 'pc.claim_once("training_schedule", slot)' in code
-    assert 'if patch.get("enabled") and not current.get("enabled"):' in code
+    assert "current.get(k) != merged.get(k)" in code

@@ -363,6 +363,9 @@ def after_sql_pull(run_id: str, summary: dict) -> dict:
     pull. Registered on `data.sql_sensor.after_pull` by the ticker.
     """
     from . import retrain_schedule as rs
+    from .. import record_store
+    if record_store.enabled():
+        return {'queued': False, 'reason': 'Training starts from the training schedule.'}
 
     copied = int(summary.get("copied") or 0)
     minimum = max(1, int(settings().get("min_files") or 1))

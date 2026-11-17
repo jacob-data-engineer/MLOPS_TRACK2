@@ -2803,6 +2803,7 @@ export function deleteTrack2Snapshot(id: string): Promise<{
 export type Track2TrainingTrigger = "pull" | "clock" | "off";
 
 export interface Track2RetrainSchedule {
+  from_date?: string;
   enabled: boolean;
   trigger?: Track2TrainingTrigger;
   follow_pull: boolean;
@@ -2881,7 +2882,7 @@ export function getTrack2Retrain(): Promise<Track2RetrainStatus> {
 /** A PATCH -- only the fields sent are changed, so turning the schedule
  * on does not reset the cadence somebody set last week. */
 export function saveTrack2Retrain(
-  patch: Partial<Pick<Track2RetrainSchedule, "enabled" | "every_days" | "at" | "follow_pull" | "trigger">>,
+  patch: Partial<Pick<Track2RetrainSchedule, "enabled" | "every_days" | "at" | "from_date" | "follow_pull" | "trigger">>,
 ): Promise<Track2RetrainStatus> {
   return apiPost("/track2/retention/retrain", patch);
 }

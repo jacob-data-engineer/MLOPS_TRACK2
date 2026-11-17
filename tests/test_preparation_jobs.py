@@ -107,3 +107,32 @@ def test_sql_schedule_hands_off_to_same_durable_job(monkeypatch):
     monkeypatch.setattr(jobs, 'submit', lambda config, **kw: got.append(kw) or {'ok':True})
     assert retrain_schedule._run_chain_body(config={}, trigger='schedule', submit='queue')['ok']
     assert got == [{'trigger':'schedule','submit':'queue'}]
+
+
+@pytest.mark.parametrize('pull_error', [False, True])
+def test_schedule_pulls_then_rebuilds_before_preserving(world, monkeypatch, pull_error):
+    jobs.submit(config={'dataset_assemble':{'only':False}}, trigger='schedule', submit='queue')
+    calls=[]
+    monkeypatch.setattr(jobs.pc, 'active_run', lambda: None)
+    monkeypatch.setattr(jobs.pc, 'new_run_id', lambda: '20261117T090000-scheduled')
+    monkeypatch.setattr(jobs.pc, 'route_pending', lambda **kw: calls.append('pull') or {'errors':int(pull_error)})
+    monkeypatch.setattr(retrain_schedule, 'combine_and_decay', lambda *a, **kw: calls.append('rebuild'))
+    monkeypatch.setattr(prepared_training, 'queue_prepared', lambda *a, **kw: calls.append('preserve'))
+    jobs.tick.__wrapped__()
+    assert jobs.jobs()[0]['pull_run_id'] == '20261117T090000-scheduled'
+    assert calls == (['pull'] if pull_error else ['pull','rebuild','preserve'])
+    if pull_error:
+        assert jobs.latest()['state'] == 'failed'
+    else:
+        # Restart after completed pull/rebuild: resume preservation without pulling again.
+        jobs.tick.__wrapped__()
+        assert calls == ['pull','rebuild','preserve','preserve']
+
+
+def test_schedule_waits_for_existing_pull(world, monkeypatch):
+    jobs.submit(trigger='schedule')
+    monkeypatch.setattr(jobs.pc,'active_run',lambda:{'status':'running','run_id':'other'})
+    monkeypatch.setattr(jobs.pc,'route_pending',lambda **kw:pytest.fail('overlapping pull'))
+    monkeypatch.setattr(prepared_training,'queue_prepared',lambda *a,**kw:pytest.fail('training before pull finished'))
+    jobs.tick.__wrapped__()
+    assert jobs.latest()['stage'] == 'Waiting for the current data pull to finish'

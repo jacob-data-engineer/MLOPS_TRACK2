@@ -1,5 +1,4 @@
 """Development SQL scheduling without touching production EventBridge rules."""
-import datetime as dt
 import json
 import os
 
@@ -55,26 +54,4 @@ def tick():
             conn.commit()
         finally:
             conn.close()
-    config = pc.read_config()
-    if not pc.pull_in_use(config):
-        return
-    mode = config.get("mode", "off")
-    if mode == "arrival":
-        # SQL development polls the sources; the production S3 event rule
-        # continues targeting production only. One sweep per minute at most.
-        if pc.count_pending(config=config, limit=1) and pc.claim_once("sql_arrival", now.strftime("%Y-%m-%dT%H:%M")):
-            pc.enqueue_pull(config=config, added_by="arrival", note="SQL arrival poll")
-    elif mode == "schedule":
-        text = config.get("sql_next_pull_at")
-        if not text:
-            upcoming = pc.next_pull_times(config, count=1)
-            if upcoming:
-                pc.write_config({"sql_next_pull_at": upcoming[0]})
-            return
-        due = pc._parse_time(text)
-        if due <= now and pc.claim_once("sql_pull_schedule", text):
-            pc.enqueue_pull(config=config, added_by="schedule", note="SQL scheduled pull")
-            interval = dt.timedelta(days=pc.pull_interval_days(config))
-            while due <= now:
-                due += interval
-            pc.write_config({"sql_next_pull_at": due.isoformat()})
+    # Automatic pulls belong to the durable scheduled training job.

@@ -55,7 +55,7 @@ def test_the_rate_expression_is_still_the_last_resort():
     """Better than nothing when neither clock has a date -- but it is
     the fallback now, not the usual answer."""
     code = _flat(BAR)
-    assert "rule.next_run || rule.schedule" in code
+    assert 'retrain.next_runs?.[0] || ""' in code
 
 
 def test_an_unarmed_clock_contributes_no_date():
@@ -199,14 +199,14 @@ def test_the_next_run_is_rendered_in_singapore_time():
 
 def test_the_helper_carries_its_own_zone_so_it_cannot_be_mislabelled():
     code = _flat(BAR)
-    assert "? savedWhen(trainNext)" in code and "? savedWhen(pullNext)" in code
+    assert "savedWhen(trainNext)" in code and "pullNext" not in code
     assert "SGT`" not in code
 
 
 def test_the_input_is_still_labelled_sgt():
     """The field IS interpreted as Singapore time by the backend, so
     saying so beside the box is correct and has to stay."""
-    assert "SGT" in BAR.read_text(encoding="utf-8")
+    assert "At (Singapore time)" in BAR.read_text(encoding="utf-8")
 
 
 def test_the_models_page_shows_server_instants_in_the_same_zone():

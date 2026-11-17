@@ -930,8 +930,8 @@ export function TrainingForm({
               : "off"}
           </span>
           <span className="mt-0.5 block text-xs text-ink-muted">
-            Switched on and off by <strong>PULL, BUILD, QUEUE, TRAIN</strong> at
-            the top. The background worker preserves the already-prepared
+            Switched on and off by <strong>TRAINING SCHEDULE</strong> at
+            the top. The background worker pulls fresh data, rebuilds and preserves the
             decayed dataset, then queues the run and starts it, even when this page is closed.
             The cleanup option above applies
             to runs you add here with Add to Queue.
@@ -943,7 +943,7 @@ export function TrainingForm({
             <span className="mt-2 block text-xs text-ink-muted">
               {retrain.settings.enabled && retrain.next_runs?.length
                 ? `Next run ${localDate(retrain.next_runs[0])}.`
-                : "Not armed -- set “On a schedule” in PULL, BUILD, QUEUE, TRAIN at the top."}
+                : "Not armed -- set “On a schedule” in TRAINING SCHEDULE at the top."}
               {retrain.problems?.some((p) => p.level === "blocking") && (
                 <span className="mt-1 block text-critical">
                   {retrain.problems.filter((p) => p.level === "blocking")[0].text}

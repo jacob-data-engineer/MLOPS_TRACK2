@@ -6,15 +6,12 @@ import {
   ApiError,
   deleteTrack2SettingsFile,
   getTrack2PullControl,
-  getTrack2QueueAfterPull,
   getTrack2Retrain,
   newTrack2Settings,
   getTrack2SettingsFiles,
   loadTrack2SettingsFile,
   saveTrack2SettingsFile,
-  saveTrack2QueueAfterPull,
   saveTrack2Retrain,
-  setTrack2PullMode,
   type Track2SettingsFile,
   type Track2SettingsScope,
   type Track2TrainingTrigger,
@@ -59,29 +56,12 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
   const [clashed, setClashed] = useState(false);
   const [allowClash, setAllowClash] = useState(false);
 
-  // Both pull and training timing are controlled on Multi-Auto Training.
-  const [mode, setMode] = useState<"off" | "arrival" | "schedule">("off");
-  const [everyDays, setEveryDays] = useState(1);
-  const [timeOfDay, setTimeOfDay] = useState("");
-  // Where "every N days" counts from: today, or a chosen date whose grid
-  // the pulls then keep. Saved server-side with the rest of the schedule.
-  const [countFrom, setCountFrom] = useState<"today" | "date">("today");
-  const [startDate, setStartDate] = useState("");
-  const [pullDirty, setPullDirty] = useState(false);
-  const [pullNext, setPullNext] = useState("");
-  // The TRAINING schedule (Multi-Auto Training): after each pull, its own
-  // clock, or nothing.
-  const [trigger, setTrigger] = useState<Track2TrainingTrigger>("pull");
-  const [trainEvery, setTrainEvery] = useState(7);
+  const [trigger, setTrigger] = useState<Track2TrainingTrigger>("off");
+  const [trainEvery, setTrainEvery] = useState(1);
   const [trainAt, setTrainAt] = useState("02:00");
+  const [trainFrom, setTrainFrom] = useState("");
   const [trainNext, setTrainNext] = useState("");
   const [scheduleDirty, setScheduleDirty] = useState(false);
-  // The arrival trigger's guards: smallest batch worth a run, and the
-  // shortest gap between two runs. Training settings, so they sit with
-  // the training schedule.
-  const [minFiles, setMinFiles] = useState(1);
-  const [cooldown, setCooldown] = useState(0);
-
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
@@ -94,14 +74,11 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
    * dirty -- straight after Apply, when the server is the truth again. */
   async function refresh(force = false) {
     try {
-      const [out, status, after, retrain] = await Promise.all([
+      const [out, status, retrain] = await Promise.all([
         getTrack2SettingsFiles(),
         getTrack2PullControl().catch(() => null),
-        scope === "at" ? getTrack2QueueAfterPull().catch(() => null) : Promise.resolve(null),
         scope === "at" ? getTrack2Retrain().catch(() => null) : Promise.resolve(null),
       ]);
-      setMinFiles(Number(after?.settings.min_files ?? 1) || 1);
-      setCooldown(Number(after?.settings.cooldown_minutes ?? 0) || 0);
       // This tab's files ONLY. Files from before the split hold both pages
       // and are not offered on either (2026-10-29): a tab's list is that
       // tab's settings and nothing else.
@@ -121,21 +98,11 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
       setPicked((p) =>
         names.includes(p) ? p : names.includes(live) ? live : names[0] ?? "");
 
-      if (status && (force || !pullDirty)) {
-        const c = status.config;
-        setMode((c.mode as typeof mode) || "off");
-        setEveryDays(Number(c.schedule_every_days ?? 1) || 1);
-        setCountFrom(c.schedule_from === "date" ? "date" : "today");
-        setStartDate(String(c.schedule_start_date ?? ""));
-        setTimeOfDay(String(c.schedule_time ?? ""));
-        const rule = status.triggers?.schedule;
-        setPullNext(rule?.enabled ? (rule.next_run || rule.schedule || "") : "");
-
-      }
       if (retrain && (force || !scheduleDirty)) {
-        setTrigger(retrain.trigger ?? "pull");
+        setTrigger(retrain.trigger === "clock" ? "clock" : "off");
         setTrainEvery(Number(retrain.settings.every_days ?? 7) || 7);
         setTrainAt(String(retrain.settings.at ?? "02:00"));
+        setTrainFrom(String(retrain.settings.from_date ?? ""));
         setTrainNext(retrain.trigger === "clock" ? retrain.next_runs?.[0] || "" : "");
       }
     } catch {
@@ -165,7 +132,6 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
    * The label says which, with the ending the server will add. */
   const typed = name.trim();
   const canSave = Boolean(typed || currentExists);
-  const pullOn = mode === "schedule" || mode === "arrival";
 
   return (
     /* No sticky here: the page pins the whole band -- title and toolbar
@@ -368,264 +334,47 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
         </span>
       </div>
 
-      {/* Scheduling belongs to Multi-Auto Training. */}
-      {scope === "at" && <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-hairline pt-1.5 text-xs">
-            <span className="font-medium text-ink">PULL SCHEDULE</span>
-            <div className="flex overflow-hidden rounded-md border border-black/15">
-              {([
-                ["off", "Off"],
-                ["arrival", "When files arrive"],
-                ["schedule", "On a schedule"],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  disabled={!!busy}
-                  onClick={() => { setMode(value); setPullDirty(true); }}
-                  className={`px-2.5 py-1 font-medium disabled:opacity-40 ${
-                    mode === value
-                      ? "bg-accent text-white"
-                      : "bg-page text-ink-secondary hover:text-ink"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {mode === "schedule" && (
-              <>
-                <label className="flex items-center gap-1 text-ink-muted">
-                  every
-                  <input
-                    type="number"
-                    min={1}
-                    className="tabular w-12 rounded border border-black/15 bg-page px-1 py-1"
-                    value={everyDays}
-                    onChange={(e) => {
-                      setEveryDays(Number(e.target.value) || 1);
-                      setPullDirty(true);
-                    }}
-                  />
-                  day(s) at
-                  <input
-                    className="tabular w-16 rounded border border-black/15 bg-page px-1 py-1"
-                    placeholder="18:33"
-                    value={timeOfDay}
-                    onChange={(e) => { setTimeOfDay(e.target.value); setPullDirty(true); }}
-                  />
-                  SGT
-                </label>
-                {/* Where the N days count from. "Every N days" re-anchors on
-                    each Apply; "from this date" keeps the grid that starts on
-                    the chosen day, so the pull days do not move. */}
-                <div className="flex items-center gap-2 text-ink-muted">
-                  <label className="flex items-center gap-1">
-                    <input type="radio" name="pull-count-from" checked={countFrom === "today"}
-                      onChange={() => { setCountFrom("today"); setPullDirty(true); }} />
-                    every {everyDays} day(s)
-                  </label>
-                  <label className="flex items-center gap-1">
-                    <input type="radio" name="pull-count-from" checked={countFrom === "date"}
-                      onChange={() => { setCountFrom("date"); setPullDirty(true); }} />
-                    every {everyDays} day(s) from
-                  </label>
-                  <input
-                    type="date"
-                    aria-label="Count the schedule from this date"
-                    className="tabular rounded border border-black/15 bg-page px-1 py-0.5 disabled:opacity-40"
-                    value={startDate}
-                    disabled={countFrom !== "date"}
-                    onChange={(e) => { setStartDate(e.target.value); setPullDirty(true); }}
-                  />
-                </div>
-              </>
-            )}
-            {pullDirty ? (
-              <button
-                type="button"
-                disabled={!!busy}
-                onClick={() => void run("Apply pull", async () => {
-                  const res = await setTrack2PullMode(mode, {
-                    everyDays, timeOfDay: mode === "schedule" ? timeOfDay : "",
-                    from: countFrom, startDate,
-                  });
-                  setPullDirty(false);
-                  setNote(res.problems?.length
-                    ? res.problems.join(" ")
-                    : `Pull is now ${mode === "schedule"
-                        ? `every ${everyDays} day(s) at ${timeOfDay} SGT${
-                            countFrom === "date" && startDate ? ` from ${startDate}` : ""}` : mode}.`);
-                  await refresh();
-                })}
-                className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40"
-              >
-                {busy === "Apply pull" ? "Applying..." : "Apply pull schedule"}
+      {scope === "at" && <div className="mt-1.5 border-t border-hairline pt-1.5 text-xs">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-medium text-ink">TRAINING SCHEDULE</span>
+          <div className="flex overflow-hidden rounded-md border border-black/15">
+            {([["off", "Off"], ["clock", "On a schedule"]] as const).map(([value, label]) => (
+              <button key={value} type="button" disabled={!!busy}
+                onClick={() => { setTrigger(value); setScheduleDirty(true); }}
+                className={`px-2.5 py-1 font-medium ${trigger === value ? "bg-accent text-white" : "bg-page text-ink-secondary"}`}>
+                {label}
               </button>
-            ) : pullNext ? (
-              <span className="tabular text-ink-muted">
-                next pull: {pullNext.includes("T") ? savedWhen(pullNext) : pullNext}
-              </span>
-            ) : null}
-            {/* What the pull sets off is Multi-Auto Training's choice, so
-                say which it is rather than leave it to be guessed. */}
-            {!pullOn ? (
-              <span className="text-ink-muted">nothing is pulled on its own</span>
-            ) : trigger === "pull" ? (
-              <span className="text-ink-secondary">
-                each pull also builds, queues and trains &mdash; Multi-Auto
-                Training follows the pull
-              </span>
-            ) : (
-              <span className="text-ink-secondary">
-                pulls data only &mdash; training runs on Multi-Auto
-                Training&rsquo;s own schedule
-              </span>
-            )}
+            ))}
+          </div>
+          <span className="text-ink-muted">Pulls follow the training schedule.</span>
+        </div>
+        {trigger === "clock" && <div className="mt-2 flex flex-wrap items-center gap-4">
+          <label>Every <input type="number" min={1} aria-label="Training interval in days"
+            value={trainEvery} onChange={e => { setTrainEvery(Number(e.target.value) || 1); setScheduleDirty(true); }}
+            className="mx-2 w-14 rounded border border-hairline bg-page px-2 py-1" /> day(s)</label>
+          <label>At (Singapore time) <input type="time" aria-label="Training time"
+            value={trainAt} onChange={e => { setTrainAt(e.target.value); setScheduleDirty(true); }}
+            className="ml-2 rounded border border-hairline bg-page px-2 py-1" /></label>
+          <label>Start date (optional) <input type="date" aria-label="Training start date"
+            value={trainFrom} onChange={e => { setTrainFrom(e.target.value); setScheduleDirty(true); }}
+            className="ml-2 rounded border border-hairline bg-page px-2 py-1" /></label>
+        </div>}
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-ink-muted">
+          <span>{trigger === "clock"
+            ? "Pull fresh data, rebuild the decayed dataset, preserve it, then queue and train. Saving after the selected time schedules the next occurrence."
+            : "Automatic pulls and training are off."}</span>
+          {scheduleDirty ? <button type="button" disabled={!!busy}
+            onClick={() => void run("Apply", async () => {
+              await saveTrack2Retrain({ trigger, every_days: trainEvery, at: trainAt, from_date: trainFrom });
+              setScheduleDirty(false);
+              setNote("Training schedule saved. Pulls use this schedule too.");
+              await refresh(true);
+            })}
+            className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40">
+            {busy === "Apply" ? "Applying..." : "Apply schedule"}
+          </button> : trigger === "clock" && trainNext && <span>Next run: {savedWhen(trainNext)}</span>}
+        </div>
       </div>}
-      {scope === "at" && <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-hairline pt-1.5 text-xs">
-            <span className="font-medium text-ink">TRAINING SCHEDULE</span>
-            <div className="flex overflow-hidden rounded-md border border-black/15">
-              {([
-                ["off", "Off"],
-                ["pull", "After each data pull"],
-                ["clock", "On its own schedule"],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  disabled={!!busy}
-                  onClick={() => { setTrigger(value); setScheduleDirty(true); }}
-                  className={`px-2.5 py-1 font-medium disabled:opacity-40 ${
-                    trigger === value
-                      ? "bg-accent text-white"
-                      : "bg-page text-ink-secondary hover:text-ink"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {trigger === "clock" && (
-              <label className="flex items-center gap-1 text-ink-muted">
-                every
-                <input
-                  type="number"
-                  min={1}
-                  className="tabular w-12 rounded border border-black/15 bg-page px-1 py-1"
-                  value={trainEvery}
-                  onChange={(e) => {
-                    setTrainEvery(Number(e.target.value) || 1);
-                    setScheduleDirty(true);
-                  }}
-                />
-                day(s) at
-                <input
-                  className="tabular w-16 rounded border border-black/15 bg-page px-1 py-1"
-                  placeholder="02:00"
-                  value={trainAt}
-                  onChange={(e) => { setTrainAt(e.target.value); setScheduleDirty(true); }}
-                />
-                SGT
-              </label>
-            )}
-            {scheduleDirty ? (
-              <button
-                type="button"
-                disabled={!!busy}
-                onClick={() => void run("Apply", async () => {
-                  await saveTrack2Retrain(trigger === "clock"
-                    ? { trigger, every_days: trainEvery, at: trainAt }
-                    : { trigger });
-                  setScheduleDirty(false);
-                  setNote(trigger === "clock"
-                    ? `Training is now every ${trainEvery} day(s) at ${trainAt} SGT.`
-                    : trigger === "pull"
-                      ? "Training now follows each data pull."
-                      : "Nothing trains on its own now.");
-                  await refresh(true);
-                })}
-                className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40"
-              >
-                {busy === "Apply" ? "Applying..." : "Apply"}
-              </button>
-            ) : trigger === "clock" && trainNext ? (
-              <span className="tabular text-ink-muted">
-                next run: {trainNext.includes("T") ? savedWhen(trainNext) : trainNext}
-              </span>
-            ) : trigger === "pull" && pullOn && pullNext ? (
-              <span className="tabular text-ink-muted">
-                next pull: {pullNext.includes("T") ? savedWhen(pullNext) : pullNext}
-              </span>
-            ) : null}
-            {trigger === "off" && (
-              <span className="text-ink-muted">nothing trains on its own</span>
-            )}
-            {trigger === "clock" && (
-              <span className="text-ink-secondary">
-                builds, queues and trains on this clock, from the data as it stands
-              </span>
-            )}
-            {trigger === "pull" && !pullOn && (
-              <span className="text-critical">
-                The data pull is off, so nothing will train &mdash;
-                enable the pull schedule above, or pick &ldquo;On its own schedule&rdquo;
-              </span>
-            )}
-            {trigger === "pull" && mode === "schedule" && (
-              <span className="text-ink-secondary">
-                builds, queues and trains after each scheduled pull
-              </span>
-            )}
-            {/* Arrival fires once per upload burst. Never offered without
-                its two guards: on 6 October three arrival pulls fired in ten
-                minutes, one moving a single file, and each would have been a
-                GPU run. Saved on blur. */}
-            {trigger === "pull" && mode === "arrival" && (
-              <>
-                <label className="flex items-center gap-1 text-ink-muted">
-                  trains when a pull brings at least
-                  <input
-                    type="number"
-                    min={1}
-                    key={`min-${minFiles}`}
-                    defaultValue={minFiles}
-                    disabled={!!busy}
-                    className="tabular w-16 rounded border border-black/15 bg-page px-1 py-1"
-                    onBlur={(e) => {
-                      const value = Math.max(1, Number(e.target.value) || 1);
-                      void run("Saving", async () => {
-                        await saveTrack2QueueAfterPull({ min_files: value });
-                        setMinFiles(value);
-                      });
-                    }}
-                  />
-                  file(s), at most one run every
-                  <input
-                    type="number"
-                    min={0}
-                    key={`cool-${cooldown}`}
-                    defaultValue={cooldown}
-                    disabled={!!busy}
-                    className="tabular w-14 rounded border border-black/15 bg-page px-1 py-1"
-                    onBlur={(e) => {
-                      const value = Math.max(0, Number(e.target.value) || 0);
-                      void run("Saving", async () => {
-                        await saveTrack2QueueAfterPull({ cooldown_minutes: value });
-                        setCooldown(value);
-                      });
-                    }}
-                  />
-                  min
-                </label>
-                {minFiles <= 1 && cooldown === 0 && (
-                  <span className="text-critical">
-                    every upload will start a GPU run -- set a batch size and a wait
-                  </span>
-                )}
-              </>
-            )}
-      </div>}
-
       {/* ---- THIRD ROW: what the chain is doing right now ---- */}
       {scope === "at" && <Track2ChainStatusBar />}
       {/* Training spend belongs with the training schedule. */}

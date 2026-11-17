@@ -20,14 +20,13 @@ def test_the_retention_section_is_gone():
 def test_the_strip_says_what_a_scheduled_pull_does():
     # Since 2026-10-29 the TRAINING schedule says it, on Multi-Auto
     # Training's strip, when training follows the pull.
-    assert "builds, queues and trains after each scheduled pull" in STRIP
+    assert "Pull fresh data, rebuild the decayed dataset, preserve it, then queue and train." in STRIP
 
 
-def test_arrival_is_never_offered_without_its_guards():
-    """CLAUDE.md: arrival needs both guards before it is ticked."""
-    assert "saveTrack2QueueAfterPull({ min_files: value })" in STRIP
-    assert "saveTrack2QueueAfterPull({ cooldown_minutes: value })" in STRIP
-    assert "every upload will start a GPU run" in STRIP
+def test_independent_arrival_and_pull_schedules_are_not_offered():
+    assert "When files arrive" not in STRIP
+    assert "PULL SCHEDULE" not in STRIP
+    assert "After each data pull" not in STRIP
 
 
 def test_no_step_4b_tick_is_pointed_at_any_more():

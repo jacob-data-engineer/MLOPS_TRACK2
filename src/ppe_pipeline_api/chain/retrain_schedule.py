@@ -213,6 +213,15 @@ def settings(config: dict | None = None) -> dict:
         if isinstance(given, dict):
             plan["hyperparams"] = {str(k): v for k, v in given.items()
                                    if str(v).strip() != ""}
+    from .. import record_store
+    if record_store.enabled():
+        plan['enabled'] = training_trigger(config) == 'clock'
+        plan['follow_pull'] = False
+        stored = config.get('retrain_schedule') or {}
+        if stored.get('trigger', 'pull' if stored.get('follow_pull', True) else '') == 'pull' and config.get('mode') == 'schedule':
+            plan.update(every_days=config.get('schedule_every_days') or 1,
+                        at=config.get('schedule_time') or plan['at'],
+                        from_date=(config.get('schedule_start_date') or '') if config.get('schedule_from') == 'date' else '')
     return plan
 
 
@@ -1506,6 +1515,13 @@ def training_trigger(config: dict | None = None) -> str:
     config = config if config is not None else pc.read_config()
     stored = config.get("retrain_schedule") or {}
     trigger = str(stored.get("trigger") or "").strip().lower()
+    from .. import record_store
+    if record_store.enabled():
+        if trigger == 'clock' or (not trigger and stored.get('enabled') and stored.get('follow_pull') is False):
+            return 'clock'
+        if trigger == 'off':
+            return 'off'
+        return 'clock' if config.get('mode') == 'schedule' else 'off'
     if trigger in TRIGGERS:
         return trigger
     if stored.get("follow_pull", DEFAULTS["follow_pull"]):

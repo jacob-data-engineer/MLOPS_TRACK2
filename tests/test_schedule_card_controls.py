@@ -127,7 +127,7 @@ def test_an_unarmed_schedule_says_where_to_arm_it():
     somebody to find it."""
     code = _flat()
     assert "Not armed" in code
-    assert "PULL, BUILD, QUEUE, TRAIN at the top." in code
+    assert "TRAINING SCHEDULE at the top." in code
 
 
 def test_a_blocking_problem_is_shown_with_the_control():
