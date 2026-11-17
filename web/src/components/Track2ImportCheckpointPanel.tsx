@@ -21,6 +21,7 @@ import {
   type Track2MetricsRow,
 } from "../lib/api";
 import { groupNameFor, slugFromName, slugProblem } from "../lib/slug";
+import { preparationClasses } from "../lib/preparationClasses";
 import { Card } from "./Card";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
@@ -96,11 +97,13 @@ export function Track2ImportCheckpointPanel({ onImported,
   // derivations would file the same typed name under two different
   // registry groups depending on which card created it.
   const [newLabel, setNewLabel] = useState("");
-  // Either the Class comes from the names baked into the .pt, or it is
-  // defined by hand in "Define a new Class" below. Exclusive, because
-  // they are two answers to one question -- what does this model detect
-  // -- and the registry only records one of them.
+  // Choose checkpoint classes, the loaded preparation's classes, or a
+  // manual definition below. Only one source defines the Model Name.
   const [useFileClasses, setUseFileClasses] = useState(true);
+  const [usePreparationClasses, setUsePreparationClasses] = useState(false);
+  const [preparationName, setPreparationName] = useState("");
+  const [preparedClasses, setPreparedClasses] = useState<Record<string, string>>({});
+  const useSelectedClasses = useFileClasses || usePreparationClasses;
   // See the matching block in Track2DatasetAssemblePanel. Only the
   // STANDING choices are saved: a chosen file, an inspection and a
   // registration result belong to one action, and restoring them would
@@ -146,6 +149,9 @@ export function Track2ImportCheckpointPanel({ onImported,
     getTrack2PullControl()
       .then((status) => {
         const saved = status.config.import_checkpoint || {};
+        const preparation = status.config.training_data_preparation;
+        setPreparationName(preparation?.name || "");
+        setPreparedClasses(preparationClasses(preparation?.config));
         if (saved.architecture) setArchitecture(saved.architecture);
         if (saved.source === "upload" || saved.source === "bucket"
             || saved.source === "library") setSource(saved.source);
@@ -156,6 +162,11 @@ export function Track2ImportCheckpointPanel({ onImported,
         if (saved.description) setDescription(saved.description);
         if (typeof saved.use_file_classes === "boolean") {
           setUseFileClasses(saved.use_file_classes);
+        }
+        if (saved.use_preparation_classes) {
+          setUsePreparationClasses(true);
+          setUseFileClasses(false);
+          setDetectorSlug("");
         }
 
         // Read the checkpoint again rather than storing what it said.
@@ -197,6 +208,7 @@ export function Track2ImportCheckpointPanel({ onImported,
         import_checkpoint: {
           architecture, source, bucket_key: bucketKey, prefix,
           detector_slug: detectorSlug, use_file_classes: useFileClasses,
+          use_preparation_classes: usePreparationClasses,
           // What was read and what was ticked. The classes are a CHOICE,
           // not a result: "these four of the eighty" is the whole point
           // of the picker, and losing it on reload meant making it again.
@@ -209,7 +221,7 @@ export function Track2ImportCheckpointPanel({ onImported,
     }, 600);
     return () => clearTimeout(timer);
   }, [settingsRead, architecture, source, bucketKey, prefix, detectorSlug,
-      useFileClasses, inspection, pickedClasses, newLabel, description]);
+      useFileClasses, usePreparationClasses, inspection, pickedClasses, newLabel, description]);
 
   useEffect(() => {
     loadDetectors();
@@ -277,7 +289,7 @@ export function Track2ImportCheckpointPanel({ onImported,
   // checkpoint itself and a second button below doing the same thing
   // would be two ways to perform one action, which is how they drift.
   const pendingImport: Track2PendingImport | null =
-    inspection && !useFileClasses
+    inspection && !useSelectedClasses
       ? {
           key: inspection.key,
           architecture,
@@ -369,7 +381,7 @@ export function Track2ImportCheckpointPanel({ onImported,
   // while the registry says it detects two. That is a seed, and the card
   // says so below. The head is rebuilt on the first training run.
   const allFileClasses = inspection?.classes ?? {};
-  const found: Record<string, string> = Object.fromEntries(
+  const found: Record<string, string> = usePreparationClasses ? preparedClasses : Object.fromEntries(
     Object.keys(allFileClasses)
       .filter((index) => pickedClasses.includes(index))
       .sort((a, b) => Number(a) - Number(b))
@@ -404,7 +416,9 @@ export function Track2ImportCheckpointPanel({ onImported,
   // agree by construction. It was a seed only while the file was
   // registered whole and the disagreement left for a training run to fix.
   const seedForChosen = Boolean(
-    chosenDetector && classSignature(chosenDetector.classes) !== foundSignature);
+    usePreparationClasses
+      ? inspection && classSignature(inspection.classes) !== foundSignature
+      : chosenDetector && classSignature(chosenDetector.classes) !== foundSignature);
 
   async function handleRead() {
     if (!architecture) return;
@@ -461,6 +475,7 @@ export function Track2ImportCheckpointPanel({ onImported,
    * only cue was a line of text, which read as a broken button. */
   async function handleRegister() {
     if (!inspection) return;
+    if (usePreparationClasses && Object.keys(preparedClasses).length === 0) return;
     if (!detectorSlug && !newSlug) return;
     setError("");
     try {
@@ -479,9 +494,8 @@ export function Track2ImportCheckpointPanel({ onImported,
       setBusy("Registering...");
       const registered = await registerTrack2BaseModel(
         inspection.key, slug, architecture, description,
-        // Only when the chosen Class really does declare something else.
-        // A new Class is built FROM this file's classes, so it never
-        // mismatches and must not be waved through as though it might.
+        // Preparation classes may differ from the checkpoint. Preserve
+        // that distinction by registering a mismatch as a training seed.
         seedForChosen,
         // The ORIGINAL indices, so the server can cut the head down to
         // them. A strict subset then detects exactly what the Model Name
@@ -845,18 +859,18 @@ export function Track2ImportCheckpointPanel({ onImported,
               </p>
             )}
 
-            {/* The either/or. Ticked, the Model Name is these names; unticked,
-                "Define a new Model Name" below comes alive and you type them
-                yourself. Two answers to one question -- what does this
-                model detect -- and the registry records only one, so
-                both being live at once is the state that produces a
-                version filed under a taxonomy nobody chose. */}
+            {/* Class sources are mutually exclusive. Both off enables
+                the manual Model Name definition below. */}
             <label className="mt-2 flex items-start gap-2 border-t border-hairline pt-2 text-xs text-ink-secondary">
               <input
                 type="checkbox"
                 className="mt-0.5 shrink-0"
                 checked={useFileClasses}
-                onChange={(e) => setUseFileClasses(e.target.checked)}
+                onChange={(e) => {
+                  setUseFileClasses(e.target.checked);
+                  if (e.target.checked) setUsePreparationClasses(false);
+                  setDetectorSlug("");
+                }}
               />
               <span>
                 <span className="font-medium text-ink">
@@ -865,10 +879,37 @@ export function Track2ImportCheckpointPanel({ onImported,
                 <span className="ml-1.5 text-ink-muted">
                   {useFileClasses
                     ? "-- the Model Name is named below, and detects exactly these."
+                    : usePreparationClasses ? "-- using the loaded preparation classes instead."
                     : "-- off, so define the Model Name yourself in Define a new Model Name below."}
                 </span>
               </span>
             </label>
+            <label className="mt-2 flex items-start gap-2 text-xs text-ink-secondary">
+              <input type="checkbox" className="mt-0.5 shrink-0"
+                checked={usePreparationClasses}
+                disabled={!preparationName || Object.keys(preparedClasses).length === 0}
+                onChange={(e) => {
+                  setUsePreparationClasses(e.target.checked);
+                  if (e.target.checked) setUseFileClasses(false);
+                  setDetectorSlug("");
+                }} />
+              <span>Use classes from the loaded Data Preparation file
+                <span className="ml-1.5 text-ink-muted">{preparationName
+                  ? `(${preparationName})` : "— load a Data Preparation file above first."}</span>
+              </span>
+            </label>
+            {preparationName && Object.keys(preparedClasses).length === 0 && (
+              <p className="mt-1 text-xs text-critical">This preparation file needs a valid, non-empty Label classes list with unique names.</p>
+            )}
+            {usePreparationClasses && Object.keys(preparedClasses).length > 0 && (
+              <div className="mt-2 rounded border border-hairline p-2 text-xs">
+                <p className="font-medium">Model classes from {preparationName}</p>
+                <ol className="mt-1 tabular">{Object.entries(preparedClasses).map(([id, name]) =>
+                  <li key={id}>{id}: {name}</li>)}</ol>
+                <p className="mt-1 text-ink-muted">Uses every saved dataset class in index order. Model IDs start at 0.</p>
+                {seedForChosen && <p className="mt-1 text-ink-secondary">The checkpoint has different classes. It will register as a training seed, Pending approval, and needs training on these classes before use.</p>}
+              </div>
+            )}
           </div>
 
           {/* --- step 2: where it goes ---------------------------------- */}
@@ -924,7 +965,7 @@ export function Track2ImportCheckpointPanel({ onImported,
             </div>
           )}
 
-          {useFileClasses && !detectorSlug ? (
+          {useSelectedClasses && !detectorSlug ? (
             // Nothing matches, so there is nowhere to put it. Building
             // the Class from the file's own classes is the only route
             // that cannot produce a mismatch.
@@ -983,14 +1024,14 @@ export function Track2ImportCheckpointPanel({ onImported,
             />
           </label>
 
-          {!lockedByPick && !detectorSlug && (useFileClasses ? !newSlug : true) && (() => {
+          {!lockedByPick && !detectorSlug && (useSelectedClasses ? !newSlug : true) && (() => {
             // Whether any Model Name exists at all. The message used to
             // say "define one and save it" whatever the answer was, so
             // somebody with six already defined was told to go and make
             // another. What is actually missing in that case is the
             // CHOICE above, not the Model Name.
             const defined = detectors.filter((d) => !d.builtin);
-            if (useFileClasses) {
+            if (useSelectedClasses) {
               return (
                 <p className="mt-2 text-xs text-critical">
                   Name the model above -- every registered version belongs to a
@@ -1051,8 +1092,9 @@ export function Track2ImportCheckpointPanel({ onImported,
                 // the button too, so a dead button has a reason on
                 // screen rather than only in a tooltip nobody hovers.
                 || (useFileClasses && !!inspection && pickedClasses.length === 0)
+                || (usePreparationClasses && Object.keys(preparedClasses).length === 0)
                 || (!detectorSlug
-                  && (!useFileClasses || !newSlug || !!newLabelProblem))}
+                  && (!useSelectedClasses || !newSlug || !!newLabelProblem))}
               onClick={handleRegister}
               className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
             >

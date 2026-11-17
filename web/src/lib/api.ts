@@ -2136,6 +2136,7 @@ export interface Track2PullConfig {
     prefix?: string;
     detector_slug?: string;
     use_file_classes?: boolean;
+    use_preparation_classes?: boolean;
     /** The key the last successful read used. The card re-reads it on
      * load rather than storing what it said -- a .pt's classes are a
      * property of the file, so a re-read cannot be stale, and the card
