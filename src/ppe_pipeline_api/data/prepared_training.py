@@ -37,6 +37,7 @@ def verify_members(version):
         raise ValueError('The SQL dataset file list is incomplete; training has not been queued.')
 
 
+@cs.decay_locked
 def freeze(config: dict, *, trigger='manual', target_classes=None) -> dict:
     """No combine, golden rebuild, retention selection or writes to the decay folder.
 
@@ -152,6 +153,7 @@ def freeze(config: dict, *, trigger='manual', target_classes=None) -> dict:
         ('training_data_preparation', 'dataset_assemble', 'central_store', 'retention', 'golden_set', 'auto_training')}
     dv.mark(version['version_id'], strict=True, immutable_files=True, prepared_decay=f's3://{bucket}/{decay}',
             preparation=catalog_metadata.clean(preparation), preparation_marker=marker,
+            preparation_marker_etag=marker_obj['ETag'],
             file_provenance=provenance, source_yaml=built['text'], frozen_yaml=frozen_text,
             dataset_classes=dataset_names, training_classes=names)
     return dv.get(version['version_id'])
@@ -192,3 +194,51 @@ def repeat_entry(run_id: str) -> dict:
     if not template:
         raise ValueError('This older run has no complete replay recipe. Queue a new run from the prepared dataset first.')
     return copy.deepcopy(template)
+
+
+@cs.decay_locked
+def cleanup_finished():
+    """Delete only the opted-in run's unchanged working copy, never its snapshot."""
+    from botocore.exceptions import ClientError
+    from .catalog_view import _rows
+    if not record_store.enabled():
+        return ''
+    rows = _rows("SELECT DISTINCT v.id FROM training_runs r JOIN dataset_versions v ON v.id=r.version_id "
+                 "WHERE r.status IN ('Succeeded','Failed','Stopped') AND r.execution_arn IS NOT NULL "
+                 "AND r.record #>> '{reproducibility,entry,delete_decay_after_run}' = 'true' "
+                 "AND NOT (v.record ? 'decay_cleanup') LIMIT 50")
+    messages = []
+    for row in rows:
+        version = dv.get(row['id'])
+        if not version.get('immutable_files'):
+            continue
+        bucket, store, decay = cs.location(version['preparation'])
+        if version.get('prepared_decay') != f's3://{bucket}/{decay}' or decay == store:
+            raise ValueError('The recorded decay location does not match its preparation settings.')
+        marker_key = f'{decay}/{cs.MARKER}'
+        try:
+            current = storage.s3.get_object(Bucket=bucket, Key=marker_key)
+        except ClientError as exc:
+            if exc.response['Error']['Code'] not in ('NoSuchKey', '404', 'NotFound'):
+                raise
+            state = 'already absent'
+        else:
+            marker = json.loads(current['Body'].read())
+            if (marker != version.get('preparation_marker') or marker.get('status') != 'built'
+                    or (version.get('preparation_marker_etag') and current['ETag'] != version['preparation_marker_etag'])):
+                state = 'skipped: preparation has changed'
+            else:
+                verify_members(version)
+                keys = [k for k in _objects(bucket, decay) if k != marker_key]
+                for start in range(0, len(keys), 1000):
+                    result = storage.s3.delete_objects(Bucket=bucket, Delete={
+                        'Objects': [{'Key': k} for k in keys[start:start + 1000]], 'Quiet': True})
+                    if result.get('Errors'):
+                        raise RuntimeError('Some decayed files could not be deleted; cleanup will retry.')
+                storage.s3.delete_object(Bucket=bucket, Key=marker_key)
+                state = f'deleted {len(keys)} working files'
+        dv.mark(version['version_id'], strict=True, decay_cleanup={
+            'state': state, 'at': dt.datetime.now(dt.timezone.utc).isoformat(),
+            'uri': version['prepared_decay']})
+        messages.append(f"{version['version_id']}: {state}")
+    return '; '.join(messages)

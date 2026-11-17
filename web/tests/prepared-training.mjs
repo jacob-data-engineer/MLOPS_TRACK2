@@ -49,12 +49,15 @@ test('training queues the prepared dataset with the selected parameters and no s
     await page.getByText(/already-prepared decayed dataset/).waitFor();
     assert.equal(await page.getByRole('radio').count(), 0);
     assert.equal(await page.getByText('Pick a snapshot', {exact:true}).count(), 0);
+    const cleanup = page.getByRole('checkbox', {name: /Delete the decayed dataset after this run/});
+    assert.equal(await cleanup.isChecked(), false);
+    await cleanup.check();
     await page.getByRole('button',{name:'Add to Queue',exact:true}).click();
     await page.waitForFunction(()=>document.body.dataset.submitted==='yes');
     assert.equal(queued.length,1);
     assert.deepEqual(queued[0], {submit:'enqueue',prepared_only:true,training:{epochs:25,img_size:640,batch:8,
       seed:42,patience:10,hyperparams:{lr0:0.001},detector_slug:'helmet',architecture:'yolo11s',notes:'repeatable test',
-      base_version:'arn:aws:sagemaker:test:model-package/helmet/2'}});
+      base_version:'arn:aws:sagemaker:test:model-package/helmet/2',delete_decay_after_run:true}});
     assert.deepEqual(errors,[]);
   } finally {
     await browser?.close(); await server?.close();

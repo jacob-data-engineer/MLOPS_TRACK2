@@ -34,10 +34,30 @@ import datetime as _dt
 import json
 import re
 import threading
+import contextlib
+import functools
 from concurrent.futures import ThreadPoolExecutor
 
 from .. import pull_control as pc
-from .. import storage
+from .. import storage, record_store
+
+
+def decay_locked(fn):
+    """Serialize preparation, preservation and cleanup in the SQL app."""
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not record_store.enabled():
+            return fn(*args, **kwargs)
+        with contextlib.closing(record_store.connection()) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_try_advisory_lock(hashtextextended(current_schema() || ':decay-files',0))")
+            if not cur.fetchone()[0]:
+                raise ValueError('The decayed dataset is being prepared or preserved. Try again when it finishes.')
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                cur.execute("SELECT pg_advisory_unlock(hashtextextended(current_schema() || ':decay-files',0))")
+    return wrapped
 from . import central_store
 from . import retained_lists
 
@@ -283,6 +303,7 @@ def delete_decayed() -> int:
     return len(keys)
 
 
+@decay_locked
 def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
                     golden_split: bool = True, slugs: dict | None = None,
                     for_run: bool = False, stop=None, progress=None) -> dict:

@@ -10,11 +10,13 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     config = config if config is not None else pc.read_config()
     plan = rs.settings(config)
     allowed = {'epochs', 'img_size', 'batch', 'seed', 'patience', 'hyperparams',
-               'detector_slug', 'architecture', 'notes', 'base_version'}
+               'detector_slug', 'architecture', 'notes', 'base_version', 'delete_decay_after_run'}
     if overrides:
         if set(overrides) - allowed:
             raise ValueError('Unsupported training setting.')
         plan.update(overrides)
+    if not isinstance(plan.get('delete_decay_after_run', False), bool):
+        raise ValueError('Delete decayed dataset must be on or off.')
     if submit not in ('enqueue', 'queue', 'start'):
         raise ValueError('Choose enqueue, queue or start.')
     plan['hyperparams'] = training.normalize_hyperparams(plan.get('hyperparams'))
@@ -59,6 +61,7 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
         'notes': str(plan.get('notes') or ''), 'queued_by': trigger,
         'added_at': dt.datetime.now(dt.timezone.utc).isoformat(),
         'reproducible': True, 'detector_definition': detector,
+        'delete_decay_after_run': plan.get('delete_decay_after_run', False),
         'base_provenance': {**base, 'package_arn': source_arn, 'source': source},
         'drop_undeclared_classes': False}
     # The full recipe is committed to SQL before making the entry runnable.

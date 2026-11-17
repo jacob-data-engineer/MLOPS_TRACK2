@@ -1879,6 +1879,17 @@ def cleanup_decayed() -> str:
 
     from .. import data, training
 
+    # SQL runs preserve their input files before queueing; cleanup follows
+    # the recorded per-run choice and terminal execution status.
+    from .. import record_store
+    if record_store.enabled():
+        if training.current_training_reason():
+            return ''
+        waiting = training.queue_snapshot()
+        if waiting.get('pending') or waiting.get('running'):
+            return ''
+        return data.cleanup_finished_decay()
+
     if not combined_enabled():
         return ""
     marker = data.decay_marker()

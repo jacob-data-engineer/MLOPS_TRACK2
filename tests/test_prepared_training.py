@@ -16,6 +16,14 @@ from test_review_f1_f4_f5_dataset_contract import FakeS3
 
 
 class ConditionalS3(FakeS3):
+    def delete_objects(self, Bucket, Delete):
+        for obj in Delete['Objects']:
+            self.files.pop((Bucket, obj['Key']), None)
+        return {}
+
+    def delete_object(self, Bucket, Key):
+        self.files.pop((Bucket, Key), None)
+
     def head_object(self, Bucket, Key):
         body = self.files[Bucket, Key]
         return {'ETag': '"' + hashlib.sha256(body).hexdigest() + '"', 'ContentLength': len(body)}
@@ -238,3 +246,61 @@ def test_queue_sql_failure_does_not_leave_runnable_entry(monkeypatch):
     with pytest.raises(RuntimeError, match='SQL unavailable'):
         t.queue_add({'id': 'new', 'reproducible': True})
     assert t._training_queue == []
+
+
+@pytest.mark.parametrize('rebuilt', [False, True])
+def test_cleanup_only_deletes_the_original_working_copy(prepared, monkeypatch, rebuilt):
+    from ppe_pipeline_api.data import catalog_view
+    config, s3, _ = prepared
+    version = pt.freeze(config)
+    preserved = {k: v for k, v in s3.files.items() if k[1].startswith(('_training_inputs/', '_datasets/'))}
+    s3.files['home', 'combined/keep.jpg'] = b'central store'
+    if rebuilt:
+        s3.files['home', 'combined_decay/_decay.json'] = b'{"status":"built","built_at":"new"}'
+    def rows(sql, params=()):
+        assert "r.status IN ('Succeeded','Failed','Stopped')" in sql
+        assert "delete_decay_after_run}' = 'true'" in sql
+        assert "r.execution_arn IS NOT NULL" in sql
+        return [{'id': version['version_id']}]
+    monkeypatch.setattr(catalog_view, '_rows', rows)
+    monkeypatch.setattr(pt.record_store, 'enabled', lambda: True)
+    result = pt.cleanup_finished.__wrapped__()
+    assert ('skipped' if rebuilt else 'deleted') in result
+    assert all(s3.files[k] == v for k, v in preserved.items())
+    assert s3.files['home', 'combined/keep.jpg'] == b'central store'
+    assert any(k.startswith('combined_decay/') for b, k in s3.files) == rebuilt
+    assert dv.get(version['version_id'])['decay_cleanup']['state'] in result
+
+
+def test_cleanup_delete_failure_keeps_marker_for_retry(prepared, monkeypatch):
+    from ppe_pipeline_api.data import catalog_view
+    config, s3, _ = prepared
+    version = pt.freeze(config)
+    monkeypatch.setattr(catalog_view, '_rows', lambda *a: [{'id': version['version_id']}])
+    monkeypatch.setattr(pt.record_store, 'enabled', lambda: True)
+    monkeypatch.setattr(s3, 'delete_objects', lambda **kw: {'Errors': [{'Code': 'AccessDenied'}]})
+    with pytest.raises(RuntimeError, match='cleanup will retry'):
+        pt.cleanup_finished.__wrapped__()
+    assert ('home', 'combined_decay/_decay.json') in s3.files
+    assert 'decay_cleanup' not in dv.get(version['version_id'])
+
+
+def test_cleanup_does_nothing_without_completed_opted_in_runs(prepared, monkeypatch):
+    from ppe_pipeline_api.data import catalog_view
+    _, s3, _ = prepared
+    original = dict(s3.files)
+    monkeypatch.setattr(catalog_view, '_rows', lambda *a: [])
+    monkeypatch.setattr(pt.record_store, 'enabled', lambda: True)
+    assert pt.cleanup_finished.__wrapped__() == ''
+    assert s3.files == original
+
+
+def test_cleanup_cannot_overlap_preparation_or_preservation(monkeypatch):
+    from ppe_pipeline_api.data import combined_store as cs
+    monkeypatch.setattr(cs.record_store, 'enabled', lambda: True)
+    cursor = SimpleNamespace(execute=lambda *a: None, fetchone=lambda: [False])
+    monkeypatch.setattr(cs.record_store, 'connection', lambda: SimpleNamespace(cursor=lambda: cursor, close=lambda: None))
+    called = []
+    with pytest.raises(ValueError, match='being prepared or preserved'):
+        cs.decay_locked(lambda: called.append(True))()
+    assert not called

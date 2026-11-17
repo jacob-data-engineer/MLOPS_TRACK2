@@ -396,6 +396,7 @@ export function TrainingForm({
 }) {
   const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
+  const [deleteDecayAfterRun, setDeleteDecayAfterRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [datasetClasses, setDatasetClasses] = useState<Track2DatasetClasses | null>(null);
   // Saved dataset taxonomy is checked against the selected model.
@@ -692,6 +693,7 @@ export function TrainingForm({
         epochs, img_size: imgSize, batch, seed, patience, hyperparams,
         detector_slug: detectorSlug, architecture, notes,
         base_version: basePackageArn,
+        delete_decay_after_run: deleteDecayAfterRun,
       });
       const failed = got.steps.find((step) => !step.ok);
       if (!got.ok || failed) {
@@ -839,6 +841,17 @@ export function TrainingForm({
         )}
       </div>
 
+      <label className="mt-3 flex items-start gap-2 text-xs text-ink">
+        <input type="checkbox" checked={deleteDecayAfterRun} disabled={busy}
+          onChange={(event) => setDeleteDecayAfterRun(event.target.checked)} />
+        <span>Delete the decayed dataset after this run
+          <span className="mt-1 block text-ink-muted">
+            Removes the working decay copy once training finishes and the queue is clear.
+            Preserved run data stays available for repeat runs and exports.
+            Prepare a new decayed dataset before adding another new run.
+          </span>
+        </span>
+      </label>
       <div className="mt-3 flex gap-2">
         <button
           type="button"
@@ -878,11 +891,9 @@ export function TrainingForm({
           </span>
           <span className="mt-0.5 block text-xs text-ink-muted">
             Switched on and off by <strong>PULL, BUILD, QUEUE, TRAIN</strong> at
-            the top. Each automatic run builds the data.yaml from the ticked
-            sources -- the week folders (after the retention policy), the golden
-            set and the Assemble folders, each when its card is ticked -- then
-            queues the run and starts it. The Training data radio above is for
-            runs you add here by hand.
+            the top. Runs using the combined store preserve the already-prepared
+            decayed dataset before queueing. The cleanup option above applies
+            to runs you add here with Add to Queue.
           </span>
           {/* When the training clock is in charge -- Pull Control is not
               a source, so no sweep runs -- its next slot, from the same
