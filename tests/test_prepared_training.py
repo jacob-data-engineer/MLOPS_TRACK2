@@ -142,6 +142,7 @@ def test_repeated_pipeline_reuses_inputs_and_pins_version():
 
 def test_first_run_pins_mutable_evaluation_dependencies(monkeypatch):
     from ppe_pipeline_api.training import reproducibility as rp
+    monkeypatch.setenv('APP_BUILD_TAG', 'deployed-build')
     original = {'Parameters': [{'Name': 'RunId'}], 'Steps': [{'Arguments': {
         'AppSpecification': {'ImageUri': '123.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train:latest'},
         'ProcessingInputs': [{'S3Input': {'S3Uri': 's3://b/code/evaluate.py'}}]}}]}
@@ -155,6 +156,7 @@ def test_first_run_pins_mutable_evaluation_dependencies(monkeypatch):
         update_pipeline=lambda **kw: (updated.append(kw) or {'PipelineVersionId': 5}))
     pipeline, params = rp.pin_pipeline(sm, 'training', None, {'RunId': 'new'})
     assert pipeline['version_id'] == 5
+    assert pipeline['app_build'] == 'deployed-build'
     assert '@sha256:abc' in pipeline['definition']
     assert 's3://b/_training_inputs/code/evaluate.py' in pipeline['definition']
     assert len(pipeline['dependencies']) == 2 and len(updated) == 1

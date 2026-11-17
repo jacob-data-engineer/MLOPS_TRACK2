@@ -72,6 +72,6 @@ def pin_pipeline(sm, name, saved, current):
     if unknown or missing:
         raise ValueError(f'Pipeline inputs do not match version {version}: unknown {sorted(unknown)}, missing {sorted(missing)}.')
     return {'name': name, 'version_id': version, 'definition': definition,
-            'app_build': saved.get('app_build') or os.environ.get('BUILD_TAG', ''),
+            'app_build': saved.get('app_build') or os.environ.get('APP_BUILD_TAG') or os.environ.get('BUILD_TAG', ''),
             'dependencies': dependencies,
             'recorded_parameters': parameters}, parameters
