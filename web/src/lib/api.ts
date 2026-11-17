@@ -296,7 +296,8 @@ export interface Track2TrainingProgress {
   status: string;
   start_time: string | null;
   steps: Record<"TrainYolo" | "EvaluateYolo" | "RegisterYoloModel", string>;
-  epoch_progress: { current: number; total: number } | null;
+  epoch_progress: { current: number; total: number; completed?: boolean } | null;
+  image_progress?: { current: number; total: number; per_epoch: number } | null;
   download_progress: { current: number; total: number } | null;
 }
 

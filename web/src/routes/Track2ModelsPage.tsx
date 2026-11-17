@@ -8,6 +8,7 @@ import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Track2DatasetVersionsPanel } from "../components/Track2DatasetVersionsPanel";
 import { ProgressBar } from "../components/ProgressBar";
+import { Track2TrainingRunProgress } from "../components/Track2TrainingRunProgress";
 import { StatTile } from "../components/StatTile";
 import { Track2DatasetAssemblePanel } from "../components/Track2DatasetAssemblePanel";
 import { Track2DetectorsPanel } from "../components/Track2DetectorsPanel";
@@ -271,29 +272,7 @@ function QueueEntryBlock({
             </span>
           )}
         </div>
-        {running && progress?.epoch_progress && (
-          <div className="mt-2">
-            <p className="tabular mb-1 text-xs text-ink-muted">
-              Epoch {progress.epoch_progress.current} / {progress.epoch_progress.total}
-              {/* The number actually being asked for -- "how much longer"
-                  is not a subtraction the reader should have to do. Only
-                  while training: once evaluation starts the epoch count
-                  is finished and "0 left" would read as a stall. */}
-              {runPhase(progress) === "Training" &&
-                progress.epoch_progress.total > progress.epoch_progress.current &&
-                ` -- ${progress.epoch_progress.total - progress.epoch_progress.current} to go`}
-            </p>
-            <ProgressBar processed={progress.epoch_progress.current} total={progress.epoch_progress.total} />
-          </div>
-        )}
-        {running && progress?.download_progress && (
-          <div className="mt-2">
-            <p className="tabular mb-1 text-xs text-ink-muted">
-              Downloading {progress.download_progress.current} / {progress.download_progress.total}
-            </p>
-            <ProgressBar processed={progress.download_progress.current} total={progress.download_progress.total} />
-          </div>
-        )}
+        {running && progress && <Track2TrainingRunProgress progress={progress} />}
       </div>
       {onRemove && (
         <button
@@ -1665,7 +1644,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                 the same run is reported twice, a few lines apart. */}
             {data.pending_message ? (
               <p className="mb-2 text-sm font-medium text-ink">{data.pending_message}</p>
-            ) : data.queue.running ? null : data.custom_run_id ? (
+            ) : data.queue.running ? null : data.custom_run_id && !data.training_progress ? (
               <div className="mb-2 flex flex-col gap-1">
                 <Badge tone="pending" label="Executing" />
                 <p className="tabular text-xs text-ink-secondary">
@@ -1681,22 +1660,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                   }
                   label={data.training_progress.status}
                 />
-                {data.training_progress.epoch_progress && (
-                  <div>
-                    <p className="tabular mb-1 text-xs text-ink-muted">
-                      Epoch {data.training_progress.epoch_progress.current} / {data.training_progress.epoch_progress.total}
-                    </p>
-                    <ProgressBar processed={data.training_progress.epoch_progress.current} total={data.training_progress.epoch_progress.total} />
-                  </div>
-                )}
-                {data.training_progress.download_progress && (
-                  <div>
-                    <p className="tabular mb-1 text-xs text-ink-muted">
-                      Downloading {data.training_progress.download_progress.current} / {data.training_progress.download_progress.total}
-                    </p>
-                    <ProgressBar processed={data.training_progress.download_progress.current} total={data.training_progress.download_progress.total} />
-                  </div>
-                )}
+                <Track2TrainingRunProgress progress={data.training_progress} />
               </div>
             ) : null}
             {data.queue.last_error && (

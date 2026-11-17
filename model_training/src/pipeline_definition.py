@@ -403,6 +403,9 @@ def build_pipeline(pipeline_session: PipelineSession) -> Pipeline:
         #    hyperparameters instead of a second regex).
         metric_definitions=[
             {"Name": "train:epoch", "Regex": r"(\d+)/\d+\s+\d+(?:\.\d+)?G"},
+            {"Name": "train:images_processed", "Regex": r"TRAIN_PROGRESS images=(\d+)"},
+            {"Name": "train:images_per_epoch", "Regex": r"TRAIN_PROGRESS images=\d+ per_epoch=(\d+)"},
+            {"Name": "train:epochs_completed", "Regex": r"TRAIN_PROGRESS images=\d+ per_epoch=\d+ epochs_completed=(\d+)"},
             {"Name": "dataset:total_images", "Regex": r"DATASET_TOTAL_IMAGES:\s+(\d+)"},
             {"Name": "dataset:images_downloaded", "Regex": r"DATASET_IMAGES:\s+(\d+)/\d+"},
         ],

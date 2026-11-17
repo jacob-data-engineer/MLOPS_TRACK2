@@ -1164,6 +1164,8 @@ def main():
             print("SINGLE_CLS: true (Ultralytics will log the class as 'item'; "
                   "the registered model takes its name from the detector)")
 
+        from training_progress import attach_training_progress
+        attach_training_progress(model)
         results = model.train(
             data=data_yaml,
             epochs=args.epochs,

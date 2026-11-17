@@ -3366,6 +3366,9 @@ def get_epoch_progress(training_job_name: str) -> dict | None:
         return None
     if not total_epochs:
         return None
+    completed = _get_metric_max(training_job_name, 'train:epochs_completed')
+    if completed is not None:
+        return {'current': completed, 'total': total_epochs, 'completed': True}
     current_epoch = _get_metric_max(training_job_name, "train:epoch") or 0
     return {"current": current_epoch, "total": total_epochs}
 
@@ -3378,6 +3381,14 @@ def get_dataset_images_progress(training_job_name: str) -> dict | None:
         return None
     current = _get_metric_max(training_job_name, "dataset:images_downloaded") or 0
     return {"current": current, "total": total_images}
+
+
+def get_training_images_progress(training_job_name: str, epochs: int) -> dict | None:
+    per_epoch = _get_metric_max(training_job_name, 'train:images_per_epoch')
+    processed = _get_metric_max(training_job_name, 'train:images_processed')
+    if not per_epoch or processed is None or epochs < 1:
+        return None
+    return {'current': processed, 'total': per_epoch * epochs, 'per_epoch': per_epoch}
 
 
 def get_training_progress(pipeline_name: str = "") -> dict | None:
@@ -3427,12 +3438,14 @@ def get_training_progress(pipeline_name: str = "") -> dict | None:
 
     epoch_progress = None
     download_progress = None
+    image_progress = None
     # Keep showing the epoch bar through Evaluate/Register too, not just
     # while TrainYolo itself is Executing -- both CloudWatch metrics stay
     # queryable long after the training job finishes.
-    if training_job_name and step_status["TrainYolo"] in ("Executing", "Succeeded"):
+    if training_job_name and step_status["TrainYolo"] in ("Executing", "Succeeded", "Failed", "Stopped"):
         epoch_progress = get_epoch_progress(training_job_name)
-        if step_status["TrainYolo"] == "Executing" and not epoch_progress:
+        image_progress = get_training_images_progress(training_job_name, (epoch_progress or {}).get('total', 0))
+        if step_status["TrainYolo"] == "Executing" and image_progress is None and not (epoch_progress or {}).get('current'):
             download_progress = get_dataset_images_progress(training_job_name)
 
     start_time = execution.get("StartTime")
@@ -3442,6 +3455,7 @@ def get_training_progress(pipeline_name: str = "") -> dict | None:
         "start_time": start_time.isoformat() if start_time else None,
         "steps": step_status,
         "epoch_progress": epoch_progress,
+        "image_progress": image_progress,
         "download_progress": download_progress,
         # WHICH pipeline this describes. Carried because the panel shows
         # one of two and they are not interchangeable: a custom run and a

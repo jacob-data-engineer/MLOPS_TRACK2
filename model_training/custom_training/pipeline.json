@@ -129,8 +129,11 @@
       "Arguments": {
         "AlgorithmSpecification": {
           "TrainingInputMode": "File",
-          "TrainingImage": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train@sha256:f32b71bdad25db69d906c2cb5e843a78e982ab69eba57522fac682305eb11fe0",
+          "TrainingImage": "125192671932.dkr.ecr.ap-southeast-1.amazonaws.com/track2-yolo-train@sha256:842fc5856b93e5def1c61443934729625b0ce03b0a097da6df6e7991c9cc3caf",
           "MetricDefinitions": [
+            {"Name": "train:images_processed", "Regex": "TRAIN_PROGRESS images=(\\d+)"},
+            {"Name": "train:images_per_epoch", "Regex": "TRAIN_PROGRESS images=\\d+ per_epoch=(\\d+)"},
+            {"Name": "train:epochs_completed", "Regex": "TRAIN_PROGRESS images=\\d+ per_epoch=\\d+ epochs_completed=(\\d+)"},
             {
               "Name": "train:epoch",
               "Regex": "(\\d+)/\\d+\\s+\\d+(?:\\.\\d+)?G"

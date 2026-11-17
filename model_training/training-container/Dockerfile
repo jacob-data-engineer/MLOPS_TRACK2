@@ -16,6 +16,7 @@ FROM ${BASE_IMAGE}
 RUN pip install --no-cache-dir ultralytics==8.4.* boto3 "sagemaker>=2.220,<3"
 
 COPY train.py /opt/ml/code/train.py
+COPY training_progress.py /opt/ml/code/training_progress.py
 # train.py copies this into the model artifact's own code/ dir at the end
 # of every run -- see its own comment for why that (not Dockerfile.serve's
 # COPY+ENV, confirmed unreliable) is what actually gets the serving

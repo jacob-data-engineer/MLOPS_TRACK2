@@ -1718,7 +1718,7 @@ def test_the_epoch_total_comes_from_the_job_not_a_constant(monkeypatch):
 
     monkeypatch.setattr(t2, "sm", FakeSm())
     monkeypatch.setattr(t2, "_get_metric_max", lambda job, metric: 0)
-    assert t2.get_epoch_progress("job") == {"current": 0, "total": 1}
+    assert t2.get_epoch_progress("job") == {"current": 0, "total": 1, "completed": True}
 
 
 # --- downloading the .pt a run produced ---------------------------------------
