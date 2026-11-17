@@ -26,7 +26,9 @@ APP_ROLE="${APP_ROLE:-stable}"
 # "off" for a container that must only show pages: no startup recovery and
 # no queue poll loop (see main.background_enabled). The refactor slot.
 APP_BACKGROUND="${APP_BACKGROUND:-on}"
+APP_EXTERNAL_WORKER=false
 if [ "$APP_ROLE" = "dev" ] && [ "$PORT" = "8090" ]; then
+  APP_EXTERNAL_WORKER=true
   TRACK2_RECORD_BACKEND="${TRACK2_RECORD_BACKEND:-postgres}"
   CATALOG_SCHEMA="${CATALOG_SCHEMA:-track2_dev}"
 else
@@ -273,6 +275,7 @@ docker run -d --name $CONTAINER --restart unless-stopped -p $PORT:8501 \\
   -e APP_BUILD_TAG='$TAG' \\
   -e APP_ROLE='$APP_ROLE' \\
   -e APP_BACKGROUND='$APP_BACKGROUND' \\
+  -e APP_EXTERNAL_WORKER='$APP_EXTERNAL_WORKER' \\
   -e TRACK2_RECORD_BACKEND='$TRACK2_RECORD_BACKEND' \\
   -e CATALOG_SCHEMA='$CATALOG_SCHEMA' \\
   -e APP_PORT='$PORT' \\
@@ -298,6 +301,20 @@ for i in \$(seq 1 40); do
 done
 curl -sf http://localhost:$PORT/health
 echo
+if [ '$APP_EXTERNAL_WORKER' = 'true' ]; then
+  # Separate lifetime from the HTTP app: browser closure and web restarts
+  # cannot stop preparation, scheduling or queue advancement.
+  WORKER_ENV=/opt/track2-app/settings/$CONTAINER/worker.env
+  umask 077
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' $CONTAINER \
+    | grep -v '^PPE_APP_PASSWORD=' > "\$WORKER_ENV"
+  docker rm -f $CONTAINER-worker 2>/dev/null || true
+  docker run -d --name $CONTAINER-worker --restart always \\
+    --env-file "\$WORKER_ENV" -e PYTHONPATH=/app/src \\
+    -v /opt/track2-app/settings/$CONTAINER:/settings \\
+    --entrypoint /app/.venv/bin/python $IMAGE -u -m ppe_pipeline_api.chain.background_worker
+  rm -f "\$WORKER_ENV"
+fi
 docker ps --filter name=$CONTAINER --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 EOF
 

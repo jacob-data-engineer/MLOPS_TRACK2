@@ -4981,7 +4981,9 @@ def start_custom_training_run(
     # whose documented minimum is 32 characters -- "custom-" + 24 is 31, so
     # botocore rejected EVERY custom run with a 400 before it reached AWS.
     # That is why this pipeline had never had a single execution.
-    run_id = "custom-" + uuid.uuid4().hex
+    import hashlib
+    run_id = "custom-" + (hashlib.sha256(str(replay_entry['id']).encode()).hexdigest()[:32]
+                          if replay_entry and replay_entry.get('id') else uuid.uuid4().hex)
     run_root = f"s3://{BUCKET}/custom/runs/{run_id}"
     # SEVERAL prefixes, or the one derived from the folder. train.py splits
     # this on commas and keeps each key's full path when there is more than
@@ -5109,6 +5111,9 @@ def start_custom_training_run(
         pipeline_name = pipeline["name"]
         reproducibility = _data.record_training_submission(replay_entry["dataset_version_id"],
             entry={**replay_entry, "pipeline": pipeline}, pipeline=pipeline, parameters=sent)
+        if replay_entry.get('id'):
+            replay_entry['pipeline'] = pipeline
+            _persist_queue_entry(replay_entry)
     else:
         declared = pipeline_parameter_names()
         for optional in ("DataYamlUri", "DropUndeclaredClasses", "EvalExtraUris"):
@@ -5218,6 +5223,8 @@ def queue_snapshot() -> dict:
     """Point-in-time copy of the queue state for a response -- copied out
     under the lock so a concurrent poll-loop mutation is never read half-
     applied."""
+    if record_store.enabled():
+        restore_queue(refresh=True)
     with _queue_lock:
         pending = [dict(e) for e in _training_queue]
         running = dict(_queue_running) if _queue_running else None
@@ -5352,12 +5359,7 @@ def _scan_queue_rows() -> list:
 def _undecimalize(item: dict) -> dict:
     """DynamoDB returns numbers as Decimal; the queue entry's ints are fed
     straight back into the training APIs, which expect ints."""
-    out = {}
-    for key, value in item.items():
-        if isinstance(value, decimal.Decimal):
-            out[key] = int(value) if value == value.to_integral_value() else float(value)
-        else:
-            out[key] = value
+    out = record_store.native_numbers(item)
     out.pop("record_type", None)
     return out
 
@@ -5412,6 +5414,8 @@ def queue_add(entry: dict) -> None:
 
 
 def queue_remove(entry_id: str) -> bool:
+    if record_store.enabled():
+        restore_queue(refresh=True)
     with _queue_lock:
         before = len(_training_queue)
         _training_queue[:] = [e for e in _training_queue if e["id"] != entry_id]
@@ -5448,6 +5452,8 @@ def _persist_queue_started(started: bool) -> None:
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         })
     except Exception as exc:                                   # noqa: BLE001
+        if record_store.enabled():
+            raise
         print(f"Could not persist the queue's started flag: {exc}")
 
 
@@ -5464,12 +5470,15 @@ def queue_start() -> bool:
     """Returns False if there's nothing to start (empty queue, nothing
     already running)."""
     global _queue_started
+    if record_store.enabled():
+        restore_queue(refresh=True)
     with _queue_lock:
         if not _training_queue and _queue_running is None:
             return False
         _queue_started = True
     _persist_queue_started(True)
-    try_advance_queue()  # don't wait up to ~25s for the next poll tick
+    if not record_store.enabled():
+        try_advance_queue()  # SQL workers advance independently of HTTP requests.
     return True
 
 
@@ -5489,6 +5498,8 @@ def try_advance_queue() -> None:
     entry, pops it and starts it."""
     global _queue_running, _queue_started, _queue_completed_count
     global _queue_last_error, _queue_starting
+    if record_store.enabled():
+        restore_queue(refresh=True)
     with _queue_lock:
         if _queue_starting:
             # Another caller is mid-submission. It has already taken its
@@ -5516,6 +5527,8 @@ def try_advance_queue() -> None:
             return
         if not _training_queue:
             _queue_started = False
+            if record_store.enabled():
+                _persist_queue_started(False)
             return
         entry = _training_queue.pop(0)
         _queue_starting = True
@@ -5530,7 +5543,8 @@ def try_advance_queue() -> None:
         # Dropped from the durable copy as soon as it leaves the queue,
         # whether it goes on to start or to be skipped -- a restart must
         # not resurrect a run that has already had its turn.
-        _forget_queue_entry(entry["id"])
+        if not entry.get('reproducible'):
+            _forget_queue_entry(entry["id"])
         try:
             if entry.get("custom_classes"):
                 # Started directly as a pipeline execution rather than via
@@ -5592,13 +5606,18 @@ def try_advance_queue() -> None:
             with _queue_lock:
                 _queue_running = entry
                 _queue_last_error = ""
+            if entry.get('reproducible'):
+                _forget_queue_entry(entry['id'])
         except Exception as exc:
-            # Don't put it back -- retrying the same bad entry forever
-            # would just spin every poll.
+            if entry.get('reproducible') and isinstance(exc, ValueError):
+                _forget_queue_entry(entry['id'])
+            # Durable submissions retry transient failures with the same AWS token.
+            # Invalid entries and legacy submissions are removed.
+            disposition = 'will retry' if entry.get('reproducible') and not isinstance(exc, ValueError) else 'skipped'
             with _queue_lock:
                 _queue_last_error = (
                     f"Queue entry (YOLO{entry.get('generation', '?')}-"
-                    f"{entry.get('size', '?')}) failed to start, skipped: {exc}")
+                    f"{entry.get('size', '?')}) failed to start, {disposition}: {exc}")
             print(_queue_last_error)
     finally:
         # Cleared whatever happened, or one failed submission would stop
@@ -6462,7 +6481,8 @@ def write_training_audit(
     now = datetime.now(timezone.utc).isoformat()
     # Generated up front: the file manifests are keyed on it, and they are
     # written while this record is being built.
-    audit_id = uuid.uuid4().hex[:16]
+    submission_id = (reproducibility or {}).get('entry', {}).get('id')
+    audit_id = 'run-' + str(submission_id) if submission_id else uuid.uuid4().hex[:16]
     record = {
         "id": audit_id,
         "record_type": "training_audit",

@@ -722,9 +722,10 @@ def _run_chain_body(*, config: dict | None = None, trigger: str = "manual",
 
     config = config if config is not None else pc.read_config()
     plan = settings(config)
-    if combined_enabled(config):
-        from .prepared_training import queue_prepared
-        return queue_prepared(config, trigger=trigger, submit=submit)
+    from .. import record_store
+    if record_store.enabled() or combined_enabled(config):
+        from .preparation_jobs import submit as submit_preparation
+        return submit_preparation(config, trigger=trigger, submit=submit)
     checks = preflight(config)
     steps: list = []
 

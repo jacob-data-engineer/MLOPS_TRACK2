@@ -5,6 +5,8 @@ import copy
 import datetime as dt
 import json
 import uuid
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import yaml
@@ -38,7 +40,7 @@ def verify_members(version):
 
 
 @cs.decay_locked
-def freeze(config: dict, *, trigger='manual', target_classes=None) -> dict:
+def freeze(config: dict, *, trigger='manual', target_classes=None, progress=None) -> dict:
     """No combine, golden rebuild, retention selection or writes to the decay folder.
 
     Copies are version-specific and never reused by another preparation. Labels
@@ -53,6 +55,8 @@ def freeze(config: dict, *, trigger='manual', target_classes=None) -> dict:
     if marker.get('status') != 'built' or marker.get('failed'):
         raise ValueError('Complete Combine data sources in Data Preparation before training.')
     objects = _objects(bucket, decay)
+    if progress:
+        progress('Reading prepared dataset', 0, 0)
     splits = {'train': [], 'val': []}
     images = []
     for key, obj in sorted(objects.items()):
@@ -90,8 +94,11 @@ def freeze(config: dict, *, trigger='manual', target_classes=None) -> dict:
         by_name = {name: index for index, name in names.items()}
         selection = {i: by_name[name] for i, name in dataset_names.items() if name in by_name}
     folder = f'_training_inputs/{uuid.uuid4().hex}/dataset'
+    progress_lock = threading.Lock()
+    completed, last_report = 0, 0.0
 
     def preserve(item):
+        nonlocal completed, last_report
         key, relative, side, obj = item
         target = f'{folder}/{relative}'
         storage.s3.copy_object(Bucket=bucket, Key=target,
@@ -128,6 +135,13 @@ def freeze(config: dict, *, trigger='manual', target_classes=None) -> dict:
                 target_id = selection[target_id]
             normalized.append(' '.join([str(target_id), *parts[1:]]))
         _put(bucket, destination_label, ('\n'.join(normalized) + ('\n' if normalized else '')).encode())
+        if progress:
+            with progress_lock:
+                completed += 1
+                now = time.monotonic()
+                if completed == len(images) or now - last_report >= 2:
+                    progress('Preserving images and labels', completed, len(images))
+                    last_report = now
         return provenance
 
     with ThreadPoolExecutor(max_workers=16) as pool:
@@ -145,6 +159,8 @@ def freeze(config: dict, *, trigger='manual', target_classes=None) -> dict:
         frozen_doc[side] = [entry['images'][len(decay) + 1:] for entry in splits[side]]
     frozen_text = yaml.safe_dump(frozen_doc, sort_keys=False)
     _put(bucket, f'{folder}/data.yaml', frozen_text.encode())
+    if progress:
+        progress('Saving dataset records to SQL', len(images), len(images))
     version = dv.create(home=bucket, yaml_text=frozen_text,
         prefixes=[f's3://{bucket}/{folder}/'], trigger=trigger,
         sources=[f's3://{bucket}/{decay}'], preserve_files=False)

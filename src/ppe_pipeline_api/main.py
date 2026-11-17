@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
     # track2_shared.py's module docstring on why this state is in-memory,
     # single-process only, same as session_store.py.
     poll_task = (asyncio.create_task(ticker.queue_poll_loop())
-                 if background_enabled() else None)
+                 if background_enabled() and os.environ.get('APP_EXTERNAL_WORKER') != 'true' else None)
     # Fill the registry cache before anybody asks for it.
     #
     # Review & Metrics lists every model package group and describes every

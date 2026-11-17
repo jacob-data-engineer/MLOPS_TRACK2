@@ -28,6 +28,7 @@ test('training queues the prepared dataset with the selected parameters and no s
     browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE });
     const page = await browser.newPage();
     const queued = [], errors = [];
+    let job = null;
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/track2/**', async route => {
       const req = route.request(), url = new URL(req.url());
@@ -40,20 +41,30 @@ test('training queues the prepared dataset with the selected parameters and no s
       else if (url.pathname.endsWith('/metrics')) response = {rows:[]};
       else if (url.pathname.endsWith('/queue-after-pull')) response = {settings:{enabled:false,triggers:[]},next:{act:false,reason:'Manual'}};
       else if (url.pathname.endsWith('/retrain')) response = {settings:{enabled:false},next:{}};
+      else if (url.pathname.endsWith('/retrain/preparation')) response = {job};
       else if (url.pathname.endsWith('/retrain/run')) {
-        queued.push(req.postDataJSON()); response = {ok:true,steps:[{step:'queue',ok:true,detail:'queued'}]};
+        queued.push(req.postDataJSON());
+        job = {id:'job-test',state:'running',stage:'Preserving images and labels',completed:50,total:100,percent:47,updated_at:'2026-11-17T00:00:00Z'};
+        response = {ok:true,job,steps:[{step:'background',ok:true,detail:'saved'}]};
       }
       await route.fulfill({json:response});
     });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`);
-    await page.getByText(/already-prepared decayed dataset/).waitFor();
+    await page.getByText(/Training uses the already-prepared decayed dataset/).waitFor();
     assert.equal(await page.getByRole('radio').count(), 0);
     assert.equal(await page.getByText('Pick a snapshot', {exact:true}).count(), 0);
     const cleanup = page.getByRole('checkbox', {name: /Delete the decayed dataset after this run/});
     assert.equal(await cleanup.isChecked(), false);
     await cleanup.check();
     await page.getByRole('button',{name:'Add to Queue',exact:true}).click();
+    await page.getByRole('progressbar', {name:'Dataset preparation'}).waitFor();
+    assert.equal(await page.getByRole('progressbar').getAttribute('aria-valuenow'),'47');
+    await page.reload();
+    await page.getByText('50 / 100 image and label pairs',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Preserving the prepared dataset and queueing...'}).isDisabled(),true);
+    job = {...job,state:'completed',stage:'Added to training queue',percent:100,completed:100};
     await page.waitForFunction(()=>document.body.dataset.submitted==='yes');
+    assert.equal(await page.getByRole('progressbar').getAttribute('aria-valuenow'),'100');
     assert.equal(queued.length,1);
     assert.deepEqual(queued[0], {submit:'enqueue',prepared_only:true,training:{epochs:25,img_size:640,batch:8,
       seed:42,patience:10,hyperparams:{lr0:0.001},detector_slug:'helmet',architecture:'yolo11s',notes:'repeatable test',

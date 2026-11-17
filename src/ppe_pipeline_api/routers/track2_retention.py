@@ -420,11 +420,17 @@ def run_retrain(body: RetrainRunRequest | None = None,
                             detail=f"submit must be 'start', 'queue' or 'enqueue', not {submit!r}.")
     try:
         if body and body.prepared_only:
-            from ..chain.prepared_training import queue_prepared
-            return queue_prepared(trigger="manual", submit=submit, overrides=body.training)
+            from ..chain.preparation_jobs import submit as submit_preparation
+            return submit_preparation(trigger="manual", submit=submit, overrides=body.training)
         return rs.run_chain(trigger="manual", submit=submit)
     except Exception as exc:                                   # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not run it: {exc}")
+
+
+@router.get('/retrain/preparation')
+def preparation_status(session=Depends(require_session)) -> dict:
+    from ..chain.preparation_jobs import latest
+    return {'job': latest()}
 
 
 def _pull_status() -> dict:

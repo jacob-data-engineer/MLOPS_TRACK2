@@ -2844,6 +2844,7 @@ export interface Track2RetrainStatus {
 /** One pass of the chain: rebuild, freeze, submit. Each step reports
  * separately, because a chain that stopped half way should say where. */
 export interface Track2RetrainRun {
+  job?: Track2PreparationJob;
   trigger: string;
   at: string;
   ok: boolean;
@@ -2854,6 +2855,22 @@ export interface Track2RetrainRun {
     detail: string;
     [key: string]: unknown;
   }[];
+}
+
+export interface Track2PreparationJob {
+  id: string;
+  state: "pending" | "running" | "completed" | "failed";
+  stage: string;
+  percent: number;
+  completed: number;
+  total: number;
+  updated_at: string;
+  error?: string;
+  dataset_version_id?: string;
+}
+
+export function getTrack2PreparationJob(): Promise<{job: Track2PreparationJob | null}> {
+  return apiGet('/track2/retention/retrain/preparation');
 }
 
 export function getTrack2Retrain(): Promise<Track2RetrainStatus> {

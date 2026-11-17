@@ -104,6 +104,17 @@ def plain(item):
     return {k: deserial.deserialize(_binary(v)) for k, v in item.items()}
 
 
+def native_numbers(value):
+    """Restore nested numeric settings at the boundary to application code."""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dict):
+        return {k: native_numbers(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [native_numbers(v) for v in value]
+    return value
+
+
 def encode(item):
     from .data.dynamo_migration import canonical
     return canonical(typed(item))

@@ -194,13 +194,12 @@ def test_the_caption_no_longer_claims_it_does_not_start():
 
 
 
-def test_the_card_says_automatic_runs_use_the_ticked_sources():
-    """An automatic run composes from the ticked sources; the radio is for
-    runs added by hand (2026-10-26)."""
+def test_the_card_explains_background_prepared_training():
+    """Automatic SQL runs preserve the prepared data and start without a browser."""
     code = _flat()
     assert "Switched on and off by <strong>PULL, BUILD, QUEUE, TRAIN</strong>" in code
     assert "queues the run and starts it" in code
-    assert "The Training data radio above is for runs you add here by hand." in code
+    assert "decayed dataset, then queues the run and starts it, even when this page is closed." in code
 
 
 def test_unattended_runs_ignore_a_frozen_radio():

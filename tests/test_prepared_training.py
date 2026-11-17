@@ -225,16 +225,40 @@ def test_sql_audit_must_succeed_before_gpu_submission(monkeypatch, sql_fails):
         return {'PipelineExecutionArn': 'execution'}
     monkeypatch.setattr(t, 'sm', SimpleNamespace(start_pipeline_execution=start))
     monkeypatch.setattr(t, 'training_audit_table', lambda: SimpleNamespace(update_item=lambda **kw: None))
+    persisted = []
+    monkeypatch.setattr(t, '_persist_queue_entry', lambda entry: persisted.append(copy.deepcopy(entry)))
     kwargs = dict(dataset_folder='preserved', eval_dataset_folder='', epochs=1, img_size=640,
                   batch=1, seed=42, notes='', architecture='yolo11s', base_model_key='preserved/model.pt',
-                  replay_entry={'dataset_version_id': 'frozen', 'reproducible': True})
+                  replay_entry={'id': 'durable-job', 'dataset_version_id': 'frozen', 'reproducible': True})
     if sql_fails:
         with pytest.raises(RuntimeError, match='SQL unavailable'):
             t.start_custom_training_run(**kwargs)
         assert calls == ['sql']
     else:
-        t.start_custom_training_run(**kwargs)
+        first = t.start_custom_training_run(**kwargs)
         assert calls == ['sql', 'gpu']
+        calls.clear()
+        second = t.start_custom_training_run(**kwargs)
+        assert first['run_id'] == second['run_id']
+        assert len(persisted) == 2 and persisted[0]['pipeline'] == persisted[1]['pipeline']
+
+
+def test_retried_audit_never_overwrites_pending_queue_entry(monkeypatch):
+    from ppe_pipeline_api.training import track2_shared as t
+    rows = {'durable-job': {'id': 'durable-job', 'record_type': 'queue_entry'}}
+    monkeypatch.setattr(t, 'training_audit_table', lambda: SimpleNamespace(
+        put_item=lambda Item: rows.update({Item['id']: Item})))
+    monkeypatch.setattr(t, '_run_artifacts', lambda *a: {})
+    monkeypatch.setattr(t, '_dataset_audit_block', lambda *a: {})
+    monkeypatch.setattr(t, '_evaluates_on_its_training_images', lambda *a: False)
+    for _ in range(2):
+        audit = t.write_training_audit(build_id='', generation='26', size='s', epochs=1,
+            img_size=640, batch=16, seed=42, dataset_folder='preserved',
+            eval_dataset_folder='', base_model_folder='', notes='', strict=True,
+            reproducibility={'dataset_version_id':'frozen', 'entry': {'id':'durable-job'}})
+        assert audit['id'] == 'run-durable-job'
+        assert rows['durable-job']['record_type'] == 'queue_entry'
+    assert len(rows) == 2
 
 
 def test_queue_sql_failure_does_not_leave_runnable_entry(monkeypatch):

@@ -17,6 +17,8 @@ import { Track2PinnedBar } from "../components/Track2PinnedBar";
 import { Track2TrainingHistory } from "../components/Track2TrainingAuditPanel";
 import {
   runTrack2Retrain,
+  getTrack2PreparationJob,
+  type Track2PreparationJob,
   ApiError,
   getTrack2Metrics,
   getTrack2QueueAfterPull,
@@ -397,6 +399,26 @@ export function TrainingForm({
   const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
   const [deleteDecayAfterRun, setDeleteDecayAfterRun] = useState(false);
+  const [preparationJob, setPreparationJob] = useState<Track2PreparationJob | null>(null);
+  const completedJob = useRef('');
+  const preparing = preparationJob?.state === 'pending' || preparationJob?.state === 'running';
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const {job} = await getTrack2PreparationJob();
+        if (cancelled) return;
+        setPreparationJob(job);
+        if (job?.state === 'completed' && completedJob.current !== job.id) {
+          completedJob.current = job.id;
+          onSubmitted();
+        }
+      } catch { /* Keep the saved status while the server reconnects. */ }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [datasetClasses, setDatasetClasses] = useState<Track2DatasetClasses | null>(null);
   // Saved dataset taxonomy is checked against the selected model.
@@ -700,7 +722,8 @@ export function TrainingForm({
         setError(failed?.detail || "Could not preserve and queue the prepared dataset.");
         return;
       }
-      onSubmitted();
+      if (got.job) setPreparationJob(got.job);
+      else onSubmitted();
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Add to queue failed.");
     } finally {
@@ -842,7 +865,7 @@ export function TrainingForm({
       </div>
 
       <label className="mt-3 flex items-start gap-2 text-xs text-ink">
-        <input type="checkbox" checked={deleteDecayAfterRun} disabled={busy}
+        <input type="checkbox" checked={deleteDecayAfterRun} disabled={busy || preparing}
           onChange={(event) => setDeleteDecayAfterRun(event.target.checked)} />
         <span>Delete the decayed dataset after this run
           <span className="mt-1 block text-ink-muted">
@@ -852,21 +875,38 @@ export function TrainingForm({
           </span>
         </span>
       </label>
+      {preparationJob && (
+        <div className="mt-3 rounded-md border border-black/15 bg-page p-3 text-xs"
+          role="status" aria-live="polite">
+          <div className="mb-2 flex justify-between gap-3">
+            <span>{preparationJob.stage}</span><span>{preparationJob.percent}%</span>
+          </div>
+          <div role="progressbar" aria-label="Dataset preparation" aria-valuemin={0}
+            aria-valuemax={100} aria-valuenow={preparationJob.percent}>
+            <ProgressBar processed={preparationJob.percent} total={100} />
+          </div>
+          {preparationJob.total > 0 && <p className="mt-1">
+            {preparationJob.completed.toLocaleString()} / {preparationJob.total.toLocaleString()} image and label pairs
+          </p>}
+          {preparing && <p className="mt-1 text-ink-muted">You can close this page. The background worker will continue; progress returns when you reopen it.</p>}
+          {preparationJob.error && <p className="mt-1 text-critical">{preparationJob.error}</p>}
+        </div>
+      )}
       <div className="mt-3 flex gap-2">
         <button
           type="button"
           onClick={handleAddToQueue}
-          disabled={busy || baseSelectionIncomplete || analysis.blocking}
+          disabled={busy || preparing || baseSelectionIncomplete || analysis.blocking}
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
-          {busy
+          {busy || preparing
             ? "Preserving the prepared dataset and queueing..."
             : "Add to Queue"}
         </button>
         <button
           type="button"
           onClick={handleStartAllOver}
-          disabled={busy}
+          disabled={busy || preparing}
           className="rounded-md border border-black/15 px-3 py-2 text-sm font-medium text-ink-secondary disabled:opacity-40"
         >
           Start All Over
@@ -891,8 +931,9 @@ export function TrainingForm({
           </span>
           <span className="mt-0.5 block text-xs text-ink-muted">
             Switched on and off by <strong>PULL, BUILD, QUEUE, TRAIN</strong> at
-            the top. Runs using the combined store preserve the already-prepared
-            decayed dataset before queueing. The cleanup option above applies
+            the top. The background worker preserves the already-prepared
+            decayed dataset, then queues the run and starts it, even when this page is closed.
+            The cleanup option above applies
             to runs you add here with Add to Queue.
           </span>
           {/* When the training clock is in charge -- Pull Control is not

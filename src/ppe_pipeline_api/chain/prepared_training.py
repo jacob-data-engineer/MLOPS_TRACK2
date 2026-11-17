@@ -5,7 +5,8 @@ import uuid
 from .. import data, pull_control as pc, training
 
 
-def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides=None):
+def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides=None,
+                   progress=None, publish=None, entry_id=None):
     from . import retrain_schedule as rs
     config = config if config is not None else pc.read_config()
     plan = rs.settings(config)
@@ -25,6 +26,8 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     if plan['epochs'] < 1 or plan['img_size'] < 32 or plan['batch'] == 0 or plan['batch'] < -1 or plan['patience'] < 0:
         raise ValueError('Invalid epochs, image size, batch size or patience.')
     data.require_training_sql()
+    if progress:
+        progress('Checking the selected model', 0, 0)
     detector = training.get_detector(str(plan['detector_slug']))
     architecture = str(plan['architecture'])
     packages = training.model_registry_summary(training.detector_group_name(detector, architecture)).get('packages') or []
@@ -47,10 +50,12 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     source_arn = chosen['ModelPackageArn'] if chosen else ''
     uri, source = training.resolve_base_model_source(scratch=scratch, scratch_architecture=architecture,
         base_model_key='', base_model_folder='', base_model_package_arn=source_arn)
+    if progress:
+        progress('Preserving starting weights', 0, 0)
     base = data.preserve_training_base(uri)
-    version = data.freeze_prepared_training(config, trigger=trigger, target_classes=detector['classes'])
+    version = data.freeze_prepared_training(config, trigger=trigger, target_classes=detector['classes'], progress=progress)
     generation, size = training.split_architecture(architecture)
-    entry = {**data.version_run_fields(version), 'id': uuid.uuid4().hex[:12],
+    entry = {**data.version_run_fields(version), 'id': entry_id or uuid.uuid4().hex[:12],
         'generation': generation, 'size': size, 'architecture': architecture,
         'detector_slug': str(plan['detector_slug']), 'custom_classes': True,
         'base_model_key': base['key'], 'base_model_package_arn': '',
@@ -67,8 +72,8 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     # The full recipe is committed to SQL before making the entry runnable.
     template = {k: v for k, v in entry.items() if k not in ('id', 'added_at')}
     data.mark_version(version['version_id'], strict=True, state='queued', entry_id=entry['id'], entry_template=template)
-    training.queue_add(entry)
-    if submit in ('queue', 'start'):
+    (publish or training.queue_add)(entry)
+    if publish is None and submit in ('queue', 'start'):
         training.queue_start()
     return {'ok': True, 'steps': [{'step': 'preserve', 'ok': True,
         'detail': f"Preserved {version['train_images']} training and {version['val_images']} validation images"},
