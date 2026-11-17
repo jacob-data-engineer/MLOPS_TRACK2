@@ -1,4 +1,4 @@
-import { AlertCircle, Download, FileText, Library, Loader2 } from "lucide-react";
+import { AlertCircle, FileText, Library, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Card } from "../components/Card";
 import { Track2CatalogMetadata } from "../components/Track2CatalogMetadata";
@@ -10,14 +10,12 @@ import {
   type Track2Bucket,
   downloadTrack2CatalogCsv,
   getTrack2CatalogExports,
-  getTrack2CatalogExportUrl,
   getTrack2CatalogRunFiles,
   getTrack2CatalogRuns,
   getTrack2CatalogStatus,
   getTrack2CatalogVersionFiles,
   getTrack2CatalogVersions,
   getTrack2SqlPreviews,
-  stopTrack2CatalogExport,
   getTrack2PullControl,
   saveTrack2PullConfig,
   repeatTrack2CatalogRun,
@@ -62,14 +60,6 @@ function runModel(r: { detector: string | null; architecture: string | null; mod
 }
 const shortName = (uri: string) => uri.split("/").slice(-1)[0];
 
-function bytes(n: number | null | undefined): string {
-  if (!n) return "--";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
-  return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
-}
 
 export function Track2CatalogPage() {
   const [status, setStatus] = useState<Track2CatalogStatus | null>(null);
@@ -265,7 +255,6 @@ export function Track2CatalogPage() {
           renderDestination={(showFormat) => <ExportDestination destination={destination} onDestination={changeDestination} showFormat={showFormat} />}>
           <FilesCard key={picked?.kind === "run" ? picked.run.run_id : picked?.version.id || "empty"}
             picked={picked} emptyMessage="No run or dataset version selected" />
-          <ExportsCard exportsList={exportsList} onExported={refreshExports} />
         </Track2CatalogMetadata>
       </div>
     </div>
@@ -498,91 +487,3 @@ function FilesCard({ picked, emptyMessage }: { picked: Picked | null; emptyMessa
   );
 }
 
-function ExportsCard({ exportsList, onExported }: {
-  exportsList: Track2CatalogExport[] | null; onExported: () => void;
-}) {
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function stop(id: string) {
-    setError(""); setBusy(true);
-    try {
-      await stopTrack2CatalogExport(id);
-      onExported();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not stop the export.");
-    } finally { setBusy(false); }
-  }
-
-  function download(id: string) {
-    setError("");
-    getTrack2CatalogExportUrl(id)
-      .then((r) => { window.location.href = r.url; })
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not get the link."));
-  }
-
-  return (
-    <div id="catalog-export-history" className="scroll-mt-20"><Card title="Export history" collapsible={false}
-          caption="Export actual images and labels to your PC as a ZIP, or copy them to S3. Missing source files are reported as incomplete exports. This list refreshes while an export is building.">
-      {error && <p className="mb-2 text-xs text-critical">{error}</p>}
-      {exportsList === null ? <p className="text-sm text-ink-muted">Reading...</p>
-        : exportsList.length === 0 ? (
-          <p className="text-sm text-ink-muted">No exports yet. Pick a run or a version, choose a destination, and export its files.</p>
-        ) : (
-          <table className="tabular min-w-full text-xs">
-            <thead className="text-left text-ink">
-              <tr>
-                {["Export", "State", "Started", "Finished", "Files", "Size", "Format", "Destination", ""].map((h) => (
-                  <th key={h} className="border-b border-hairline px-2 py-1.5 font-medium">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {exportsList.map((e) => (
-                <tr key={e.id} className="border-b border-hairline/50">
-                  <td className="px-2 py-1 font-medium text-ink">{e.label}</td>
-                  <td className={`px-2 py-1 ${e.state === "failed" || e.missing > 0 ? "text-critical" : ""}`} title={e.error ?? ""}>
-                    {e.state === "building" || e.state === "stopping"
-                      ? <span className="inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" />{e.state === "stopping" ? "Stopping…" : "building"}</span>
-                      : e.state === "cancelled" ? "Stopped"
-                      : e.state === "partial" || (e.state === "ready" && e.missing > 0) ? "Incomplete" : e.state}
-                    {e.state === "failed" && e.error ? ` -- ${e.error}` : ""}
-                  </td>
-                  <td className="px-2 py-1">{when(e.created_at)}</td>
-                  <td className="px-2 py-1">{when(e.finished_at)}</td>
-                  <td className="px-2 py-1">
-                    {(e.files ?? 0).toLocaleString()}
-                    {e.missing ? <span className="text-critical"> ({e.missing} missing)</span> : ""}
-                  </td>
-                  <td className="px-2 py-1">{bytes(e.bytes)}</td>
-                  <td className="px-2 py-1">{e.format === "folder" ? "Folder" : "ZIP"}</td>
-                  <td className="max-w-xs break-all px-2 py-1">
-                    {e.destination === "s3" ? e.destination_uri : "Local PC (ZIP)"}
-                    {e.destination === "s3" && e.destination_uri && <button type="button" className="ml-2 underline"
-                      onClick={() => {
-                        if (!navigator.clipboard) { setError("Select and copy the S3 address shown in the table."); return; }
-                        void navigator.clipboard.writeText(e.destination_uri!).catch(() => setError("Select and copy the S3 address shown in the table."));
-                      }}>Copy address</button>}
-                  </td>
-                  <td className="px-2 py-1">
-                    {e.format !== "folder" && (e.state === "ready" || e.state === "partial") && (
-                      <button type="button" onClick={() => download(e.id)}
-                              className="inline-flex items-center gap-1 rounded-md border border-black/15 bg-page px-2 py-0.5 font-medium text-ink">
-                        <Download size={12} /> {e.missing ? "Download incomplete ZIP" : "Download ZIP"}
-                      </button>
-                    )}
-                    {(e.state === "building" || e.state === "stopping") && <button type="button"
-                      className="rounded-md border border-black/15 bg-page px-2 py-1 font-medium disabled:opacity-40"
-                      disabled={busy || e.state === "stopping"} onClick={() => void stop(e.id)}>
-                      {e.state === "stopping" ? "Stopping…" : "Stop export"}
-                    </button>}
-
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-    </Card></div>
-  );
-}
