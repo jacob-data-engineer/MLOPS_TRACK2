@@ -160,7 +160,7 @@ export function Track2CatalogMetadata({ selection, destination, onExported, rend
           disabled={!metadata || !settingsLoaded || !!busy || (destination.destination === "s3" && !destination.bucket) || (mode === "model" && !metadata.checkpoint_available)} onClick={() => void prepare()}>
           {busy === "export" ? "Preparing…" : destination.destination === "local" && (mode === "model" || mode === "metadata") ? `Download ${format}` : `Prepare ${format} export`}</button>
         {message && <p role="status" className="mt-2 break-all text-sm">{message}</p>}
-        {(trackedExport || startingExport || busy === "export") && <Track2ExportProgress state={busy === "export" ? "building" : trackedExport?.state ?? "building"} error={trackedExport?.error} />}
+        {(trackedExport || startingExport || busy === "export") && <Track2ExportProgress state={busy === "export" ? "building" : trackedExport?.state ?? "building"} error={trackedExport?.error} bytes={trackedExport?.bytes} format={trackedExport?.format ?? destination.format} />}
         {trackedExport && trackedExport.format !== "folder" && ["ready", "partial"].includes(trackedExport.state) &&
           <button type="button" className={`${button} mt-3`} onClick={() => {
             void getTrack2CatalogExportUrl(trackedExport.id).then((result) => window.location.assign(result.url))

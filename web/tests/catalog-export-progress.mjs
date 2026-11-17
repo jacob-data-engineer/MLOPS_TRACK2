@@ -33,12 +33,17 @@ test('ZIP export shows preparation, completion, incomplete and stopped states be
     await page.getByRole('button',{name:'Prepare ZIP export'}).click();
     await page.getByText('Preparing export files. Progress updates automatically.').waitFor();
     assert.equal(await page.getByRole('progressbar').getAttribute('aria-valuenow'),null);
-    const item={id:'export-1',run_id:'run-1',format:'zip',state:'ready'};
+    await page.getByText('ZIP size will appear when compression finishes.').waitFor();
+    const item={id:'export-1',run_id:'run-1',format:'zip',state:'ready',bytes:1572864};
     await page.evaluate(e=>window.renderExports([e]),item);
     await page.getByRole('button',{name:'Download ZIP',exact:true}).waitFor();
     assert.equal(await page.getByRole('progressbar').getAttribute('aria-valuenow'),'100');
+    await page.getByText('ZIP download size: 1.5 MiB (actual compressed size)').waitFor();
     await page.evaluate(e=>window.renderExports([{...e,state:'partial'}]),item);
     await page.getByRole('button',{name:'Download incomplete ZIP'}).waitFor();
+    await page.getByText('Incomplete ZIP size: 1.5 MiB (actual compressed size)').waitFor();
+    await page.evaluate(e=>window.renderExports([{...e,bytes:null}]),item);
+    await page.getByText('ZIP size was not recorded for this export.').waitFor();
     await page.evaluate(e=>window.renderExports([{...e,state:'cancelled'}]),item);
     await page.getByText('Export stopped.').waitFor();
     assert.equal(await page.getByRole('progressbar').count(),0);
