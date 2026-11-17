@@ -37,8 +37,7 @@ def test_the_card_sends_exactly_one_source_and_it_is_never_scratch():
     false rather than dropping the field: the backend's "exactly one
     source" check reads it, and the queue replays entries carrying it."""
     source = PAGE.read_text(encoding="utf-8")
-    assert "base_model_package_arn: basePackageArn," in source
-    assert "base_model_scratch: false," in source
+    assert "base_version: basePackageArn," in source
     # No mode state left to disagree with it.
     assert "modelSource" not in re.sub(r"//.*", "", source)
     assert "Track2ScratchTrainingPanel" not in source

@@ -20,6 +20,7 @@ import {
   stopTrack2CatalogExport,
   getTrack2PullControl,
   saveTrack2PullConfig,
+  repeatTrack2CatalogRun,
   type Track2CatalogExport,
   type Track2CatalogFile,
   type Track2CatalogRun,
@@ -353,6 +354,18 @@ function FilesCard({ picked, emptyMessage }: { picked: Picked | null; emptyMessa
   const title = picked?.kind === "run"
     ? `Run ${picked.run.run_number}`
     : picked ? `Version ${picked.version.version_number} (${picked.version.kind})` : emptyMessage;
+  const [repeatNote, setRepeatNote] = useState("");
+
+  async function repeatRun() {
+    if (picked?.kind !== "run") return;
+    setBusy("repeat"); setError(""); setRepeatNote("");
+    try {
+      const result = await repeatTrack2CatalogRun(id);
+      setRepeatNote(`Queued ${result.entry_id} with the preserved dataset, starting weights and training settings. Start Queue when ready.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Could not repeat this run.");
+    } finally { setBusy(""); }
+  }
 
   useEffect(() => {
     if (!picked) { setFiles([]); return; }
@@ -417,6 +430,11 @@ function FilesCard({ picked, emptyMessage }: { picked: Picked | null; emptyMessa
         </label>
         <span className="text-ink-muted">{total.toLocaleString()} image(s)</span>
         <span className="flex-1" />
+        {picked?.kind === "run" && <button type="button" disabled={!!busy}
+          onClick={() => void repeatRun()}
+          className="rounded-md border border-black/15 bg-page px-2.5 py-1 font-medium text-ink disabled:opacity-40">
+          {busy === "repeat" ? "Queueing…" : "Queue same run again"}
+        </button>}
         <button type="button" onClick={() => void downloadCsv()} disabled={!!busy}
                 className="inline-flex items-center gap-1.5 rounded-md border border-black/15 bg-page px-2.5 py-1 font-medium text-ink disabled:opacity-40">
           {busy === "csv" ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
@@ -425,6 +443,7 @@ function FilesCard({ picked, emptyMessage }: { picked: Picked | null; emptyMessa
 
       </div>
       </fieldset>
+      {repeatNote && <p role="status" className="mb-2 text-sm text-ink-secondary">{repeatNote}</p>}
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
 
       {!picked ? <p role="status" className="rounded border border-hairline p-6 text-center text-sm text-ink-muted">{emptyMessage}</p>

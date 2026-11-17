@@ -240,13 +240,3 @@ def test_no_screen_prints_a_raw_utc_timestamp_as_a_time():
             if '.replace("T", " ").slice(0, 1' in line and "SGT_OFFSET_MS" not in line:
                 offenders.append(f"{f.name}:{n}")
     assert not offenders, offenders
-
-
-def test_each_snapshot_has_a_red_delete_with_a_confirm_dialog():
-    page = " ".join((pathlib.Path(__file__).resolve().parents[1] / "web" / "src" / "routes"
-                     / "Track2ModelsPage.tsx").read_text(encoding="utf-8").split())
-    assert 'className="rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white' in page
-    assert "setSnapToDelete(snap)" in page
-    assert "await deleteTrack2Snapshot(snapToDelete.snapshot_id);" in page
-    assert "The images and labels are not touched" in page
-    assert "This cannot be undone." in page

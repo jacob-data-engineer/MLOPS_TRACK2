@@ -280,9 +280,17 @@ def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | No
         return path
 
     if kind == "run":
-        run = _rows("SELECT run_number, version_id FROM training_runs WHERE run_id = %s", (ident,))
+        run = _rows("SELECT run_number, version_id, record FROM training_runs WHERE run_id = %s", (ident,))
         if not run:
             raise ValueError(f"No run {ident}.")
+        if (run[0].get("record") or {}).get("reproducibility") and run[0]["version_id"]:
+            entries, names, _ = _plan("version", run[0]["version_id"])
+            recipe = run[0]["record"]["reproducibility"]
+            base = (recipe.get("pipeline_parameters") or {}).get("BaseModelUri")
+            if base:
+                path = "starting-model/" + base.rsplit("/", 1)[-1]
+                entries.append((path, base, {"path": path, "source": base, "role": "base_model", "included": True}))
+            return entries, names, f"run-{run[0]['run_number']}"
         names, stored = None, {}
         if run[0]["version_id"]:
             got = _rows("SELECT class_names FROM dataset_versions WHERE id = %s",
@@ -505,6 +513,11 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                 zf.writestr("data.yaml", f"path: .\ntrain: images/train\nval: {val_path}\n"
                                          f"names:\n{lines}\n")
             zf.writestr("manifest.csv", manifest.getvalue())
+            if kind == "run":
+                saved = _rows("SELECT record FROM training_runs WHERE run_id = %s", (ident,))
+                recipe = (saved[0].get("record") or {}).get("reproducibility") if saved else None
+                if recipe:
+                    zf.writestr("training-recipe.json", catalog_metadata.dumps(catalog_metadata.clean(recipe)))
             if metadata:
                 check(True)
                 metadata["export_result"] = {"files_written": packed, "missing_files": missing,

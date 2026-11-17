@@ -22,6 +22,8 @@ __all__ = [
     "create_snapshot",
     # THE HANDOVER: a dataset version, the only thing a run trains on
     "version_for_run", "version_run_fields", "mark_version", "version_card_fields",
+    "require_training_sql", "freeze_prepared_training", "preserve_training_base",
+    "record_training_submission", "repeat_training_entry",
     # assembling folders into one dataset, and what a dataset declares
     "assemble_dataset", "inspect_dataset_layout", "discover_dataset_sources",
     "dataset_source_map", "image_names_by_stem", "dataset_classes",
@@ -91,3 +93,8 @@ load_combine_job = _through(__name__, "combined_store", "load_job")
 plan_decayed = _through(__name__, "combined_store", "plan_decayed")
 build_yaml_in_place = _through(__name__, "dataset_yaml", "build_in_place")
 combined_slug = _through(__name__, "combined_store", "slug_of")
+require_training_sql = _through(__name__, "prepared_training", "require_sql")
+freeze_prepared_training = _through(__name__, "prepared_training", "freeze")
+preserve_training_base = _through(__name__, "prepared_training", "preserve_base")
+record_training_submission = _through(__name__, "prepared_training", "record_submission")
+repeat_training_entry = _through(__name__, "prepared_training", "repeat_entry")

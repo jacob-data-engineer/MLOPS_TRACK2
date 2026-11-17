@@ -32,6 +32,12 @@ def test_it_reads_in_sections(monkeypatch):
         assert f"\n{title}\n" in text, title
 
 
+def test_csv_identifies_the_dataset_record_for_new_and_older_runs(monkeypatch):
+    assert 'Dataset record ID,dv-preserved' in _csv(monkeypatch, {**AUDIT, 'dataset_version_id': 'dv-preserved'})
+    assert 'Dataset record ID,dv-legacy' in _csv(monkeypatch, {
+        **AUDIT, 'train_dataset': {'folder': '_datasets/dv-legacy', 'dataset_version_id': 'dv-legacy'}})
+
+
 def test_every_hyperparameter_is_listed_set_or_default(monkeypatch):
     text = _csv(monkeypatch)
     assert "Optimiser,lr0,0.005" in text

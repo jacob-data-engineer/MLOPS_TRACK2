@@ -119,6 +119,8 @@ function formatMetric(value: number | null | undefined): string {
  * must not drift: they describe the same run, and two renderings of the
  * same submitted-vs-actual comparison would be worse than one. */
 export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted: () => void }) {
+  const datasetRecordId = audit.dataset_version_id || audit.train_dataset.dataset_version_id
+    || audit.eval_dataset.dataset_version_id || audit.snapshot?.snapshot_id;
   const [open, setOpen] = useCardOpen("training_audit", false);
   const [deleting, setDeleting] = useState(false);
   // Deleting a run deletes the registered model with it. The dialog
@@ -297,7 +299,7 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
           <button
             type="button"
             onClick={() => setExportOpen((open) => !open)}
-            title="Copy the .pt into a folder in the bucket"
+            title="Copy this model version's .pt into a folder in the bucket"
             className="shrink-0 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04]"
           >
             {exportOpen ? "Cancel export" : "Export .pt to S3"}
@@ -355,10 +357,9 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
           <p className="mb-2 text-xs text-ink-secondary">
             Copy{" "}
             <span className="tabular">{audit.model.group} v{audit.model.version}</span> as{" "}
-            <span className="tabular">selected.pt</span> into a folder. Use "New folder
-            name" to create one that does not exist yet; any existing{" "}
-            <span className="tabular">selected.pt</span> there is archived rather than
-            overwritten.
+            a versioned .pt file into a folder. Use "New folder name" to create
+            one that does not exist yet. If the same export filename already exists,
+            it is archived before the new copy is written.
           </p>
           <Track2S3FolderBrowser
             prefix={exportPrefix}
@@ -379,7 +380,7 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
             </button>
             {exportTarget && (
               <span className="tabular text-xs text-ink-muted">
-                -&gt; {exportTarget}/selected.pt
+                Destination: {exportTarget}/
               </span>
             )}
           </div>
@@ -411,6 +412,11 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
               never happened. Only rendered when they actually differ. */}
           {audit.actual && <ActualRunNotice audit={audit} />}
 
+          <div className="mt-3 grid gap-1 break-all text-xs text-ink">
+            <Field label="Dataset record ID" value={datasetRecordId || "Not recorded for this run"} />
+            <Field label="Training record ID" value={audit.id} />
+          </div>
+
           <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
             <DatasetBlock title="Training images" dataset={audit.train_dataset} />
             <DatasetBlock
@@ -430,7 +436,6 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
               label="Model version"
               value={audit.model ? `${audit.model.group} v${audit.model.version}` : "--"}
             />
-            <Field label="Approval" value={audit.model?.approval_status || "--"} />
             <Field
               label="Base model"
               value={audit.base_model.folder || "Registry's latest Approved"}

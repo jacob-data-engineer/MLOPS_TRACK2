@@ -395,6 +395,8 @@ class RetrainRunRequest(BaseModel):
     card uses `queue` so a composed run lands in the same list as every
     other run on that card, rather than appearing only as a job.
     """
+    prepared_only: bool = False
+    training: dict | None = None
     submit: str = "start"
 
 
@@ -417,6 +419,9 @@ def run_retrain(body: RetrainRunRequest | None = None,
         raise HTTPException(status_code=400,
                             detail=f"submit must be 'start', 'queue' or 'enqueue', not {submit!r}.")
     try:
+        if body and body.prepared_only:
+            from ..chain.prepared_training import queue_prepared
+            return queue_prepared(trigger="manual", submit=submit, overrides=body.training)
         return rs.run_chain(trigger="manual", submit=submit)
     except Exception as exc:                                   # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not run it: {exc}")

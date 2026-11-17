@@ -78,11 +78,6 @@ def test_the_built_record_is_restored_on_mount():
 
 # --- the three options ----------------------------------------------------------
 
-def test_all_three_are_offered():
-    code = _code(PAGE)
-    for key in ('key: "assembled"', 'key: "snapshot"', 'key: "pull"'):
-        assert key in code, f"missing option {key}"
-
 
 def test_pick_any_folder_is_gone():
     """Dropped deliberately. Leaving the button behind would be a control
@@ -93,47 +88,6 @@ def test_pick_any_folder_is_gone():
     for dead in ("pickOpen", "pickPrefix", "pickFolders", "pickBusy", "pickNote"):
         assert not re.search(rf"\b{dead}\b", code), f"{dead} survived the removal"
     assert "Choose a folder" not in code
-
-
-def test_an_old_settings_file_still_loads():
-    """`live` is the old name. A file still carrying it must land on one
-    of the three rather than being ignored, which would silently put the
-    card back on Assembled while the file said otherwise."""
-    # The named `live` branch folded into the default when the restore
-    # was rewritten to cascade (see tests/test_data_source_cascades.py).
-    # Same landing, wider net: ANY value that is not one of the other
-    # two becomes "assembled", so a name nobody anticipated lands
-    # somewhere real instead of leaving the radio and the folder
-    # disagreeing.
-    code = " ".join(_code(PAGE).split())
-    assert 'saved === "snapshot" || saved === "pull" ? saved : "assembled"' in code
-    assert "setDataSource(source);" in code
-
-
-def test_an_unavailable_source_is_greyed_with_a_reason():
-    """Hiding it would mean a reader cannot tell the option exists or
-    how to get it."""
-    code = _code(PAGE)
-    assert "missing:" in code
-    assert "disabled={!ready" in code
-    assert "opacity-55" in code, "the greyed state has to be visible"
-
-
-def test_the_snapshot_option_is_never_greyed():
-    """Picking one is how it gets filled, so greying it until it has a
-    value would be a control that can never be reached."""
-    code = _code(PAGE)
-    assert 'option.key === "snapshot" || (option.key === "assembled"' in " ".join(code.split())
-
-
-def test_choosing_a_source_points_the_run_at_that_folder():
-    """Otherwise the radio and the line beneath it disagree, and the run
-    trains on whatever was selected last."""
-    code = _code(PAGE)
-    block = code.split("onChange={() => {")[1][:1400]
-    assert 'option.key === "assembled" && assembled?.folder' in block
-    assert 'option.key === "pull" && lastPull?.folder' in block
-    assert re.search(r"setSelection\(\{\s*datasetFolder: assembled\.folder", block)
 
 
 # --- the auto-pull snapshot is found, not waited for ----------------------------
@@ -196,18 +150,3 @@ def test_nothing_anywhere_is_reported_as_nothing(monkeypatch):
     monkeypatch.setattr(pc, "read_config", lambda: {})
     monkeypatch.setattr(r.ds, "listing", lambda limit=50: [])
     assert r.last_pull_dataset(session=None)["dataset"] is None
-
-
-def test_choosing_it_restores_the_snapshot():
-    """A snapshot's folder IS the live root. Pointing at it without
-    putting the frozen file lists back would train on whatever has been
-    pulled since, under a label promising the pull's images."""
-    code = _code(PAGE)
-    block = code.split('option.key === "pull" && lastPull?.folder')[1][:900]
-    assert "restoreTrack2Snapshot(lastPull.snapshot_id)" in block
-    assert "refreshLiveDataset()" in block
-
-
-def test_the_label_says_auto_pull():
-    code = _code(PAGE)
-    assert "Use snapshot generated during auto pull" in code

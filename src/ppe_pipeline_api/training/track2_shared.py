@@ -4877,6 +4877,7 @@ def start_custom_training_run(
     # Everything else Ultralytics takes, as one validated blob -- see
     # `encode_hyperparams` and train.py's `_validated_hyperparams`.
     hyperparams: dict | None = None,
+    replay_entry: dict | None = None,
 ) -> dict:
     """Trains on a dataset's own classes, via the separate custom pipeline.
 
@@ -4911,7 +4912,7 @@ def start_custom_training_run(
 
     class_filter: dict = {}
     if detector_slug:
-        detector_for_run = get_detector(detector_slug)
+        detector_for_run = ((replay_entry or {}).get("detector_definition") or get_detector(detector_slug))
         class_filter = class_filter_for(dataset_folder, detector_for_run)
         if class_filter.get("derive") and str(train_data_uris or "").strip():
             # `derive_filtered_dataset` copies `images/` and `labels/` from
@@ -4947,7 +4948,7 @@ def start_custom_training_run(
         # keeps its own six classes on disk and Ultralytics narrows them,
         # so demanding that the yaml already equal the detector's list
         # would reject exactly the case this exists to serve.
-        detector_slug="" if class_filter.get("classes") else detector_slug,
+        detector_slug="" if class_filter.get("classes") or replay_entry else detector_slug,
     )
     base_model_package_arn = (base_model_package_arn or "").strip()
     # The one dispatcher decides the source and resolves it to a URI. There
@@ -4962,7 +4963,7 @@ def start_custom_training_run(
     # back to the shared open groups, which is what every custom run used
     # before detectors existed.
     registry_group = (
-        detector_group_name(get_detector(detector_slug), architecture)
+        detector_group_name((replay_entry or {}).get("detector_definition") or get_detector(detector_slug), architecture)
         if detector_slug else open_registry_group(architecture)
     )
     # The last line of defence against the pipeline failing at RegisterModel
@@ -5096,41 +5097,30 @@ def start_custom_training_run(
     # pipeline declares; `expect` re-reads the cache for exactly that
     # name when it is missing, so an update-pipeline is seen without a
     # restart.
-    declared = pipeline_parameter_names()
-    for optional in ("DataYamlUri", "DropUndeclaredClasses", "EvalExtraUris"):
-        if sent.get(optional):
-            declared = pipeline_parameter_names(expect=optional)
-    undeclared = [k for k in sent if declared and k not in declared]
-    if undeclared:
-        raise ValueError(
-            "The training pipeline does not declare "
-            + ", ".join(sorted(undeclared))
-            + ". Update it with `aws sagemaker update-pipeline "
-            + f"--pipeline-name {OPEN_PIPELINE_NAME}` before a run that "
-            + "needs it."
-        )
-    # The ones the pipeline declares with NO default cannot be omitted --
-    # dropping one would trade this error for a stranger one further in.
-    blank_required = [k for k in PIPELINE_PARAMETERS_WITHOUT_DEFAULTS
-                      if k not in sent]
-    if blank_required:
-        raise ValueError(
-            "Cannot start the run: "
-            + ", ".join(sorted(blank_required))
-            + " came through empty, and the pipeline has no default for "
-            + ("them." if len(blank_required) > 1 else "it.")
-        )
-    response = sm.start_pipeline_execution(
-        PipelineName=OPEN_PIPELINE_NAME,
-        ClientRequestToken=run_id,
-        PipelineExecutionDisplayName=run_id,
-        PipelineParameters=[{"Name": k, "Value": v} for k, v in sent.items()],
-    )
-    execution_arn = response["PipelineExecutionArn"]
-    # Holds the single GPU slot until the execution is listed as Executing.
-    global _custom_submission_at
-    with _custom_submission_lock:
-        _custom_submission_at = datetime.now(timezone.utc)
+    reproducibility = None
+    pipeline_version = None
+    pipeline_name = OPEN_PIPELINE_NAME
+    if replay_entry:
+        from .. import data as _data
+        from .reproducibility import pin_pipeline
+        _data.require_training_sql()
+        pipeline, sent = pin_pipeline(sm, OPEN_PIPELINE_NAME, replay_entry.get("pipeline"), sent)
+        pipeline_version = pipeline["version_id"]
+        pipeline_name = pipeline["name"]
+        reproducibility = _data.record_training_submission(replay_entry["dataset_version_id"],
+            entry={**replay_entry, "pipeline": pipeline}, pipeline=pipeline, parameters=sent)
+    else:
+        declared = pipeline_parameter_names()
+        for optional in ("DataYamlUri", "DropUndeclaredClasses", "EvalExtraUris"):
+            if sent.get(optional):
+                declared = pipeline_parameter_names(expect=optional)
+        undeclared = [k for k in sent if declared and k not in declared]
+        if undeclared:
+            raise ValueError("The training pipeline does not declare " + ", ".join(sorted(undeclared))
+                             + f". Update it with `aws sagemaker update-pipeline --pipeline-name {OPEN_PIPELINE_NAME}`.")
+        blank_required = [k for k in PIPELINE_PARAMETERS_WITHOUT_DEFAULTS if k not in sent]
+        if blank_required:
+            raise ValueError("Cannot start the run: " + ", ".join(sorted(blank_required)) + " came through empty.")
     audit = write_training_audit(
         train_data_uris=train_uri if "," in train_uri else "",
         data_yaml_uri=str(data_yaml_uri or "").strip(),
@@ -5144,12 +5134,31 @@ def start_custom_training_run(
         base_model_source=base_model_source,
         detector_slug=detector_slug, snapshot=snapshot,
         patience=patience, hyperparams=hyperparams,
+        strict=bool(replay_entry), reproducibility=reproducibility,
         training_options={
             "classes": list(class_filter.get("classes") or []),
             "single_cls": bool(class_filter.get("single_cls")),
             "drop_undeclared_classes": bool(drop_undeclared_classes),
         },
     )
+    try:
+        response = sm.start_pipeline_execution(
+            PipelineName=pipeline_name,
+            **({"PipelineVersionId": pipeline_version} if pipeline_version else {}),
+            ClientRequestToken=run_id,
+            PipelineExecutionDisplayName=run_id,
+            PipelineParameters=[{"Name": k, "Value": v} for k, v in sent.items()],
+        )
+    except Exception:
+        training_audit_table().update_item(Key={"id": audit["id"]},
+            UpdateExpression="SET #status = :status",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":status": "SubmissionFailed"})
+        raise
+    execution_arn = response["PipelineExecutionArn"]
+    global _custom_submission_at
+    with _custom_submission_lock:
+        _custom_submission_at = datetime.now(timezone.utc)
     # Linked immediately, which the replay path cannot do.
     try:
         training_audit_table().update_item(
@@ -5255,6 +5264,8 @@ def _persist_queue_entry(entry: dict) -> None:
     except Exception as exc:
         # Never fatal: a queue that runs but is not durable is still better
         # than refusing to queue at all.
+        if entry.get("reproducible"):
+            raise
         print(f"Could not persist queue entry {entry.get('id')}: {exc}")
 
 
@@ -5396,8 +5407,8 @@ def queue_add(entry: dict) -> None:
     with _queue_lock:
         if len(_training_queue) >= MAX_QUEUE_SIZE:
             raise ValueError(f"Queue is full (max {MAX_QUEUE_SIZE} runs) -- remove an entry before adding another.")
+        _persist_queue_entry(entry)
         _training_queue.append(entry)
-    _persist_queue_entry(entry)
 
 
 def queue_remove(entry_id: str) -> bool:
@@ -5558,6 +5569,7 @@ def try_advance_queue() -> None:
                     drop_undeclared_classes=bool(entry.get("drop_undeclared_classes")),
                     eval_extra_uris=entry.get("eval_extra_uris", ""),
                     source="queue",
+                    replay_entry=entry if entry.get("reproducible") else None,
                     epochs=entry["epochs"], img_size=entry["img_size"],
                     batch=entry["batch"], seed=entry["seed"],
                     notes=entry["notes"],
@@ -6132,6 +6144,11 @@ def audit_as_csv(audit: dict, settings: dict | None = None) -> str:
 
     writer.writerow(["TRAINING RUN RECORD"])
     writer.writerow(["Run ID", text(audit.get("id"))])
+    dataset_record = (audit.get("dataset_version_id")
+                      or (audit.get("train_dataset") or {}).get("dataset_version_id")
+                      or (audit.get("eval_dataset") or {}).get("dataset_version_id")
+                      or (audit.get("snapshot") or {}).get("snapshot_id"))
+    writer.writerow(["Dataset record ID", text(dataset_record) or "Not recorded"])
     writer.writerow([])
 
     status, submitted, started, ended, source, notes, arn, build = take(
@@ -6436,11 +6453,12 @@ def write_training_audit(
     # record named four of the run's settings and the CSV export said
     # nothing about the learning rate, optimiser or augmentation used.
     patience=None, hyperparams=None, training_options=None,
+    strict=False, reproducibility=None,
 ) -> dict:
     """One row per submitted run, written before the run is under way so
     the operator's exact inputs are captured even if the run later fails.
-    Never raises: an audit write failing must not take down the training
-    submission it is describing."""
+    Strict repeatable runs require the SQL audit to succeed before submission.
+    Legacy callers keep their historical best-effort behavior."""
     now = datetime.now(timezone.utc).isoformat()
     # Generated up front: the file manifests are keyed on it, and they are
     # written while this record is being built.
@@ -6522,6 +6540,10 @@ def write_training_audit(
         "metrics": None,
         "execution_arn": "",
     }
+    if reproducibility:
+        record["reproducibility"] = reproducibility
+        record["dataset_version_id"] = reproducibility["dataset_version_id"]
+        record["status"] = "Prepared"
     # A composed run's dataset fields come from the folders its yaml
     # names, not from `_generated/<hash>` -- see composed_audit_fields.
     if train_data_uris and data_yaml_uri:
@@ -6530,10 +6552,14 @@ def write_training_audit(
                 train_data_uris=train_data_uris, data_yaml_uri=data_yaml_uri,
                 eval_uri=eval_uri, eval_extra_uris=eval_extra_uris, audit_id=audit_id))
         except Exception as exc:                                   # noqa: BLE001
+            if strict:
+                raise
             print(f"Composed audit fields unavailable: {exc}")
     try:
         training_audit_table().put_item(Item=record)
     except Exception as exc:
+        if strict:
+            raise
         print(f"Could not write training audit for build {build_id}: {exc}")
     return record
 

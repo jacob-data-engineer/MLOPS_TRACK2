@@ -66,7 +66,7 @@ def test_every_data_card_that_saves_says_so():
 def test_training_listens_and_rereads_only_the_ticks():
     at = MODELS.index('listen("data-sources-changed"')
     block = MODELS[at:at + 600]
-    assert "getTrack2PullControl()" in block and "setSources({" in block
+    assert "getTrack2PullControl()" in block and "setAssembleSaved(" in block
 
 
 def test_the_board_reaches_other_windows_too():

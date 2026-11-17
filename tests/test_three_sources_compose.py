@@ -343,39 +343,6 @@ def test_a_single_folder_run_is_never_asked():
 PAGE = WEB / "routes" / "Track2ModelsPage.tsx"
 
 
-def test_the_training_data_option_names_every_ticked_source():
-    """It said "Use the assembled dataset" and named one folder. With
-    the golden set ticked that folder is one of two the run trains
-    from, and nothing on the card said so."""
-    code = _flat(PAGE)
-    assert '"Use the assembled dataset + the other ticked sources"' in code
-    assert "the golden set / edge cases" in code
-    assert "Pull Control's week folders" in code
-
-
-def test_it_reads_the_same_three_fields_the_chain_reads():
-    code = _flat(PAGE)
-    assert "folders: status.config.dataset_assemble?.use !== false," in code
-    assert "golden: Boolean(status.config.retention?.use_golden)," in code
-    assert "pull: !status.config.dataset_assemble?.only," in code
-
-
-def test_it_says_where_the_held_out_set_comes_from():
-    """Which is the part that decides whether a score means anything."""
-    code = _flat(PAGE)
-    assert "The golden set's val side is the held-out evaluation set." in code
-
-
-def test_nothing_ticked_says_so_here_too():
-    code = _flat(PAGE)
-    assert "No source is ticked. Tick at least one on the cards above." in code
-
-
-def test_the_folder_line_admits_it_is_not_the_whole_dataset():
-    code = _flat(PAGE)
-    assert "after the retention policy when Pull Control is ticked." in code
-
-
 def test_the_field_the_card_reads_is_declared_on_the_type():
     """`tsc` is the gate here and it failed on exactly this: `retention`
     rides in the pull config server-side -- `pull_control.DEFAULTS` has

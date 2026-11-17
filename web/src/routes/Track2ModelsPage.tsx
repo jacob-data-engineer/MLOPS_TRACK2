@@ -1,6 +1,6 @@
 import { Track2TrainingDataFile } from "../components/Track2TrainingDataFile";
 import { AlertCircle, Cpu, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "../lib/bus";
 import { formatDayTime } from "../lib/format";
 import { Badge } from "../components/Badge";
@@ -16,15 +16,8 @@ import { Track2ImportCheckpointPanel } from "../components/Track2ImportCheckpoin
 import { Track2PinnedBar } from "../components/Track2PinnedBar";
 import { Track2TrainingHistory } from "../components/Track2TrainingAuditPanel";
 import {
-  addTrack2Queue,
   runTrack2Retrain,
   ApiError,
-  listTrack2Snapshots,
-  getTrack2LastPullDataset,
-  restoreTrack2Snapshot,
-  deleteTrack2Snapshot,
-  trainOnTrack2Snapshot,
-  type Track2DatasetSnapshot,
   getTrack2Metrics,
   getTrack2QueueAfterPull,
   saveTrack2QueueAfterPull,
@@ -383,7 +376,7 @@ function localDate(iso: string): string {
   return iso ? formatDayTime(iso) : "";
 }
 
-function TrainingForm({
+export function TrainingForm({
   selection,
   setSelection,
   onSubmitted,
@@ -401,108 +394,26 @@ function TrainingForm({
    * below is never offering a list that no longer exists. */
   detectorsVersion: number;
 }) {
-  const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, evalFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
+  const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [datasetClasses, setDatasetClasses] = useState<Track2DatasetClasses | null>(null);
-  /** The three source ticks, as the cards left them. Read here rather
-   * than passed down: they live on three different cards, and this one
-   * only reports them. */
-  const [sources, setSources] = useState({ folders: true, golden: false, pull: false });
-  /** What the Assemble card is SAVED to build -- the inputs
-   * `retrain_schedule.assemble_plan` reads when Add to Queue runs the
-   * chain. The class check below compares against these, not against
-   * `built.folder`'s yaml: that file is whatever the card wrote LAST,
-   * possibly weeks ago with another Model Name (on 2026-11-06 it was
-   * `golden_set`, one class, under a six-class run), and the chain
-   * rewrites the yaml before training anyway. */
+  // Saved dataset taxonomy is checked against the selected model.
   const [assembleSaved, setAssembleSaved] = useState<{
     configured: boolean;
     slug: string;
     labelClasses: Record<string, string>;
     dropUndeclared: boolean;
   } | null>(null);
-  // Kept current while the page is open (2026-10-28). Read once on load,
-  // ticking the golden set or Assemble's folders afterwards left this
-  // card describing -- and choosing between enqueue and queue for -- the
-  // sources as they were when the page opened. The data cards are on the
-  // Data Preparation tab now, often in another window; the notice board
-  // says when one saved, and only the three ticks are re-read.
+  // Refresh compatibility when Data Preparation changes in another tab.
   useEffect(() => listen("data-sources-changed", () => {
     getTrack2PullControl()
       .then((status) => {
-        setSources({
-          folders: status.config.dataset_assemble?.use !== false,
-          golden: Boolean(status.config.retention?.use_golden),
-          pull: !status.config.dataset_assemble?.only,
-        });
         setAssembleSaved(readAssembleSaved(status.config.dataset_assemble));
       })
       .catch(() => undefined);
   }), []);
   // Choosing the dataset from this card, for when nothing upstream has.
-  // The frozen snapshots of the training root, offered HERE as well as
-  // in Retention. Repeating a past dataset is a thing you decide at the
-  // moment of starting a run, and it lived three cards away -- so doing
-  // it meant scrolling up, restoring, scrolling back, and trusting that
-  // the folder in this box was still the one just restored.
-  // Which KIND of dataset this run uses. Two mutually exclusive answers,
-  // and the controls for the one not chosen are disabled rather than
-  // hidden -- a greyed button still says the option exists, where a
-  // vanished one reads as a bug.
-  //
-  // "live" is the week folders as they stand, which is what the chain
-  // builds and what a scheduled retrain trains on. "snapshot" is a
-  // frozen definition: the same images every time, whatever has been
-  // pulled since. They are genuinely different datasets, which is why
-  // picking one has to DO something rather than only tick a box --
-  // choosing live rebuilds the week-folder yaml over whatever a restore
-  // left in the live slot.
-  // Three ways a run gets its images, and they are different questions:
-  // what this page assembled, a snapshot somebody froze, and whatever the
-  // pull chain last produced. Each has its own record server-side,
-  // because one slot cannot answer all three -- loading a snapshot by
-  // hand would otherwise erase what the pull built.
-  const [dataSource, setDataSource] =
-    useState<"assembled" | "snapshot" | "pull">("assembled");
-  /** What the Assemble card last wrote a data.yaml for. */
-  const [assembled, setAssembled] = useState<
-    { folder: string; eval_folder?: string; at?: string } | null>(null);
-  /** What the pull chain last froze. Never overwritten by a manual pick. */
-  const [lastPull, setLastPull] = useState<{
-    folder?: string; snapshot_id?: string; files?: number;
-    set_by?: string; at?: string;
-  } | null>(null);
-  const [snapOpen, setSnapOpen] = useState(false);
-  const [snaps, setSnaps] = useState<Track2DatasetSnapshot[]>([]);
-  const [snapBusy, setSnapBusy] = useState("");
-  /** The snapshot a Delete was pressed on, while the dialog asks. */
-  const [snapToDelete, setSnapToDelete] = useState<Track2DatasetSnapshot | null>(null);
-  const [snapDeleting, setSnapDeleting] = useState(false);
-  const [snapDeleteError, setSnapDeleteError] = useState("");
-  const [snapNote, setSnapNote] = useState("");
-  // What the last automatic run built and froze. Read so the card opens
-  // pointing at it rather than saying "Nothing chosen yet" after the
-  // schedule has just produced a dataset.
-  const [autoDataset, setAutoDataset] = useState<{
-    folder?: string; snapshot_id?: string; files?: number;
-    set_by?: string; at?: string;
-    snapshot_created_at?: string; snapshot_note?: string; pinned?: boolean;
-  } | null>(null);
-  /** Re-read which definition is live. Called after anything that moves
-   * the live slot: a restore writes `default_dataset`, and without
-   * reading it back the card goes on naming the snapshot the last chain
-   * froze over a slot now holding a different one. */
-  const refreshLiveDataset = useCallback(async () => {
-    try {
-      const status = await getTrack2PullControl();
-      const built = status.config.default_dataset || {};
-      if (built.folder) setAutoDataset(built);
-      return built;
-    } catch {
-      return null;
-    }
-  }, []);
   const [detectors, setDetectors] = useState<Track2Detector[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -562,12 +473,8 @@ function TrainingForm({
   // with everything on it. A dataset MISSING one of them cannot train it
   // at all, and that is the only real error.
   //
-  // WHICH yaml to compare against depends on the radio. A snapshot or a
-  // pull trains the folder's yaml as it stands, so that file is read. The
-  // assembled source does NOT: Add to Queue rebuilds the yaml from the
-  // saved dataset taxonomy. Model compatibility is checked separately below.
   const assembledBuild = (() => {
-    if (dataSource !== "assembled" || !assembleSaved?.configured) return null;
+    if (!assembleSaved?.configured) return null;
     return { classes: assembleSaved.labelClasses };
   })();
   const checkedClasses: Record<string, string> | null = assembledBuild
@@ -626,92 +533,10 @@ function TrainingForm({
       .then((status) => {
         if (cancelled) return;
         // The saved choice, so a reloaded page -- or a loaded settings
-        // file -- comes back on the same side of live/frozen it was left
-        // on. Without it the radio always read "live" while the live
-        // slot could be holding a restored snapshot.
-        // "live" is the old name for this setting, from when there were
-        // two choices and the first was "the week folders as they
-        // stand". A saved file still carrying it maps onto the nearest
-        // of the three rather than being ignored, which would silently
-        // put the card back on Assembled.
-        const saved = status.config.data_source;
-        const source: "assembled" | "snapshot" | "pull" =
-          saved === "snapshot" || saved === "pull" ? saved : "assembled";
-        setDataSource(source);
-
-        const assembledRecord = status.config.dataset_assemble?.built ?? null;
-        setAssembled(assembledRecord);
         setAssembleSaved(readAssembleSaved(status.config.dataset_assemble));
-        // WHICH SOURCES ARE TICKED, read from the same three fields the
-        // chain reads. The assembled folder alone stopped describing
-        // this run the moment the yaml could be composed from more than
-        // one place: with the golden set on, that folder is one of two
-        // the run trains from, and the line under the radio said only
-        // the first.
-        setSources({
-          folders: status.config.dataset_assemble?.use !== false,
-          golden: Boolean(status.config.retention?.use_golden),
-          pull: !status.config.dataset_assemble?.only,
-        });
-        setLastPull(status.config.last_pull_dataset ?? null);
-        const built = status.config.default_dataset || {};
-        if (built.folder) setAutoDataset(built);
+        const store = status.config.central_store?.folder;
+        if (store) setSelection({ datasetFolder: `${store}_decay`, evalFolder: `${store}_decay` });
 
-        // THE CHOSEN SOURCE DECIDES THE FOLDER.
-        //
-        // This used to restore the radio from `data_source` and then set
-        // the folder from `default_dataset` whatever the radio said. So
-        // every reload came back with "Use the assembled dataset" ticked
-        // and `retraining` -- the frozen-snapshot slot -- underneath it,
-        // and the run that followed trained `retraining`. Clicking the
-        // radio fixed it; reloading broke it again, and nothing on
-        // screen said which of the two to believe.
-        //
-        // Each option now fills from its OWN record, the same mapping
-        // the radio's onChange uses.
-        const recordFor = (key: string) =>
-          key === "assembled" ? assembledRecord
-            : key === "pull" ? (status.config.last_pull_dataset ?? null)
-              : (built.folder ? built : null);
-
-        let settled = recordFor(source);
-        let settledSource = source;
-        // Nothing saved under the chosen source. Fall back to the frozen
-        // slot AND move the radio with it, rather than showing one
-        // answer and running another.
-        if (!settled?.folder && built.folder && source !== "assembled") {
-          settled = built;
-          settledSource = "snapshot";
-          setDataSource("snapshot");
-        }
-        // `datasetFolder` is the value at the time this effect ran: ""
-        // on mount, current on any later re-run. An explicit pick made
-        // in this tab wins, so a refresh cannot move the folder out from
-        // under someone mid-setup.
-        if (!datasetFolder && settled?.folder) {
-          setSelection({
-            datasetFolder: settled.folder,
-            evalFolder: (settled as { eval_folder?: string }).eval_folder || settled.folder,
-          });
-        }
-
-        // The config field is only written by chains that ran after it
-        // existed. The route also reads the snapshot store, so pulls
-        // from before it are still offered -- and it answers AFTER the
-        // block above, so the pull option fills its folder here when it
-        // is the one chosen.
-        void getTrack2LastPullDataset()
-          .then((res) => {
-            if (!res.dataset?.folder) return;
-            setLastPull(res.dataset);
-            if (settledSource === "pull" && !datasetFolder) {
-              setSelection({
-                datasetFolder: res.dataset.folder,
-                evalFolder: res.dataset.folder,
-              });
-            }
-          })
-          .catch(() => undefined);
       })
       .catch(() => undefined);
     getTrack2Retrain()
@@ -778,23 +603,7 @@ function TrainingForm({
     const lines: { tone: "ok" | "warn" | "bad"; text: string }[] = [];
     let blocking = false;
 
-    if (dataSource === "assembled") {
-      // Built at Add to Queue from the ticked sources -- there is no
-      // folder to have chosen first.
-      if (!datasetFolder) {
-        lines.push({
-          tone: "ok",
-          text: "The data.yaml is built from the ticked sources when you press Add to Queue.",
-        });
-      }
-    } else if (!datasetFolder) {
-      lines.push({
-        tone: "warn",
-        text: "No dataset chosen yet -- pick a frozen snapshot above.",
-      });
-    } else if (!checkedClasses) {
-      lines.push({ tone: "warn", text: `Could not read data.yaml in ${datasetFolder}.` });
-    }
+    lines.push({ tone: "ok", text: "Training uses the already-prepared decayed dataset. Its exact files and settings are preserved before queueing." });
 
     if (!chosenDetector) {
       lines.push({
@@ -871,97 +680,24 @@ function TrainingForm({
   }
 
 
-  const params = (): Track2TrainingParams => ({
-    generation,
-    size,
-    epochs,
-    img_size: imgSize,
-    batch,
-    seed,
-    patience,
-    // Overrides only -- see the request type. Empty means every
-    // Ultralytics default, which is how a run behaved before this.
-    hyperparams,
-    dataset_folder: datasetFolder,
-    eval_dataset_folder: evalFolder,
-    // A custom run picks EXACTLY one source and the backend rejects two,
-    // so the folder is never sent alongside a key -- custom runs select a
-    // file now, not a folder. The production run keeps its original
-    // browse-or-latest-approved behaviour untouched.
-    // Exactly one source, on either pipeline. `registry` on the production
-    // path means "leave it to the coordinator's production pointer", which
-    // is what sending nothing does -- so it deliberately sends nothing.
-    base_model_folder: "",
-    // EXACTLY ONE base model source, which the backend enforces. With
-    // scratch gone there is only one to send.
-    base_model_package_arn: basePackageArn,
-    // Retired: starting weights are always a registered version now. Still
-    // sent, and still empty, because the backend's "exactly one source"
-    // check reads it and the queue replays entries that carry it.
-    base_model_key: "",
-    // Always false from this page now. Still SENT, because the backend's
-    // "exactly one base model source" check reads it and the queue
-    // replays entries that carry it.
-    base_model_scratch: false,
-    architecture,
-    // Sent on every submission, not just Start Training: Add to Queue used
-    // to drop it, so a queued custom run silently ran as a production one.
-    // Always: this card trains a detector's classes through the open
-    // pipeline. The production person/helmet path is not reachable
-    // from here any more, by design.
-    custom_classes: true,
-    // Only meaningful on the custom path -- the production pipeline's
-    // taxonomy and registry group are fixed.
-    detector_slug: detectorSlug,
-    notes,
-  });
-
   // Starting a run directly was removed with the button that did it: both
   // cards queue, and the queue is what gets started. The backend still
   // exposes both start endpoints, so this is a UI decision, not a
   // capability that has gone.
-  /** A run built from MORE than the assembled folder.
-   *
-   * The queue entry this card writes names one folder, and one folder
-   * cannot carry a golden set that lives under another root. Only the
-   * chain composes that yaml -- builds the golden set, names every
-   * source, fetches every prefix -- so when the radio above says the
-   * run is composed, this button has to run the chain or the label
-   * lies: it would say "plus the golden set" and train without it.
-   *
-   * The chain trains with the SAME shape: step 1 writes
-   * `default_training`, `settings()` reads it, and `onTraining` copies
-   * it into this form. There is no second copy to disagree. */
-  const composed = dataSource === "assembled" && (sources.golden || sources.pull);
-
   async function handleAddToQueue() {
     setBusy(true);
     setError(null);
     try {
-      // THE ASSEMBLED DATASET IS GENERATED HERE -- there is no other
-      // place it is built from the cards (2026-10-26). The
-      // chain rebuilds the data.yaml from the Assemble card's saved
-      // settings -- the same build the schedule runs -- freezes it, and
-      // queues it. That is also what carries the card's "filter
-      // undeclared classes" tick to the run; queueing a stale folder
-      // dropped it, and the trainer refused labels the yaml did not name.
-      //
-      // `queue` for a composed run (it also releases the queue, as it
-      // always has); `enqueue` otherwise, which leaves the queue as it was
-      // -- the meaning Add to Queue had before.
-      if (dataSource === "assembled") {
-        const got = await runTrack2Retrain(composed ? "queue" : "enqueue");
-        const failed = got.steps.find((step) => !step.ok);
-        if (!got.ok || failed) {
-          // The step that stopped it, in its own words. "Add to queue
-          // failed" would hide the one sentence that says what to fix.
-          setError(`Stopped at "${failed?.step ?? "?"}": ${failed?.detail ?? "no detail"}`);
-          return;
-        }
-        onSubmitted();
+      const got = await runTrack2Retrain("enqueue", true, {
+        epochs, img_size: imgSize, batch, seed, patience, hyperparams,
+        detector_slug: detectorSlug, architecture, notes,
+        base_version: basePackageArn,
+      });
+      const failed = got.steps.find((step) => !step.ok);
+      if (!got.ok || failed) {
+        setError(failed?.detail || "Could not preserve and queue the prepared dataset.");
         return;
       }
-      await addTrack2Queue(params());
       onSubmitted();
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Add to queue failed.");
@@ -988,11 +724,10 @@ function TrainingForm({
             and sends it.
           </p>
           <p className="mt-2">
-            The dataset comes from the radio below. <em>Use the assembled
-            dataset</em> builds the data.yaml from the ticked sources when you
-            press <em>Add to Queue</em> &mdash; after the retention policy,
-            when Pull Control is one of them. A frozen snapshot is trained
-            exactly as it was frozen.
+            Training uses the decayed dataset already produced in Data Preparation.
+            Add to Queue preserves its files and starting weights. The recipe is saved
+            in SQL before training starts; Data Catalog can queue the same run again
+            or export its dataset as a ZIP.
           </p>
           <p className="mt-2">
             When the validation set lives under a different prefix &mdash; its
@@ -1024,407 +759,6 @@ function TrainingForm({
           modes -- so the box could only ever be ticked, and clicking it
           did nothing. Both remaining modes submit from here. */}
       <fieldset>
-
-      <div className="mb-3 rounded-md border border-black/15 bg-page p-2.5 text-xs">
-        <p className="tabular text-ink-muted">
-          Training data{" "}
-          <span className="text-ink-muted/70">
-            (from <em>Assemble a dataset</em> above, from Selection weeks,
-            &ldquo;Use for training&rdquo; on a data.yaml, or pick one here)
-          </span>
-        </p>
-        {/* The choice, before anything that depends on it. Radios rather
-            than two checkboxes: they are mutually exclusive, and a pair
-            of checkboxes that cannot both be ticked is a radio group
-            wearing the wrong control. */}
-        {/* Three sources, each with its own record. A greyed one says
-            what would fill it rather than disappearing: an option you
-            cannot see is one you cannot plan for. */}
-        <div className="mt-1 flex flex-col gap-1">
-          {([
-            {
-              key: "assembled" as const,
-              label: sources.golden || sources.pull
-                ? "Use the assembled dataset + the other ticked sources"
-                : "Use the assembled dataset",
-              why: [
-                sources.folders ? "the folders you picked in Assemble a dataset" : "",
-                sources.golden ? "the golden set / edge cases" : "",
-                sources.pull ? "Pull Control's week folders" : "",
-              ].filter(Boolean).join(" + ")
-                ? `Built from ${[
-                    sources.folders ? "the folders you picked in Assemble a dataset" : "",
-                    sources.golden ? "the golden set / edge cases" : "",
-                    sources.pull ? "Pull Control's week folders" : "",
-                  ].filter(Boolean).join(" + ")}.`
-                  + (sources.golden
-                    ? " The golden set's val side is the held-out evaluation set."
-                    : "")
-                : "No source is ticked. Tick at least one on the cards above.",
-              folder: assembled?.folder,
-              // The data.yaml is built when Add to Queue is pressed (and
-              // when the schedule fires), so there is nothing to have
-              // pressed first -- the option is ready once a source is.
-              detail: "The data.yaml is built when you press Add to Queue, "
-                + "after the retention policy when Pull Control is ticked.",
-              missing: "No source is ticked. Tick at least one of the cards above.",
-            },
-            {
-              key: "snapshot" as const,
-              label: "Use a frozen snapshot",
-              why: "The same images every time, whatever has been pulled since.",
-              folder: autoDataset?.folder,
-              detail: "",
-              missing: "",
-            },
-            {
-              key: "pull" as const,
-              label: "Use snapshot generated during auto pull",
-              why: "The snapshot the chain froze when the pull last ran on its own.",
-              folder: lastPull?.folder,
-              detail: lastPull?.folder
-                ? `${lastPull.folder} · ${lastPull.snapshot_id ?? "snapshot"}`
-                  + (lastPull.files ? ` · ${lastPull.files.toLocaleString()} images` : "")
-                  + (lastPull.at ? ` · ${localDate(lastPull.at)}` : "")
-                : "",
-              missing: "No automatic pull has frozen one yet. Switch on “Run after every pull” in Auto Training, and run a pull.",
-            },
-          ]).map((option) => {
-            // The snapshot option is always offered: picking one is how
-            // it gets filled, so greying it until it has a value would
-            // be a control that can never be reached.
-            const ready = option.key === "snapshot"
-              || (option.key === "assembled"
-                ? sources.folders || sources.golden || sources.pull
-                : Boolean(option.folder));
-            const chosen = dataSource === option.key;
-            // Keyed here as well as on the wrapper below: whichever of
-            // the two is returned IS the list item, so both need one.
-            const row = (
-              <label key={option.key}
-                     className={`flex items-start gap-1.5 ${ready ? "" : "opacity-55"}`}>
-                <input
-                  type="radio"
-                  name="track2-data-source"
-                  className="mt-0.5 shrink-0"
-                  checked={chosen}
-                  disabled={!ready || !!snapBusy}
-                  onChange={() => {
-                    setDataSource(option.key);
-                    setSnapOpen(false);
-                    setSnapNote("");
-                    void saveTrack2PullConfig({ data_source: option.key })
-                      .catch(() => undefined);
-                    // Point the run at that source's own folder, so the
-                    // radio and the line under it cannot disagree.
-                    if (option.key === "assembled" && assembled?.folder) {
-                      setSelection({
-                        datasetFolder: assembled.folder,
-                        evalFolder: assembled.eval_folder || assembled.folder,
-                      });
-                    } else if (option.key === "pull" && lastPull?.folder) {
-                      setSelection({
-                        datasetFolder: lastPull.folder,
-                        evalFolder: lastPull.folder,
-                      });
-                      // RESTORED, not merely pointed at.
-                      //
-                      // A snapshot's folder is the live root -- the same
-                      // `retraining` the week folders fill. Pointing at
-                      // it without putting the frozen file lists back
-                      // would train on whatever has been pulled since,
-                      // under a label promising the images from the
-                      // pull. The restore writes those lists back, which
-                      // is what makes the two agree.
-                      if (lastPull.snapshot_id) {
-                        setSnapBusy("Restoring...");
-                        void restoreTrack2Snapshot(lastPull.snapshot_id)
-                          .then(async (got) => {
-                            await refreshLiveDataset();
-                            setSnapNote(
-                              `Put back ${got.restored.length} file lists from `
-                              + `${lastPull.snapshot_id}.`);
-                          })
-                          .catch((err) => setSnapNote(
-                            err instanceof ApiError ? err.detail
-                              : "Could not put that snapshot back."))
-                          .finally(() => setSnapBusy(""));
-                      }
-                    }
-                  }}
-                />
-                <span>
-                  <span className={chosen ? "font-medium text-ink" : "text-ink-muted"}>
-                    {option.label}
-                  </span>
-                  <span className="block text-ink-muted/80">{option.why}</span>
-                  {ready && option.detail && (
-                    <span className="tabular block text-ink-secondary">{option.detail}</span>
-                  )}
-                  {!ready && (
-                    <span className="block text-ink-muted">{option.missing}</span>
-                  )}
-                </span>
-              </label>
-            );
-            // The picker belongs ON this row, not three lines below the
-            // last option: it only acts on THIS choice, and sitting
-            // under all three it read as belonging to whichever was
-            // ticked. A sibling of the label rather than a child of it
-            // -- a button inside a label is also the label's control,
-            // so clicking it would tick the radio as well.
-            if (option.key !== "snapshot") return row;
-            return (
-              <div key={option.key} className="flex items-start gap-2">
-                {row}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !snapOpen;
-                    setSnapOpen(next);
-                    setSnapNote("");
-                    if (!next) return;
-                    const root = (autoDataset?.folder || datasetFolder || "").trim();
-                    setSnapBusy("Loading...");
-                    listTrack2Snapshots(root, 25)
-                      .then((res) => setSnaps(res.snapshots ?? []))
-                      .catch(() => setSnapNote("Could not read the snapshots."))
-                      .finally(() => setSnapBusy(""));
-                  }}
-                  disabled={dataSource !== "snapshot"}
-                  title={dataSource !== "snapshot"
-                    ? "Switch to “Use a frozen snapshot” to pick one."
-                    : undefined}
-                  className="mt-0.5 shrink-0 rounded-md border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary disabled:opacity-40"
-                >
-                  {snapOpen ? "Hide snapshots" : "Pick a snapshot"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        <p className="tabular mt-0.5 text-ink">
-          {datasetFolder || "Nothing chosen yet."}
-        </p>
-        {evalFolder && (
-          <p className="tabular mt-0.5 text-ink-secondary">Evaluation: {evalFolder}</p>
-        )}
-
-        {/* Pickable HERE, not only upstream. The dataset could previously
-            be set in exactly one place -- "Use for training" in
-            Retention, which appears only once a data.yaml has been built
-            -- so anyone who had not built one reached this card, read
-            "no dataset chosen", and had nothing on screen to act on. The
-            run was unreachable from the card that starts it. */}
-        {/* Only under the radio it describes. This records
-            `default_dataset` -- the FROZEN slot -- and it was rendered
-            whenever that slot had anything in it, so "Built by the
-            snapshot run ... frozen as 532f55d72b51a774 (451 files)" sat
-            under a ticked "Use the assembled dataset" describing a
-            different dataset entirely. */}
-        {dataSource === "snapshot" && autoDataset?.folder && (
-          <p className="tabular mt-1 text-xs text-ink-secondary">
-            {/* Two dates, and they are not the same thing. `at` is when
-                this definition was PUT BACK; `snapshot_created_at` is
-                when it was frozen. Showing only the first made a
-                snapshot taken on 30 September read as "at 2026-10-06
-                06:59" -- the one fact that tells one frozen dataset from
-                another, replaced by the time you clicked Load. */}
-            {/* Only while the frozen side is chosen. The record can say
-                "snapshot" for a moment after switching to live -- the
-                rebuild clears it, but the card renders first -- and a
-                line reading "Loaded snapshot ..." under a ticked "Use
-                live data" is the card contradicting itself. The radio is
-                what the person just chose; it wins. */}
-            {autoDataset.set_by === "snapshot" && dataSource === "snapshot" ? (
-              <>
-                {/* The date it was FROZEN, and nothing about when it was
-                    put back. "Built by the snapshot run at <now>" was
-                    the restore time wearing the creation time's place --
-                    it changed every time you pressed Load, so the one
-                    fact that tells one frozen dataset from another was
-                    the one fact it never showed. */}
-                Loaded snapshot{" "}
-                <span className="font-medium">{autoDataset.snapshot_id}</span>
-                {autoDataset.snapshot_created_at && (
-                  <> &middot; frozen {localDate(autoDataset.snapshot_created_at)}</>
-                )}
-                {autoDataset.files
-                  ? ` · ${autoDataset.files.toLocaleString()} images`
-                  : ""}
-                {autoDataset.pinned && " pinned by name from its manifest"}
-                {autoDataset.snapshot_note && (
-                  <span className="block text-ink-muted">{autoDataset.snapshot_note}</span>
-                )}
-              </>
-            ) : (
-              <>
-                Built by the {autoDataset.set_by ?? "automatic"} run at{" "}
-                {localDate(autoDataset.at ?? "")}
-                {autoDataset.snapshot_id && (
-                  <>
-                    {" "}&middot; frozen as{" "}
-                    <span className="font-medium">{autoDataset.snapshot_id}</span>
-                    {autoDataset.files ? ` (${autoDataset.files.toLocaleString()} files)` : ""}
-                  </>
-                )}
-              </>
-            )}
-            {datasetFolder && datasetFolder !== autoDataset.folder && (
-              <span className="block text-critical">
-                You are training {datasetFolder}, not the folder the schedule
-                built.
-              </span>
-            )}
-          </p>
-        )}
-        {snapNote && (
-          <p className={`mt-1 text-xs ${
-            /could not|stopped at/i.test(snapNote) ? "text-critical" : "text-ink-secondary"
-          }`}>
-            {snapNote}
-          </p>
-        )}
-
-        {snapOpen && (
-          <div className="mt-2 rounded-sm border border-hairline">
-            <p className="border-b border-hairline px-2 py-1.5 text-xs text-ink-muted">
-              Every frozen definition of this root, newest first. <strong>Load</strong>{" "}
-              puts one back and points this form at it; <strong>Run</strong> does that
-              and queues the run.
-            </p>
-            {snapBusy && <p className="px-2 py-1.5 text-xs text-ink-muted">{snapBusy}</p>}
-            {!snapBusy && snaps.length === 0 && (
-              <p className="px-2 py-1.5 text-xs text-ink-muted">
-                No snapshots yet. The automatic chain freezes one on every run.
-              </p>
-            )}
-            <div className="max-h-56 overflow-y-auto">
-              {snaps.map((snap) => (
-                <div key={snap.snapshot_id}
-                     className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-2 py-1.5 last:border-b-0">
-                  <span className="tabular text-xs font-medium text-ink">
-                    {snap.snapshot_id}
-                  </span>
-                  <span className="tabular text-xs text-ink-muted">
-                    {snap.created_at ? localDate(snap.created_at) : ""}
-                    {" · "}
-                    {snap.file_count.toLocaleString()} files
-                  </span>
-                  {snap.note && (
-                    <span className="text-xs text-ink-secondary">{snap.note}</span>
-                  )}
-                  <span className="ml-auto flex gap-3">
-                    <button type="button" disabled={!!snapBusy}
-                      onClick={async () => {
-                        setSnapBusy("Loading..."); setSnapNote("");
-                        try {
-                          const got = await restoreTrack2Snapshot(snap.snapshot_id);
-                          setSelection({ datasetFolder: got.root, evalFolder: got.root });
-                          // Read back WHICH definition is live. The
-                          // folder name does not change on a restore --
-                          // there is one live slot per root -- so
-                          // without this the box looked identical
-                          // afterwards and loading appeared to do
-                          // nothing, while still naming the snapshot the
-                          // last chain froze.
-                          await refreshLiveDataset();
-                          const frozen = got.created_at
-                            ? ` (frozen ${localDate(got.created_at)})` : "";
-                          setSnapNote(got.pinned_from_manifest
-                            ? `Loaded ${got.snapshot_id}${frozen} -- `
-                              + `${got.selected.toLocaleString()} images pinned by `
-                              + `name from its manifest.`
-                            : `Loaded ${got.snapshot_id}${frozen}.`);
-                          setSnapOpen(false);
-                        } catch (err) {
-                          setSnapNote(err instanceof ApiError ? err.detail : "Could not load it.");
-                        } finally { setSnapBusy(""); }
-                      }}
-                      className="text-xs font-medium text-ink-secondary underline disabled:opacity-40">
-                      Load
-                    </button>
-                    <button type="button" disabled={!!snapBusy}
-                      onClick={async () => {
-                        setSnapBusy("Starting..."); setSnapNote("");
-                        try {
-                          const got = await trainOnTrack2Snapshot(snap.snapshot_id);
-                          setSelection({ datasetFolder: got.restore.root,
-                                         evalFolder: got.restore.root });
-                          await refreshLiveDataset();
-                          const failed = (got.run.steps || []).find((st) => !st.ok);
-                          setSnapNote(failed
-                            ? `Stopped at ${failed.step}: ${failed.detail}`
-                            : `Queued a run on ${got.restore.snapshot_id}`
-                              + (got.restore.created_at
-                                ? ` (frozen ${localDate(got.restore.created_at)})` : "")
-                              + `. It starts when the GPU is free.`);
-                          if (!failed) setSnapOpen(false);
-                        } catch (err) {
-                          setSnapNote(err instanceof ApiError ? err.detail : "Could not start it.");
-                        } finally { setSnapBusy(""); }
-                      }}
-                      className="text-xs font-medium text-accent underline disabled:opacity-40">
-                      Run
-                    </button>
-                    <button type="button" disabled={!!snapBusy}
-                      onClick={() => { setSnapDeleteError(""); setSnapToDelete(snap); }}
-                      className="rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-40">
-                      Delete
-                    </button>
-                  </span>
-                </div>
-              ))}
-              {/* Destructive, so a dialog that says what goes and what
-                  stays; Cancel is the default. */}
-              <ConfirmDialog
-                open={!!snapToDelete}
-                title={`Delete snapshot ${snapToDelete?.snapshot_id ?? ""}?`}
-                destructive
-                busy={snapDeleting}
-                confirmLabel="Delete it"
-                cancelLabel="Cancel"
-                body={
-                  <>
-                    <p>
-                      Frozen {snapToDelete?.created_at ? localDate(snapToDelete.created_at) : ""}
-                      {" · "}{snapToDelete?.file_count.toLocaleString()} files.
-                      Its record, its frozen <span className="tabular">data.yaml</span> and
-                      its file list are deleted. <strong>The images and labels are not
-                      touched</strong>, and no trained model is affected.
-                    </p>
-                    <p className="mt-2">
-                      What is lost is the record of exactly which files this selection
-                      held, so a run trained from it can no longer be repeated from it.
-                      This cannot be undone.
-                    </p>
-                    {snapDeleteError && (
-                      <p className="mt-2 text-critical">{snapDeleteError}</p>
-                    )}
-                  </>
-                }
-                onConfirm={async () => {
-                  if (!snapToDelete) return;
-                  setSnapDeleting(true);
-                  setSnapDeleteError("");
-                  try {
-                    await deleteTrack2Snapshot(snapToDelete.snapshot_id);
-                    setSnaps((list) => list.filter((x) => x.snapshot_id !== snapToDelete.snapshot_id));
-                    setSnapNote(`Deleted snapshot ${snapToDelete.snapshot_id}. The images are untouched.`);
-                    setSnapToDelete(null);
-                  } catch (err) {
-                    setSnapDeleteError(err instanceof ApiError ? err.detail : "Could not delete it.");
-                  } finally {
-                    setSnapDeleting(false);
-                  }
-                }}
-                onCancel={() => setSnapToDelete(null)}
-              />
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* The detector, the generation, the size and the version to start
           from are all chosen in step 1 now. Repeating those controls here
@@ -1505,39 +839,16 @@ function TrainingForm({
         )}
       </div>
 
-      {/* Queue only. Starting is done once, from the card below, so two
-          cards cannot each kick off a run against the single GPU.
-
-          EXCEPT for a composed run, which runs the chain: it builds the
-          golden set, composes the yaml, freezes a snapshot, queues the
-          entry and releases the queue -- the same hand-over the
-          schedule uses. Said here so the label change is not a
-          surprise. */}
-      {dataSource === "assembled" && !composed && (
-        <p className="mt-3 text-xs text-ink-muted">
-          Add to Queue generates the data.yaml from <em>Assemble a dataset</em>{" "}
-          first -- from the folders, classes and filter saved there right now --
-          then freezes a snapshot and adds the run to the queue.
-        </p>
-      )}
-      {composed && (
-        <p className="mt-3 text-xs text-ink-muted">
-          This run is composed from more than one source, so the button
-          runs the full chain: build the golden set &rarr; compose the
-          data.yaml &rarr; freeze a snapshot &rarr; queue it &rarr; start
-          it. Exactly what the schedule does when it fires, done now.
-        </p>
-      )}
       <div className="mt-3 flex gap-2">
         <button
           type="button"
           onClick={handleAddToQueue}
-          disabled={busy || (!datasetFolder && dataSource !== "assembled") || baseSelectionIncomplete || analysis.blocking}
+          disabled={busy || baseSelectionIncomplete || analysis.blocking}
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
           {busy
-            ? (dataSource === "assembled" ? "Generating the yaml and queueing..." : "Working...")
-            : (composed ? "Build, Queue and Start" : "Add to Queue")}
+            ? "Preserving the prepared dataset and queueing..."
+            : "Add to Queue"}
         </button>
         <button
           type="button"
@@ -1550,11 +861,7 @@ function TrainingForm({
       </div>
       </fieldset>
 
-      {/* Queue a run whenever a pull lands, and stop there. Starting one
-          outright commits GPU hours with nobody watching; doing nothing
-          means the rebuild is the step that gets forgotten. This does
-          the rebuild, the freeze and the queueing, and leaves the
-          expensive irreversible part a human decision. */}
+      {/* Automatic queueing uses the prepared dataset too. */}
       <div className="mt-3 rounded-md border border-black/15 p-3">
         {/* READ-ONLY (2026-10-26). "Enabled for scheduling" was a tick
             here, a third switch for the chain beside the Retention card's

@@ -211,12 +211,3 @@ def test_the_card_no_longer_carries_its_own_scheduling_tick():
     assert "setScheduled" not in code
     assert "checked={scheduled}" not in code
     assert "const [scheduled" not in code
-
-
-def test_the_tick_lives_with_the_radios_that_decide_the_source():
-    page = (pathlib.Path(__file__).resolve().parents[1]
-            / "web" / "src" / "routes" / "Track2ModelsPage.tsx").read_text(encoding="utf-8")
-    flat = " ".join(page.split())
-    assert "Enabled for scheduling" in flat
-    # Below the group it depends on, not floating somewhere else.
-    assert flat.index("Use the assembled dataset") < flat.index("Enabled for scheduling")

@@ -62,7 +62,7 @@ def describe(kind: str, ident: str) -> dict:
         "Starting checkpoint": pick("base_model", "base_model_s3_uri"),
         "Dataset and preparation": {**pick("train_dataset", "eval_dataset", "snapshot", "eval_is_train_dataset"),
                                     **({"dataset": dataset} if dataset else {})},
-        "Training settings": pick("parameters", "hyperparams", "actual", "training_options"),
+        "Training settings": pick("parameters", "hyperparams", "actual", "training_options", "reproducibility"),
         "Training history": pick("history", "training_history", "epochs_completed", "best_epoch"),
         "Evaluation": pick("metrics", "evaluation", "per_class_metrics", "confusion_matrix"),
         "Inference settings": pick("inference_settings", "confidence_threshold", "iou_threshold"),

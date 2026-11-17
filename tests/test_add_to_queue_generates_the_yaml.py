@@ -31,13 +31,6 @@ def test_the_route_accepts_enqueue():
     assert '("start", "queue", "enqueue")' in inspect.getsource(tr.run_retrain)
 
 
-def test_add_to_queue_runs_the_chain_for_the_assembled_dataset():
-    flat = " ".join(PAGE.split())
-    assert 'if (dataSource === "assembled") { const got = await runTrack2Retrain(composed ? "queue" : "enqueue");' in flat
-    # Not blocked on a folder the Generate button wrote earlier.
-    assert '(!datasetFolder && dataSource !== "assembled")' in PAGE
-
-
 def test_the_build_card_is_a_preview_with_no_button():
     """2026-10-26: the Generate button went. The run builds the yaml, so
     the card shows what it will be and writes nothing."""

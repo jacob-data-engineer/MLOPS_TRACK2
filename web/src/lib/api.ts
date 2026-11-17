@@ -438,6 +438,7 @@ export function getTrack2ModelsLive(): Promise<Track2ModelsLive> {
 }
 
 export interface Track2TrainingAuditDataset {
+  dataset_version_id?: string;
   /** Where the run's file names came from. "list" -- the yaml's file
    * lists, which is exactly what the run read. "folder" -- a recursive
    * listing of the dataset folder, which is everything that was there.
@@ -468,6 +469,7 @@ export interface Track2TrainingAuditDataset {
 
 export interface Track2TrainingAudit {
   id: string;
+  dataset_version_id?: string;
   run_number?: number | null;
   /** Which Class the run was for. The registry group implies it, but
    * only to somebody who knows how those names are built -- and a run
@@ -2870,8 +2872,13 @@ export function saveTrack2Retrain(
 /** `start` submits directly; `queue` adds to the queue and releases it,
  * the way the schedule does. Defaults to `start` so the Retention card's
  * "Run it now" is unchanged. */
-export function runTrack2Retrain(submit: "start" | "queue" | "enqueue" = "start"): Promise<Track2RetrainRun> {
-  return apiPost("/track2/retention/retrain/run", { submit });
+export function runTrack2Retrain(submit: "start" | "queue" | "enqueue" = "start", preparedOnly = false,
+  training?: Record<string, unknown>): Promise<Track2RetrainRun> {
+  return apiPost("/track2/retention/retrain/run", { submit, prepared_only: preparedOnly, training });
+}
+
+export function repeatTrack2CatalogRun(runId: string): Promise<{ entry_id: string }> {
+  return apiPost(`/track2/catalog/runs/${encodeURIComponent(runId)}/repeat`, {});
 }
 
 export function restoreTrack2Snapshot(id: string): Promise<{

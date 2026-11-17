@@ -13,6 +13,7 @@ __all__ = [
     # models and the registry
     "get_detector", "detector_group_name", "split_architecture",
     "model_registry_summary", "scratch_refusal",
+    "resolve_base_model_source", "normalize_hyperparams",
     # the queue and runs -- each trains on a data-side dataset version
     "queue_add", "queue_start", "start_custom_training_run",
     # what the clock (chain/ticker.py, chain/queue_runner.py) drives
@@ -21,6 +22,8 @@ __all__ = [
 ]
 
 get_detector = _through(__name__, "track2_shared", "get_detector")
+resolve_base_model_source = _through(__name__, "track2_shared", "resolve_base_model_source")
+normalize_hyperparams = _through(__name__, "track2_shared", "normalize_hyperparams")
 detector_group_name = _through(__name__, "track2_shared", "detector_group_name")
 split_architecture = _through(__name__, "track2_shared", "split_architecture")
 model_registry_summary = _through(__name__, "track2_shared", "model_registry_summary")

@@ -205,7 +205,7 @@ def validation_selection_id(val: list, names: dict, remap: dict) -> str:
 def create(*, home: str, yaml_text: str, prefixes: list,
            eval_yaml_text: str = "", eval_prefixes: list | None = None,
            trigger: str = "", sources: list | None = None,
-           drop_undeclared: bool = False, note: str = "") -> dict:
+           drop_undeclared: bool = False, note: str = "", preserve_files: bool = True) -> dict:
     """Freeze the dataset a run is about to be queued with. Returns the
     version, including the five values the run is started with."""
     home = home or pc.destination_bucket()
@@ -341,7 +341,8 @@ def create(*, home: str, yaml_text: str, prefixes: list,
     # a run must not wait for the copies.
     try:
         from . import central_store
-        central_store.preserve_in_background(version)
+        if preserve_files:
+            central_store.preserve_in_background(version)
     except Exception as exc:                                        # noqa: BLE001
         print(json.dumps({"dataset_version": "preserve_not_started", "id": vid,
                           "error": str(exc)}))
@@ -383,7 +384,7 @@ def listing(limit: int = 50) -> list:
     return [_plain({**r, "version_id": r["snapshot_id"]}) for r in rows[:max(1, int(limit))]]
 
 
-def mark(version_id: str, **fields) -> None:
+def mark(version_id: str, *, strict: bool = False, **fields) -> None:
     """Record what happened to a version: queued, started, which run."""
     if not version_id or not fields:
         return
@@ -393,10 +394,14 @@ def mark(version_id: str, **fields) -> None:
     try:
         row = _table().get_item(Key={"snapshot_id": version_id}).get("Item")
         if not row:
+            if strict:
+                raise ValueError(f"Dataset version {version_id} was not recorded.")
             return
         row.update({k: _for_dynamo(v) for k, v in fields.items() if v not in (None, "")})
         _table().put_item(Item=row)
     except Exception as exc:                                        # noqa: BLE001
+        if strict:
+            raise
         print(json.dumps({"dataset_version": "mark_failed", "id": version_id, "error": str(exc)}))
 
 

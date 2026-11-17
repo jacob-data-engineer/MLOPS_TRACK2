@@ -74,6 +74,12 @@ def runs_by_model(session=Depends(require_session)) -> dict:
     return _guard(lambda: {"runs": catalog_view.runs_by_model()})
 
 
+@router.post("/runs/{run_id}/repeat")
+def repeat_run(run_id: str, session=Depends(require_session)) -> dict:
+    from ..chain.prepared_training import repeat_run as queue_repeat
+    return _guard(lambda: queue_repeat(run_id))
+
+
 @router.get("/versions")
 def versions(limit: int = 100, offset: int = 0, session=Depends(require_session)) -> dict:
     return _guard(lambda: catalog_view.versions(limit, offset))
