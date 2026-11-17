@@ -362,5 +362,6 @@ def test_the_preview_route_and_card():
     from ppe_pipeline_api.main import app
     assert "/track2/pull-control/settings/training-data/preview" in app.openapi()["paths"]
     card = (ROOT / "web/src/components/Track2TrainingDataFile.tsx").read_text(encoding="utf-8")
-    assert "Classes saved in the file" in card and "Classes the run&apos;s data.yaml declares" in card
+    assert "Classes saved in the file" in card
+    assert "Classes the run&apos;s data.yaml declares" not in card
     assert "previewTrack2TrainingData(shown)" in card

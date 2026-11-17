@@ -76,21 +76,19 @@ export function Track2TrainingDataFile() {
     <p className="mt-1 text-sm text-ink-secondary">These are shared data settings, also visible in Data Preparation. Loading does not start a job. Later edits to the data cards affect the next run.</p>
     {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
     {shown && <TrainingDataPreview name={shown} preview={preview} busy={previewing} error={previewError} />}
-    {recipe && <details className="mt-3"><summary className="cursor-pointer">View imported preparation settings</summary>
+    {recipe && <details key={`${loaded}:${shown}`} open={false} className="mt-3"><summary className="cursor-pointer">View imported preparation settings</summary>
       <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(recipe, null, 2)}</pre>
     </details>}
   </Card>;
 }
 
-/** What a Data Preparation file holds for training: its saved class list,
- * the classes the run's data.yaml will declare, and that data.yaml. */
+/** What a Data Preparation file holds for training: its saved class list and data.yaml. */
 function TrainingDataPreview({ name, preview, busy, error }: {
   name: string; preview: Track2TrainingDataPreview | null; busy: boolean; error: string;
 }) {
   const saved = Object.entries(preview?.label_classes ?? {})
     .sort(([a], [b]) => Number(a) - Number(b));
   const yaml = preview?.yaml;
-  const declared = Object.entries(yaml?.names ?? {}).sort(([a], [b]) => Number(a) - Number(b));
   const cell = "border-b border-hairline px-2 py-1";
   return (
     <div className="mt-4 border-t border-hairline pt-3 text-sm">
@@ -98,7 +96,7 @@ function TrainingDataPreview({ name, preview, busy, error }: {
       {busy && <p className="mt-1 text-xs text-ink-muted" role="status">Reading the file and building its data.yaml...</p>}
       {error && <p className="mt-1 text-xs text-critical" role="alert">{error}</p>}
       {preview && (
-        <div className="mt-2 grid gap-4 md:grid-cols-2">
+        <div className="mt-2">
           <div>
             <p className="text-xs font-medium text-ink">Classes saved in the file</p>
             {saved.length ? (
@@ -108,19 +106,6 @@ function TrainingDataPreview({ name, preview, busy, error }: {
               </table>
             ) : <p className="mt-1 text-xs text-ink-muted">No class list is saved in this file.</p>}
 
-          </div>
-          <div>
-            <p className="text-xs font-medium text-ink">Classes the run&apos;s data.yaml declares</p>
-            {declared.length ? (
-              <table className="tabular mt-1 text-xs">
-                <thead><tr><th className={`${cell} text-left`}>ID</th><th className={`${cell} text-left`}>Name</th></tr></thead>
-                <tbody>{declared.map(([id, n]) => <tr key={id}><td className={cell}>{id}</td><td className={cell}>{n}</td></tr>)}</tbody>
-              </table>
-            ) : <p className="mt-1 text-xs text-ink-muted">{yaml ? "None." : "No data.yaml could be built (below)."}</p>}
-            <p className="mt-1 text-xs text-ink-secondary">
-              The YAML keeps all dataset classes. Choose the model's classes separately
-              in Auto Training; that choice is applied only to the training run.
-            </p>
           </div>
         </div>
       )}
