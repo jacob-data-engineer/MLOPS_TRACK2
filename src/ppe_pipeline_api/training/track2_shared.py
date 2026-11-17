@@ -5091,6 +5091,8 @@ def start_custom_training_run(
     # from the moment those two were added, every custom run died here.
     # Before any GPU time was spent, at least: the queue reported "failed
     # to start, skipped" and moved on.
+    from .reproducibility import evaluation_inputs
+    parameters['EvalExtraUris'] = evaluation_inputs(s3, BUCKET, run_id, parameters['EvalExtraUris'])
     sent = {k: v for k, v in parameters.items() if str(v) != ""}
     # A composed dataset cannot run on a pipeline that does not know
     # where to find its yaml. Checked before the call so the message

@@ -6,6 +6,35 @@ import re
 import boto3
 
 
+def evaluation_inputs(s3, bucket, run_id, uris):
+    """Keep ProcessingJob environment values within the 256-character limit."""
+    if len(uris) <= 256:
+        return uris
+    key = f'custom/runs/{run_id}/evaluation-inputs.json'
+    uri = f's3://{bucket}/{key}'
+    if len(uri) > 256:
+        raise ValueError('Evaluation manifest location exceeds the processing environment limit.')
+    s3.put_object(Bucket=bucket, Key=key,
+                  Body=json.dumps({'uris': [u.strip() for u in uris.split(',') if u.strip()]}).encode(),
+                  ContentType='application/json')
+    return uri
+
+
+def validate_processing_environment(definition, parameters):
+    doc = json.loads(definition)
+    values = {p['Name']: p.get('DefaultValue', '') for p in doc.get('Parameters', [])}
+    values.update(parameters)
+    for step in doc.get('Steps', []):
+        if step.get('Type') != 'Processing':
+            continue
+        for key, value in step.get('Arguments', {}).get('Environment', {}).items():
+            if isinstance(value, dict) and str(value.get('Get', '')).startswith('Parameters.'):
+                value = values.get(value['Get'].split('.', 1)[1], '')
+            if isinstance(value, str) and len(value) > 256:
+                raise ValueError(f"{step['Name']} environment {key} has {len(value)} characters; AWS allows 256. "
+                                 'Queue a new run using the updated evaluation pipeline instead of repeating this older recipe.')
+
+
 def freeze_definition(definition):
     """Replace mutable container tags and static processing-code inputs."""
     from .. import data
@@ -71,6 +100,7 @@ def pin_pipeline(sm, name, saved, current):
     missing = {k for k, p in declared.items() if 'DefaultValue' not in p and k not in parameters}
     if unknown or missing:
         raise ValueError(f'Pipeline inputs do not match version {version}: unknown {sorted(unknown)}, missing {sorted(missing)}.')
+    validate_processing_environment(definition, parameters)
     return {'name': name, 'version_id': version, 'definition': definition,
             'app_build': saved.get('app_build') or os.environ.get('APP_BUILD_TAG') or os.environ.get('BUILD_TAG', ''),
             'dependencies': dependencies,

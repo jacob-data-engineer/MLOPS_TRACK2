@@ -521,13 +521,25 @@ def build_filtered_dataset(dataset_root, data_yaml_path, *, drop_undeclared=Fals
     return new_yaml, rep
 
 
+def extra_val_uris(value, client):
+    """Accept legacy inline prefixes or the preserved JSON manifest location."""
+    if value.startswith('s3://') and value.endswith('/evaluation-inputs.json') and ',' not in value:
+        bucket, key = value[5:].split('/', 1)
+        doc = json.loads(client.get_object(Bucket=bucket, Key=key)['Body'].read())
+        uris = doc.get('uris') if isinstance(doc, dict) else None
+        if not isinstance(uris, list) or not all(isinstance(u, str) and u.startswith('s3://') for u in uris):
+            raise ValueError('Invalid evaluation input manifest: expected a list of S3 locations.')
+        return uris
+    return [u.strip() for u in (value or '').split(',') if u.strip()]
+
+
 def fetch_extra_val(data, uris, primary_bucket=""):
     """Download val folders that live outside the one ProcessingInput
     prefix, to `data/<their full key>` -- which is how the yaml names
     them. Only the folders listed: each images/val and its labels."""
     client = boto3.client("s3")
     fetched = 0
-    for uri in [u.strip() for u in (uris or "").split(",") if u.strip()]:
+    for uri in extra_val_uris(uris, client):
         bucket, prefix = uri.removeprefix("s3://").split("/", 1)
         for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents") or []:
