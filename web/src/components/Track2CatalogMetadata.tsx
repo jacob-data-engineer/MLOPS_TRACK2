@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Card } from "./Card";
+import { Track2ExportProgress } from "./Track2ExportProgress";
 import { ApiError, getTrack2CatalogMetadata, inspectTrack2CatalogMetadata, startTrack2CatalogExport,
-  exportTrack2CatalogWeights, exportTrack2CatalogMetadata,
+  exportTrack2CatalogWeights, exportTrack2CatalogMetadata, getTrack2CatalogExportUrl,
   getTrack2PullControl, saveTrack2PullConfig,
-  type CatalogMetadata, type CatalogExportDestination } from "../lib/api";
+  type CatalogMetadata, type CatalogExportDestination, type Track2CatalogExport } from "../lib/api";
 
 function saveFile(name: string, body: string, type = "application/json") {
   const url = URL.createObjectURL(new Blob([body], { type }));
@@ -33,10 +34,11 @@ const descriptions: Record<string, string> = {
   "Governance and notes": "Ownership, intended use and notes", "File provenance": "Source addresses, splits and file inventory",
 };
 
-export function Track2CatalogMetadata({ selection, destination, onExported, renderDestination, children }: {
+export function Track2CatalogMetadata({ selection, destination, onExported, renderDestination, children, exportsList = [] }: {
   selection: { kind: "run" | "version"; id: string; label: string } | null;
   destination: CatalogExportDestination; onExported: () => void;
   renderDestination: (showFormat: boolean) => ReactNode; children?: ReactNode;
+  exportsList?: Track2CatalogExport[] | null;
 }) {
   const [metadata, setMetadata] = useState<CatalogMetadata | null>(null);
   const [opened, setOpened] = useState<CatalogMetadata | null>(null);
@@ -52,6 +54,11 @@ export function Track2CatalogMetadata({ selection, destination, onExported, rend
   const [search, setSearch] = useState("");
   const [reload, setReload] = useState(0);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [startedExport, setStartedExport] = useState<{ id: string; kind: string; source: string } | null>(null);
+  const latestExport = selection ? exportsList?.find((item) => selection.kind === "run" ? item.run_id === selection.id : item.version_id === selection.id) : undefined;
+  const trackedExport = startedExport && startedExport.kind === selection?.kind && startedExport.source === selection?.id
+    ? exportsList?.find((item) => item.id === startedExport.id) : latestExport;
+  const startingExport = !!startedExport && startedExport.kind === selection?.kind && startedExport.source === selection?.id && !trackedExport;
   useEffect(() => {
     let active = true;
     getTrack2PullControl().then((value) => {
@@ -104,7 +111,8 @@ export function Track2CatalogMetadata({ selection, destination, onExported, rend
           include_metadata: mode === "complete", include_images: mode === "dataset" || includeImages,
           include_model: mode === "complete" && includeModel && selection.kind === "run" && metadata.checkpoint_available,
           metadata_groups: chosen });
-        onExported(); setMessage(`Export ${result.label} started. Follow progress in Export history below.`);
+        setStartedExport({ id: result.id, kind: selection.kind, source: selection.id });
+        onExported(); setMessage(`Export ${result.label} started.`);
       }
     } catch (err) { setError(err instanceof ApiError ? err.detail : "Export failed. Please retry."); }
     finally { setBusy(""); }
@@ -152,6 +160,12 @@ export function Track2CatalogMetadata({ selection, destination, onExported, rend
           disabled={!metadata || !settingsLoaded || !!busy || (destination.destination === "s3" && !destination.bucket) || (mode === "model" && !metadata.checkpoint_available)} onClick={() => void prepare()}>
           {busy === "export" ? "Preparing…" : destination.destination === "local" && (mode === "model" || mode === "metadata") ? `Download ${format}` : `Prepare ${format} export`}</button>
         {message && <p role="status" className="mt-2 break-all text-sm">{message}</p>}
+        {(trackedExport || startingExport || busy === "export") && <Track2ExportProgress state={busy === "export" ? "building" : trackedExport?.state ?? "building"} error={trackedExport?.error} />}
+        {trackedExport && trackedExport.format !== "folder" && ["ready", "partial"].includes(trackedExport.state) &&
+          <button type="button" className={`${button} mt-3`} onClick={() => {
+            void getTrack2CatalogExportUrl(trackedExport.id).then((result) => window.location.assign(result.url))
+              .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not get the download link."));
+          }}>{trackedExport.state === "partial" ? "Download incomplete ZIP" : "Download ZIP"}</button>}
       </div>
     </Card>
     {children}

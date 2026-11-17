@@ -261,7 +261,7 @@ export function Track2CatalogPage() {
         <Track2CatalogMetadata
           selection={picked ? picked.kind === "run" ? { kind: "run", id: picked.run.run_id, label: `Run ${picked.run.run_number}` }
             : { kind: "version", id: picked.version.id, label: `Version ${picked.version.version_number}` } : null}
-          destination={destination} onExported={refreshExports}
+          destination={destination} onExported={refreshExports} exportsList={exportsList}
           renderDestination={(showFormat) => <ExportDestination destination={destination} onDestination={changeDestination} showFormat={showFormat} />}>
           <FilesCard key={picked?.kind === "run" ? picked.run.run_id : picked?.version.id || "empty"}
             picked={picked} emptyMessage="No run or dataset version selected" />
