@@ -272,7 +272,7 @@ function QueueEntryBlock({
             </span>
           )}
         </div>
-        {running && progress && <Track2TrainingRunProgress progress={progress} />}
+        {running && progress?.status === "Executing" && <Track2TrainingRunProgress progress={progress} />}
       </div>
       {onRemove && (
         <button
@@ -1651,13 +1651,10 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                   Custom-class run {data.custom_run_id}
                 </p>
               </div>
-            ) : data.training_progress ? (
+            ) : data.training_progress?.status === "Executing" ? (
               <div className="mb-2 flex flex-col gap-2">
                 <Badge
-                  tone={
-                    data.training_progress.status === "Executing" ? "pending" :
-                    data.training_progress.status === "Succeeded" ? "confirmed" : "neutral"
-                  }
+                  tone="pending"
                   label={data.training_progress.status}
                 />
                 <Track2TrainingRunProgress progress={data.training_progress} />
