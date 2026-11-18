@@ -24,7 +24,7 @@ __all__ = [
     "version_for_run", "version_run_fields", "mark_version", "version_card_fields",
     "require_training_sql", "freeze_prepared_training", "preserve_training_base",
     "record_training_submission", "repeat_training_entry",
-    "cleanup_finished_decay",
+    "cleanup_finished_decay", "prepare_central_training_entry",
     # assembling folders into one dataset, and what a dataset declares
     "assemble_dataset", "inspect_dataset_layout", "discover_dataset_sources",
     "dataset_source_map", "image_names_by_stem", "dataset_classes",
@@ -100,3 +100,4 @@ preserve_training_base = _through(__name__, "prepared_training", "preserve_base"
 record_training_submission = _through(__name__, "prepared_training", "record_submission")
 repeat_training_entry = _through(__name__, "prepared_training", "repeat_entry")
 cleanup_finished_decay = _through(__name__, "prepared_training", "cleanup_finished")
+prepare_central_training_entry = _through(__name__, "central_recipe", "prepare_entry")

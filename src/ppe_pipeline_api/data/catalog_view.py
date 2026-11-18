@@ -128,7 +128,10 @@ def run_files(run_id: str, *, split: str = "", role: str = "", kind: str = "imag
               limit: int = PAGE, offset: int = 0) -> dict:
     where, params = _run_filter(run_id, split, role, kind)
     total = _rows(f"SELECT count(*) AS n FROM run_files WHERE {where}", params)[0]["n"]
-    rows = _rows(f"SELECT s3_uri AS uri, role, split, kind, folder FROM run_files WHERE {where}"
+    rows = _rows("SELECT COALESCE((SELECT CASE WHEN f.kind='label' THEN m.stored_label_uri ELSE m.stored_image_uri END "
+                 "FROM dataset_members m JOIN training_runs r ON r.version_id=m.version_id "
+                 "WHERE r.run_id=f.run_id AND (f.s3_uri=m.image_uri OR f.s3_uri=m.label_uri) LIMIT 1), f.s3_uri) AS uri, "
+                 f"role, split, kind, folder FROM run_files f WHERE {where}"
                  " ORDER BY file_key LIMIT %s OFFSET %s",
                  params + (min(int(limit), 500), max(0, int(offset))))
     return {"total": total, "files": rows}
@@ -140,7 +143,7 @@ def version_files(version_id: str, *, split: str = "", limit: int = PAGE,
     if split:
         where, params = where + " AND split = %s", params + (split,)
     total = _rows(f"SELECT count(*) AS n FROM dataset_members WHERE {where}", params)[0]["n"]
-    rows = _rows("SELECT image_uri AS uri, label_uri, split, included, reason, decay_weight,"
+    rows = _rows("SELECT COALESCE(stored_image_uri,image_uri) AS uri, COALESCE(stored_label_uri,label_uri) AS label_uri, split, included, reason, decay_weight,"
                  f" week FROM dataset_members WHERE {where}"
                  " ORDER BY image_uri LIMIT %s OFFSET %s",
                  params + (min(int(limit), 500), max(0, int(offset))))
@@ -237,7 +240,7 @@ def _fetch_tagged(uri: str) -> tuple[bytes, str] | None:
     return got["Body"].read(), str(got.get("ETag") or "").strip('"')
 
 
-def _frozen(stored: str, original: str) -> tuple[bytes | None, str]:
+def _frozen(stored: str, original: str, expected_etag: str = '') -> tuple[bytes | None, str]:
     """The bytes a version was frozen with, and a note when they cannot be had.
 
     The stored copy FIRST (R1, independent UAT 2026-11-04): it is named by
@@ -246,6 +249,13 @@ def _frozen(stored: str, original: str) -> tuple[bytes | None, str]:
     an export of a frozen version came back "ready" holding the new bytes.
     The original is used only if the stored copy has itself gone AND the
     original still carries the frozen ETag."""
+    if expected_etag:
+        got = _fetch_tagged(stored)
+        if got is None:
+            return None, 'recorded central-store file is missing'
+        if got[1] != expected_etag.strip('"'):
+            return None, 'recorded central-store file changed'
+        return got[0], ''
     body = _fetch(stored)
     if body is not None:
         return body, ""
@@ -322,17 +332,24 @@ def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | No
                                                 "stored": stored.get(f["s3_uri"], "")}))
         return entries, names, f"run-{run[0]['run_number']}"
 
-    version = _rows("SELECT version_number, class_names FROM dataset_versions WHERE id = %s",
+    version = _rows("SELECT version_number, class_names, record FROM dataset_versions WHERE id = %s",
                     (ident,))
     if not version:
         raise ValueError(f"No dataset version {ident}.")
+    expected = {}
+    if (version[0].get('record') or {}).get('central_recipe'):
+        from . import dataset_versions
+        for member in dataset_versions.get(ident)['file_provenance']:
+            for kind in ('image', 'label'):
+                expected[member[f'central_{kind}']] = member[f'central_{kind}_etag']
     catalog.ensure_schema_once()
     for m in _rows("SELECT image_uri, label_uri, split, included, reason, decay_weight, week,"
                    " stored_image_uri, stored_label_uri"
                    " FROM dataset_members WHERE version_id = %s ORDER BY image_uri", (ident,)):
         row = {"split": m["split"], "included": m["included"], "reason": m["reason"],
                "decay_weight": m["decay_weight"], "week": m["week"],
-               "stored": m["stored_image_uri"] or ""}
+               "stored": m["stored_image_uri"] or "",
+               "stored_etag": expected.get(m["stored_image_uri"], '')}
         if not m["included"]:
             # Recorded in the manifest, not packed: it was not trained on.
             entries.append(("", m["image_uri"], {**row, "path": "", "source": m["image_uri"]}))
@@ -344,7 +361,8 @@ def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | No
             label_path = path.replace("images/", "labels/", 1).rsplit(".", 1)[0] + ".txt"
             entries.append((label_path, m["label_uri"],
                             {**row, "path": label_path, "source": m["label_uri"],
-                             "stored": m["stored_label_uri"] or ""}))
+                             "stored": m["stored_label_uri"] or "",
+                             "stored_etag": expected.get(m["stored_label_uri"], '')}))
     return entries, version[0]["class_names"], f"version-{version[0]['version_number']}"
 
 
@@ -461,6 +479,8 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
         # A file kept in the central store at freeze is read from there
         # (UAT-01, R1); one frozen before that existed, from where it was.
         if entry[2].get("stored"):
+            if entry[2].get('stored_etag'):
+                return _frozen(entry[2]['stored'], entry[1], entry[2]['stored_etag'])
             return _frozen(entry[2]["stored"], entry[1])
         return _fetch(entry[1]), ""
 

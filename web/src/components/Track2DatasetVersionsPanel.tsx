@@ -69,14 +69,14 @@ export function Track2DatasetVersionsPanel() {
   return (
     <Card
       title="Dataset versions"
-      caption="The frozen dataset each queued run trains on -- written once, never changed."
+      caption="Saved dataset records for repeat training. Each record keeps its original store and classes."
     >
       <p className="mb-2 text-xs text-ink-muted">
-        A version is made when a run is queued: the exact training and
-        validation images, the classes and the filter, frozen under{" "}
-        <span className="tabular">_datasets/</span>. Builds made afterwards
-        cannot change it, and images that arrive later are not in it.
-        <em> Queue again</em> retries on identical data.
+        Each new run saves its exact file selection, train/validation split and class mapping in SQL.
+        Images and labels are retained in that record's central store. Temporary training files are
+        rebuilt when needed and removed after processing finishes and the queue is clear.
+        Changing the current store or classes does not change an earlier record.
+        <em> Queue again</em> reuses the saved dataset and settings. Older records retain their preserved copies.
       </p>
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
       {note && <p className="mb-2 text-xs text-ink-secondary">{note}</p>}

@@ -205,7 +205,8 @@ def validation_selection_id(val: list, names: dict, remap: dict) -> str:
 def create(*, home: str, yaml_text: str, prefixes: list,
            eval_yaml_text: str = "", eval_prefixes: list | None = None,
            trigger: str = "", sources: list | None = None,
-           drop_undeclared: bool = False, note: str = "", preserve_files: bool = True) -> dict:
+           drop_undeclared: bool = False, note: str = "", preserve_files: bool = True,
+           central_recipe: dict | None = None) -> dict:
     """Freeze the dataset a run is about to be queued with. Returns the
     version, including the five values the run is started with."""
     home = home or pc.destination_bucket()
@@ -335,6 +336,8 @@ def create(*, home: str, yaml_text: str, prefixes: list,
         "created_at": manifest["created_at"],
         "state": "created",
     }
+    if central_recipe:
+        version['central_recipe'] = central_recipe
     _row_put(version)
     # Keep every file it uses, so the version can always be rebuilt even
     # after its source folders change (UAT-01). In the background: queueing
@@ -491,6 +494,7 @@ def run_fields(version: dict) -> dict:
         "eval_dataset_folder": eval_folder.strip("/"),
         "eval_extra_uris": version["eval_extra_uris"],
         "dataset_version_id": version["version_id"],
+        "central_store_replay": bool(version.get("central_recipe")),
         # For the queue card: where the images come from, and how many.
         "dataset_source_folders": list(version.get("train_folders") or []),
         "eval_source_folders": list(version.get("val_folders") or []),

@@ -25,6 +25,9 @@ class ConditionalS3(FakeS3):
         self.files.pop((Bucket, Key), None)
 
     def head_object(self, Bucket, Key):
+        if (Bucket, Key) not in self.files:
+            from botocore.exceptions import ClientError
+            raise ClientError({'Error': {'Code': '404'}}, 'HeadObject')
         body = self.files[Bucket, Key]
         return {'ETag': '"' + hashlib.sha256(body).hexdigest() + '"', 'ContentLength': len(body)}
 
@@ -70,6 +73,7 @@ def prepared(monkeypatch):
     monkeypatch.setattr(dv, '_table', lambda: table)
     monkeypatch.setattr(pt, 'require_sql', lambda: None)
     monkeypatch.setattr(pt, 'verify_members', lambda version: None)
+    monkeypatch.setattr(pt.central_recipe, 'record_members', lambda *args: None)
     return config, s3, table
 
 
@@ -274,6 +278,7 @@ def test_queue_sql_failure_does_not_leave_runnable_entry(monkeypatch):
 
 @pytest.mark.parametrize('rebuilt', [False, True])
 def test_cleanup_only_deletes_the_original_working_copy(prepared, monkeypatch, rebuilt):
+    monkeypatch.setattr(pt.central_recipe, 'cleanup_finished', lambda: '')
     from ppe_pipeline_api.data import catalog_view
     config, s3, _ = prepared
     version = pt.freeze(config)
@@ -297,6 +302,7 @@ def test_cleanup_only_deletes_the_original_working_copy(prepared, monkeypatch, r
 
 
 def test_cleanup_delete_failure_keeps_marker_for_retry(prepared, monkeypatch):
+    monkeypatch.setattr(pt.central_recipe, 'cleanup_finished', lambda: '')
     from ppe_pipeline_api.data import catalog_view
     config, s3, _ = prepared
     version = pt.freeze(config)

@@ -5562,6 +5562,9 @@ def try_advance_queue() -> None:
         if not entry.get('reproducible'):
             _forget_queue_entry(entry["id"])
         try:
+            if entry.get('central_store_replay'):
+                from .. import data as _data
+                _data.prepare_central_training_entry(entry)
             if entry.get("custom_classes"):
                 # Started directly as a pipeline execution rather than via
                 # CodeBuild, so there is no build_id -- the execution arn

@@ -13,6 +13,7 @@ import yaml
 
 from .. import record_store, storage
 from . import catalog_metadata, combined_store as cs, dataset_versions as dv, dataset_yaml as dy
+from . import central_recipe
 
 
 def require_sql():
@@ -43,7 +44,7 @@ def verify_members(version):
 def freeze(config: dict, *, trigger='manual', target_classes=None, progress=None) -> dict:
     """No combine, golden rebuild, retention selection or writes to the decay folder.
 
-    Copies are version-specific and never reused by another preparation. Labels
+    Permanent inputs live in the selected central store. Training copies are disposable. Labels
     are normalized by the source YAML's explicit mapping, so exported datasets
     have the same class meanings as training, including mixed source taxonomies.
     """
@@ -134,7 +135,12 @@ def freeze(config: dict, *, trigger='manual', target_classes=None, progress=None
                     continue
                 target_id = selection[target_id]
             normalized.append(' '.join([str(target_id), *parts[1:]]))
-        _put(bucket, destination_label, ('\n'.join(normalized) + ('\n' if normalized else '')).encode())
+        label_body = ('\n'.join(normalized) + ('\n' if normalized else '')).encode()
+        _put(bucket, destination_label, label_body)
+        central_image, central_image_etag = central_recipe.keep_image(bucket, store, key, obj['ETag'])
+        central_label, central_label_etag = central_recipe.keep_label(bucket, store, label_body)
+        provenance.update(central_image=central_image, central_image_etag=central_image_etag,
+                          central_label=central_label, central_label_etag=central_label_etag)
         if progress:
             with progress_lock:
                 completed += 1
@@ -163,15 +169,19 @@ def freeze(config: dict, *, trigger='manual', target_classes=None, progress=None
         progress('Saving dataset records to SQL', len(images), len(images))
     version = dv.create(home=bucket, yaml_text=frozen_text,
         prefixes=[f's3://{bucket}/{folder}/'], trigger=trigger,
-        sources=[f's3://{bucket}/{decay}'], preserve_files=False)
+        sources=[f's3://{bucket}/{decay}'], preserve_files=False,
+        central_recipe={'schema': 1, 'store_uri': f's3://{bucket}/{store}', 'bucket': bucket, 'folder': folder})
     verify_members(version)
+    central_recipe.record_members(version['version_id'], provenance)
     preparation = {k: copy.deepcopy(config.get(k)) for k in
         ('training_data_preparation', 'dataset_assemble', 'central_store', 'retention', 'golden_set', 'auto_training')}
     dv.mark(version['version_id'], strict=True, immutable_files=True, prepared_decay=f's3://{bucket}/{decay}',
             preparation=catalog_metadata.clean(preparation), preparation_marker=marker,
             preparation_marker_etag=marker_obj['ETag'],
             file_provenance=provenance, source_yaml=built['text'], frozen_yaml=frozen_text,
-            dataset_classes=dataset_names, training_classes=names)
+            dataset_classes=dataset_names, training_classes=names,
+            central_recipe={'schema': 1, 'store_uri': f's3://{bucket}/{store}', 'bucket': bucket, 'folder': folder},
+            temporary_cleaned=False)
     return dv.get(version['version_id'])
 
 
@@ -223,7 +233,8 @@ def cleanup_finished():
                  "WHERE r.status IN ('Succeeded','Failed','Stopped') AND r.execution_arn IS NOT NULL "
                  "AND r.record #>> '{reproducibility,entry,delete_decay_after_run}' = 'true' "
                  "AND NOT (v.record ? 'decay_cleanup') LIMIT 50")
-    messages = []
+    central_cleanup = central_recipe.cleanup_finished()
+    messages = [central_cleanup] if central_cleanup else []
     for row in rows:
         version = dv.get(row['id'])
         if not version.get('immutable_files'):

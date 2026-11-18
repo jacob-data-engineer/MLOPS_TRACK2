@@ -228,6 +228,7 @@ def pending(limit: int = 5) -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("SELECT id, record FROM dataset_versions WHERE kind = 'version'"
+                    " AND NOT (record ? 'central_recipe')"
                     " AND preserved_at IS NULL AND created_at >= %s::timestamptz"
                     " ORDER BY created_at LIMIT %s", (SINCE, limit))
         out = []
