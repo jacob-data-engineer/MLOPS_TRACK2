@@ -5256,6 +5256,8 @@ def queue_snapshot() -> dict:
                 e.update(_data.version_card_fields(e["dataset_version_id"]))
             except Exception as exc:                               # noqa: BLE001
                 print(f"Could not read dataset version {e.get('dataset_version_id')}: {exc}")
+    from . import submission_progress
+    recording = submission_progress.for_queue(pending) if _queue_started else None
     with _queue_lock:
         return {
             "pending": pending,
@@ -5264,6 +5266,7 @@ def queue_snapshot() -> dict:
             "completed_count": _queue_completed_count,
             "last_error": _queue_last_error,
             "max_size": MAX_QUEUE_SIZE,
+            "submission_progress": recording,
         }
 
 
@@ -5562,6 +5565,9 @@ def try_advance_queue() -> None:
         if not entry.get('reproducible'):
             _forget_queue_entry(entry["id"])
         try:
+            from . import submission_progress
+            if entry.get('reproducible'):
+                submission_progress.write('run-' + entry['id'], 'Checking preserved dataset and preparing submission')
             if entry.get('central_store_replay'):
                 from .. import data as _data
                 _data.prepare_central_training_entry(entry)
@@ -6403,15 +6409,24 @@ def _version_audit_fields(data_yaml_uri: str, *, train_data_uris: str, eval_uri:
     folder = key.rsplit("/", 1)[0]
     manifest = json.loads(s3.get_object(Bucket=bucket, Key=f"{folder}/manifest.json")["Body"].read())
     from ..audit_files import version_file_rows
-    file_rows = version_file_rows(audit_id, manifest, BUCKET)
+    file_rows = list(version_file_rows(audit_id, manifest, BUCKET))
     written = {"train": 0, "eval": 0}
     if audit_id:
         try:
-            with training_files_table().batch_writer() as batch:
-                for item in file_rows:
-                    batch.put_item(Item=item)
-                    written[item["role"]] += 1
+            from . import submission_progress
+            submission_progress.write(audit_id, 'Recording files', 0, len(file_rows))
+            for offset in range(0, len(file_rows), 500):
+                chunk = file_rows[offset:offset + 500]
+                with training_files_table().batch_writer() as batch:
+                    for item in chunk:
+                        batch.put_item(Item=item)
+                for item in chunk:
+                    written[item['role']] += 1
+                submission_progress.write(audit_id, 'Recording files', offset + len(chunk), len(file_rows))
+            submission_progress.write(audit_id, 'File records saved — submitting training', len(file_rows), len(file_rows))
         except Exception as exc:
+            if record_store.enabled():
+                raise
             print(f"Could not write version file rows for {audit_id}: {exc}")
 
     def block(names: list, uri: str, role: str) -> dict:

@@ -1,4 +1,5 @@
 import { Track2TrainingDataFile } from "../components/Track2TrainingDataFile";
+import { Track2RecordingProgress } from '../components/Track2RecordingProgress';
 import { trainingSettingsErrors } from '../lib/trainingValidation';
 import { Track2TrainingDataChoice, type TrainingDataChoice } from "../components/Track2TrainingDataChoice";
 import { AlertCircle, Cpu, Loader2 } from "lucide-react";
@@ -1693,6 +1694,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             {data.queue.last_error && (
               <p className="mb-2 text-xs text-critical">{data.queue.last_error}</p>
             )}
+            <Track2RecordingProgress progress={data.queue.submission_progress}/>
             <div className="mb-3">
               <StatTile label="Completed" value={data.queue.completed_count} />
             </div>

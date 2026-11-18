@@ -26,6 +26,9 @@ def test_manifest_records_full_addresses_labels_and_splits():
 
 def test_version_recorder_writes_real_annotation_rows(monkeypatch):
     written = []
+    from ppe_pipeline_api.training import submission_progress
+    updates=[]
+    monkeypatch.setattr(submission_progress,'write',lambda *args:updates.append((args,len(written))))
     class Table:
         def batch_writer(self): return self
         def __enter__(self): return self
@@ -43,6 +46,8 @@ def test_version_recorder_writes_real_annotation_rows(monkeypatch):
     assert all(r["file_name"] not in ("train.txt", "val.txt") for r in written)
     assert result["train_dataset"]["label_count"] == 1
     assert result["eval_dataset"]["file_rows"] == 2
+    assert updates[0][0][2:] == (0,4)
+    assert updates[-1][0][2:] == (4,4) and updates[-1][1] == 4
 
 
 def test_repair_refuses_manifest_count_mismatch(monkeypatch):

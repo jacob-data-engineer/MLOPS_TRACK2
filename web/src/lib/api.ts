@@ -372,6 +372,7 @@ export interface Track2QueueEntry {
 }
 
 export interface Track2QueueSnapshot {
+  submission_progress?: {entry_id:string; stage:string; completed:number; total:number; updated_at:string} | null;
   pending: Track2QueueEntry[];
   running: Track2QueueEntry | null;
   started: boolean;

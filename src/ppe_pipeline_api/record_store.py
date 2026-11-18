@@ -354,6 +354,9 @@ class Batch:
     def flush(self):
         if not self.pending:
             return
+        if self.table.source.target == 'training_files' and all(op == 'put' for op, _ in self.pending):
+            self._flush_training_files()
+            return
         with contextlib.closing(connection()) as conn:
             cur = conn.cursor()
             for op, item in sorted(self.pending, key=lambda p: self.table.key(p[1])):
@@ -366,6 +369,29 @@ class Batch:
                     cur.execute(f"DELETE FROM {self.table.sql} WHERE pk=%s AND sk=%s", key)
                     from .data.sql_projection import remove
                     remove(cur, self.table.source.target, old)
+            conn.commit()
+        self.pending.clear()
+
+    def _flush_training_files(self):
+        # Match sequential put semantics for duplicate keys, while locking in the
+        # same key order as the normal writer. Payload and catalog commit together.
+        unique = {self.table.key(item): item for _, item in self.pending}
+        items = [unique[key] for key in sorted(unique)]
+        rows = [dict(pk=self.table.key(item)[0], sk=self.table.key(item)[1],
+                     payload=json.loads(encode(item)), record_type=str(item.get('record_type', item.get('kind', ''))),
+                     file_name=str(item.get('name', '')), expires_at=item.get('expires_at')) for item in items]
+        locks = [json.dumps([self.table.sql, *self.table.key(item)], separators=(',', ':')) for item in items]
+        with contextlib.closing(connection()) as conn:
+            cur = conn.cursor()
+            cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(value,0)) '
+                        'FROM jsonb_array_elements_text(%s::jsonb) WITH ORDINALITY ORDER BY ordinality', (json.dumps(locks),))
+            cur.execute(f'INSERT INTO {self.table.sql} (pk,sk,payload,record_type,file_name,expires_at) '
+                        'SELECT pk,sk,payload,record_type,file_name,expires_at FROM jsonb_to_recordset(%s::jsonb) '
+                        'AS r(pk text,sk text,payload jsonb,record_type text,file_name text,expires_at bigint) '
+                        'ON CONFLICT (pk,sk) DO UPDATE SET payload=EXCLUDED.payload,record_type=EXCLUDED.record_type,'
+                        'file_name=EXCLUDED.file_name,expires_at=EXCLUDED.expires_at', (json.dumps(native_numbers(rows)),))
+            from .data.sql_projection import project_files
+            project_files(cur, items)
             conn.commit()
         self.pending.clear()
 

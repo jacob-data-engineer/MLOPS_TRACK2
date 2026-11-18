@@ -2,6 +2,21 @@
 import json
 
 
+def project_files(cur, items):
+    """Bulk projection in the caller's transaction; retries replace identical keys."""
+    cur.execute("INSERT INTO training_runs (run_id,status,files_synced) "
+                "SELECT DISTINCT value,'Recording',true FROM jsonb_array_elements_text(%s::jsonb) "
+                "ON CONFLICT (run_id) DO NOTHING", (json.dumps(sorted({i['audit_id'] for i in items})),))
+    rows = [dict(run_id=i['audit_id'], file_key=i['file_key'], s3_uri=i.get('s3_uri',''),
+                 role=i.get('role'), split=i.get('split'), kind=i.get('kind'), folder=i.get('folder')) for i in items]
+    cur.execute('INSERT INTO run_files (run_id,file_key,s3_uri,role,split,kind,folder) '
+                'SELECT run_id,file_key,s3_uri,role,split,kind,folder FROM jsonb_to_recordset(%s::jsonb) '
+                'AS r(run_id text,file_key text,s3_uri text,role text,split text,kind text,folder text) '
+                'ORDER BY run_id,file_key ON CONFLICT (run_id,file_key) DO UPDATE SET '
+                's3_uri=EXCLUDED.s3_uri,role=EXCLUDED.role,split=EXCLUDED.split,kind=EXCLUDED.kind,folder=EXCLUDED.folder',
+                (json.dumps(rows),))
+
+
 def project(cur, target, item):
     from . import catalog_sync as cs
     if target == "training_audits" and item.get("record_type", "training_audit") == "training_audit":
