@@ -101,3 +101,6 @@ record_training_submission = _through(__name__, "prepared_training", "record_sub
 repeat_training_entry = _through(__name__, "prepared_training", "repeat_entry")
 cleanup_finished_decay = _through(__name__, "prepared_training", "cleanup_finished")
 prepare_central_training_entry = _through(__name__, "central_recipe", "prepare_entry")
+prepare_saved_training = _through(__name__, "saved_training", "prepare")
+check_saved_training = _through(__name__, "saved_training", "check")
+__all__ += ["prepare_saved_training", "check_saved_training"]

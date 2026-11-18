@@ -1,7 +1,9 @@
 import { Track2TrainingDataFile } from "../components/Track2TrainingDataFile";
+import { Track2TrainingDataChoice, type TrainingDataChoice } from "../components/Track2TrainingDataChoice";
 import { AlertCircle, Cpu, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "../lib/bus";
+import { useCardOpen } from "../lib/cardState";
 import { formatDayTime } from "../lib/format";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
@@ -378,6 +380,16 @@ export function TrainingForm({
   const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
   const [deleteDecayAfterRun, setDeleteDecayAfterRun] = useState(false);
+  const [dataChoice, setDataChoice] = useState<TrainingDataChoice>({mode: 'prepared', id: '', checked: false});
+  const [, openTrainingCard] = useCardOpen('start the training run', true);
+  useEffect(() => {
+    const select = (event: Event) => {
+      setDataChoice({mode: 'saved', id: (event as CustomEvent<string>).detail, checked: false});
+      openTrainingCard(true);
+    };
+    window.addEventListener('track2-use-saved-dataset', select);
+    return () => window.removeEventListener('track2-use-saved-dataset', select);
+  }, []);
   const [preparationJob, setPreparationJob] = useState<Track2PreparationJob | null>(null);
   const completedJob = useRef('');
   const preparing = preparationJob?.state === 'pending' || preparationJob?.state === 'running';
@@ -605,6 +617,15 @@ export function TrainingForm({
     const lines: { tone: "ok" | "warn" | "bad"; text: string }[] = [];
     let blocking = false;
 
+    if (dataChoice.mode === 'saved') {
+      blocking = !dataChoice.checked || !chosenDetector || !basePackageArn;
+      lines.push({tone: blocking ? 'bad' : 'ok', text: !chosenDetector || !basePackageArn
+        ? 'Choose a model and starting version in step 1.' : !dataChoice.checked
+        ? 'Choose and check a saved SQL dataset before queueing.'
+        : 'The saved dataset will be rebuilt from its original central store using the current model and training settings. Files are checked again before queueing.'});
+      return {lines, blocking};
+    }
+
     lines.push({ tone: "ok", text: "Training uses the already-prepared decayed dataset. Its exact files and settings are preserved before queueing." });
 
     if (!chosenDetector) {
@@ -671,6 +692,7 @@ export function TrainingForm({
 
   /** Clears every choice in this card back to its default. */
   function handleStartAllOver() {
+    setDataChoice({mode: 'prepared', id: '', checked: false});
     setSelection({
       epochs: 50, imgSize: 640, batch: 16, seed: 42, patience: 0,
       hyperparams: {},
@@ -695,6 +717,7 @@ export function TrainingForm({
         detector_slug: detectorSlug, architecture, notes,
         base_version: basePackageArn,
         delete_decay_after_run: deleteDecayAfterRun,
+        ...(dataChoice.mode === 'saved' ? {dataset_version_id: dataChoice.id, delete_decay_after_run: false} : {}),
       });
       const failed = got.steps.find((step) => !step.ok);
       if (!got.ok || failed) {
@@ -722,16 +745,15 @@ export function TrainingForm({
       help={
         <>
           <p>
-            Starts the run. Everything about <strong>which model</strong> was
-            decided in step 1; everything about <strong>which data</strong>{" "}
-            came from steps 2 to 5. This card only sets how long it trains for
-            and sends it.
+            Choose newly prepared data, a saved SQL dataset with your current
+            step 1 settings, or a previous run with its recorded settings.
           </p>
           <p className="mt-2">
-            Training uses the decayed dataset already produced in Data Preparation.
-            Add to Queue preserves its files and starting weights. The recipe is saved
-            in SQL before training starts; Data Catalog can queue the same run again
-            or export its dataset as a ZIP.
+            Newly prepared data uses the decayed dataset already produced in Data Preparation.
+            A saved dataset uses its recorded central store, even if today’s store has changed.
+            Check saved dataset verifies the files and class names. Matching names in a
+            different order are remapped automatically; selecting a subset is not supported here.
+            Add to Queue saves a new SQL recipe before training starts.
           </p>
           <p className="mt-2">
             When the validation set lives under a different prefix &mdash; its
@@ -762,7 +784,10 @@ export function TrainingForm({
           while IMPORT was selected, and import is no longer one of the
           modes -- so the box could only ever be ticked, and clicking it
           did nothing. Both remaining modes submit from here. */}
-      <fieldset>
+      <Track2TrainingDataChoice value={dataChoice} onChange={setDataChoice}
+        detectorSlug={detectorSlug} classKey={JSON.stringify(chosenDetector?.classes || {})}
+        disabled={busy || !!preparing} onSubmitted={onSubmitted} />
+      {dataChoice.mode !== 'repeat' && <fieldset>
 
       {/* The detector, the generation, the size and the version to start
           from are all chosen in step 1 now. Repeating those controls here
@@ -843,7 +868,7 @@ export function TrainingForm({
         )}
       </div>
 
-      <label className="mt-3 flex items-start gap-2 text-xs text-ink">
+      {dataChoice.mode === 'prepared' && <label className="mt-3 flex items-start gap-2 text-xs text-ink">
         <input type="checkbox" checked={deleteDecayAfterRun} disabled={busy || preparing}
           onChange={(event) => setDeleteDecayAfterRun(event.target.checked)} />
         <span>Delete the decayed dataset after this run
@@ -853,7 +878,7 @@ export function TrainingForm({
             Prepare a new decayed dataset before adding another new run.
           </span>
         </span>
-      </label>
+      </label>}
       {preparationJob && (
         <div className="mt-3 rounded-md border border-black/15 bg-page p-3 text-xs"
           role="status" aria-live="polite">
@@ -891,7 +916,7 @@ export function TrainingForm({
           Start All Over
         </button>
       </div>
-      </fieldset>
+      </fieldset>}
 
       {/* Automatic queueing uses the prepared dataset too. */}
       <div className="mt-3 rounded-md border border-black/15 p-3">

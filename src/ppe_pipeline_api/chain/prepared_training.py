@@ -11,7 +11,7 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     config = config if config is not None else pc.read_config()
     plan = rs.settings(config)
     allowed = {'epochs', 'img_size', 'batch', 'seed', 'patience', 'hyperparams',
-               'detector_slug', 'architecture', 'notes', 'base_version', 'delete_decay_after_run'}
+               'detector_slug', 'architecture', 'notes', 'base_version', 'delete_decay_after_run', 'dataset_version_id'}
     if overrides:
         if set(overrides) - allowed:
             raise ValueError('Unsupported training setting.')
@@ -53,7 +53,12 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     if progress:
         progress('Preserving starting weights', 0, 0)
     base = data.preserve_training_base(uri)
-    version = data.freeze_prepared_training(config, trigger=trigger, target_classes=detector['classes'], progress=progress)
+    saved_id = str(plan.get('dataset_version_id') or '').strip()
+    if saved_id:
+        version = data.prepare_saved_training(saved_id, trigger=trigger, target_classes=detector['classes'], progress=progress)
+        plan['delete_decay_after_run'] = False
+    else:
+        version = data.freeze_prepared_training(config, trigger=trigger, target_classes=detector['classes'], progress=progress)
     generation, size = training.split_architecture(architecture)
     entry = {**data.version_run_fields(version), 'id': entry_id or uuid.uuid4().hex[:12],
         'generation': generation, 'size': size, 'architecture': architecture,
@@ -77,7 +82,7 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
         training.queue_start()
     return {'ok': True, 'steps': [{'step': 'preserve', 'ok': True,
         'detail': f"Preserved {version['train_images']} training and {version['val_images']} validation images"},
-        {'step': 'queue', 'ok': True, 'detail': f"Queued {entry['id']} using the prepared decay dataset"}],
+        {'step': 'queue', 'ok': True, 'detail': f"Queued {entry['id']} using dataset {version['version_id']}"}],
         'dataset_version_id': version['version_id'], 'entry_id': entry['id']}
 
 

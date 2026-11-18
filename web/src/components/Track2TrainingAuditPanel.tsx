@@ -292,6 +292,11 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
         </button>
         {/* Every field and EVERY file name, not the capped sample shown
             below -- the export reads the S3 manifest. */}
+        {datasetRecordId?.startsWith('dv-') && <button type="button"
+          className="shrink-0 rounded-sm border border-black/15 px-2 py-1 text-xs"
+          onClick={() => window.dispatchEvent(new CustomEvent('track2-use-saved-dataset', {detail: datasetRecordId}))}>
+          Use this dataset
+        </button>}
         <button
           type="button"
           onClick={handleExport}

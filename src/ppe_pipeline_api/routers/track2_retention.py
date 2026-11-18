@@ -1286,11 +1286,15 @@ def get_scheduled(days: int = 42, files: str = "",
 # --- dataset versions (dataset_versions.py) ------------------------------------
 
 @router.get("/versions")
-def list_versions(limit: int = 30, session=Depends(require_session)) -> dict:
+def list_versions(limit: int = 30, summary: bool = False, session=Depends(require_session)) -> dict:
     """Every frozen dataset a run was queued or started on, newest first."""
     from .. import dataset_versions as dsv
     try:
-        return {"versions": dsv.listing(limit)}
+        versions = dsv.listing(limit)
+        if summary:
+            keys = ('version_id', 'created_at', 'run_id', 'train_images', 'val_images', 'classes', 'central_recipe')
+            versions = [{key: v[key] for key in keys if key in v} for v in versions]
+        return {"versions": versions}
     except Exception as exc:                                       # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not list versions: {exc}")
 
@@ -1334,3 +1338,17 @@ def queue_version(version_id: str, session=Depends(require_session)) -> dict:
         raise HTTPException(status_code=400, detail=f"Could not queue it: {exc}")
     dsv.mark(version_id, state="queued", entry_id=entry["id"])
     return {"queued": entry["id"], "version_id": version_id}
+
+
+class SavedDatasetCheck(BaseModel):
+    detector_slug: str
+
+
+@router.post('/versions/{version_id}/check')
+def check_saved_dataset(version_id: str, body: SavedDatasetCheck, session=Depends(require_session)):
+    from .. import data, training
+    try:
+        detector = training.get_detector(body.detector_slug)
+        return data.check_saved_training(version_id, detector['classes'])
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

@@ -3182,6 +3182,7 @@ export function getTrack2Scheduled(days = 42, files: string[] | "*" = []): Promi
 
 /** A frozen dataset a run was queued or started on (dataset_versions.py). */
 export interface Track2DatasetVersion {
+  central_recipe?: { store_uri: string };
   validation_selection_id?: string;
   version_id: string;
   created_at: string;
@@ -3198,8 +3199,8 @@ export interface Track2DatasetVersion {
   entry_template?: Record<string, unknown>;
 }
 
-export function listTrack2DatasetVersions(limit = 30): Promise<{ versions: Track2DatasetVersion[] }> {
-  return apiGet(`/track2/retention/versions?limit=${limit}`);
+export function listTrack2DatasetVersions(limit = 30, summary = false): Promise<{ versions: Track2DatasetVersion[] }> {
+  return apiGet(`/track2/retention/versions?limit=${limit}${summary ? '&summary=true' : ''}`);
 }
 
 export function getTrack2DatasetVersion(
@@ -3210,6 +3211,14 @@ export function getTrack2DatasetVersion(
 
 export function queueTrack2DatasetVersion(id: string): Promise<{ queued: string; version_id: string }> {
   return apiPost(`/track2/retention/versions/${encodeURIComponent(id)}/queue`);
+}
+
+export interface SavedDatasetCheck {
+  version_id: string; created_at: string; run_id: string; train_images: number;
+  val_images: number; classes: string[]; store_uri: string; remapped: boolean;
+}
+export function checkTrack2SavedDataset(id: string, detectorSlug: string): Promise<SavedDatasetCheck> {
+  return apiPost(`/track2/retention/versions/${encodeURIComponent(id)}/check`, { detector_slug: detectorSlug });
 }
 
 export function listTrack2Folders(
