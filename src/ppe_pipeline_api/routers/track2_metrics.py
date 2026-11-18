@@ -203,6 +203,11 @@ class ExportSettings(BaseModel):
     #: restoring what it does to what is already there would reproduce
     #: half the job.
     retention: str = "keep_all"
+    #: Send the best version's .pt with its training run's metadata
+    #: embedded (2026-11-18), and which categories. Saved in the preset:
+    #: a plain .pt and one carrying its provenance are two different files.
+    include_metadata: bool = False
+    metadata_groups: list[str] = []
 
 
 class ExportSettingsRequest(BaseModel):
@@ -318,6 +323,11 @@ class WeightsExportRequest(BestVersionRequest):
     #: What happens to EARLIER exports of this Class once the new one
     #: lands: keep_all | archive_oldest | keep_latest.
     retention: str = "keep_all"
+    #: Embed the training run's metadata in the .pt (2026-11-18). The
+    #: version is chosen exactly as for a plain export; the file is then
+    #: the run's own published checkpoint with the categories embedded.
+    include_metadata: bool = False
+    metadata_groups: list[str] | None = None
 
 
 @router.get("/export/groups")
@@ -382,6 +392,51 @@ def preview_best_version(payload: BestVersionRequest,
     }
 
 
+def _export_best_with_metadata(payload: "WeightsExportRequest") -> dict:
+    """The best version by the criterion -- the SAME pick as a plain export
+    -- traced to the training run that registered it, and exported as that
+    run's .pt with the chosen metadata categories embedded.
+
+    A version with no recorded run (imported, or registered before runs
+    were catalogued) has no metadata to add: refused with that reason,
+    never silently exported plain. Retention is not applied here; each
+    metadata export lands in its own folder."""
+    from ..data import catalog_view
+    groups = [g for g in (payload.metadata_groups or []) if g]
+    if not groups:
+        raise HTTPException(status_code=400,
+                            detail="Choose at least one metadata category, or untick Include metadata.")
+    try:
+        rows = mx.group_versions(payload.group_name)
+    except Exception as exc:                                       # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Could not read {payload.group_name}: {exc}")
+    best, why = mx.pick_best(rows, payload.criterion)
+    if not best:
+        raise HTTPException(status_code=400, detail=why or "There is no version to export.")
+    pick = mx.describe_pick(best, payload.criterion)
+    try:
+        run = catalog_view.runs_by_model().get(pick["model_package_arn"])
+    except Exception as exc:                                       # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"The catalog did not answer: {exc}")
+    if not run:
+        raise HTTPException(status_code=400, detail=(
+            f"v{pick['version']} has no recorded training run, so there is no run metadata to "
+            "embed. Untick Include metadata to export its plain .pt."))
+    try:
+        out = catalog_view.export_run_weights(run["run_id"], destination=payload.destination,
+                                              bucket=payload.bucket, prefix=payload.prefix,
+                                              metadata_groups=groups)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:                                       # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"The export failed: {exc}")
+    return {"picked": pick, "considered": len(rows), "destination": payload.destination,
+            "written_to": out.get("uri", ""), "url": out.get("url", ""),
+            "filename": f"run-{run['run_number']}.pt",
+            "retention": {"mode": "not applied", "archived": [], "deleted": []},
+            "run_number": run["run_number"], "run_id": run["run_id"], "metadata_groups": groups}
+
+
 @router.post("/export/weights")
 def export_best_weights(payload: WeightsExportRequest,
                         session=Depends(require_session)) -> dict:
@@ -395,6 +450,8 @@ def export_best_weights(payload: WeightsExportRequest,
     if payload.destination not in ("local", "s3"):
         raise HTTPException(status_code=422,
                             detail=f"{payload.destination!r} is not a destination.")
+    if payload.include_metadata:
+        return _export_best_with_metadata(payload)
     try:
         return mx.run_export(
             payload.group_name, payload.criterion,

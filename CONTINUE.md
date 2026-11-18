@@ -1,5 +1,18 @@
 # Continue here
 
+Compare -> best -> export, linked to the run (18 Nov, dev `20261118-120431`).
+Run numbers (from `/catalog/runs-by-model`, keyed on package ARN) on the
+comparison legend and bar labels, picker version list, and Model export's
+best-version line. "Open run in catalog" (Comparison and Model export)
+selects that run in the Data Catalog (looked up by ID if not loaded) and
+scrolls to Catalog export. Model export "Include the training run's
+metadata in the .pt": same pick (`mx.pick_best`), traced via runs_by_model,
+exported by `catalog_view.export_run_weights` with the groups embedded;
+no run -> refused; retention not applied. Saved in the preset
+(`include_metadata`, `metadata_groups`). Live: helmet v4 -> Run 3,
+run-3.pt carries best/extra/track2_metadata.json. Branch is now
+`ml_ops_track2` (export merged + deleted).
+
 Review & Metrics / Data Catalog page reworked (18 Nov, dev `20261118-112124`,
 app + worker). Catalog: server-side search/status/SGT date filters with
 Load more (`_browse_filter`, all bound params); per-table Loading/Empty/

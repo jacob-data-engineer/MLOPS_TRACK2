@@ -8,10 +8,12 @@ import { Track2ModelPicker, modelLabel, rowKey } from "../components/Track2Model
 import {
   ApiError,
   getTrack2Metrics,
+  getTrack2RunsByModel,
   getTrack2TrainingAudit,
   TRACK2_COMPARE_COLORS,
   type Track2ExportSettings,
   type Track2MetricsRow,
+  type Track2RunForModel,
   type Track2TrainingAudit,
 } from "../lib/api";
 import { formatSgt } from "../lib/format";
@@ -59,6 +61,9 @@ const EXPORT_DEFAULTS: Track2ExportSettings = {
   // removes nothing. A default that deleted would be a retention
   // decision taken on somebody's behalf.
   retention: "keep_all",
+  // A plain .pt unless asked: embedding metadata changes the file.
+  include_metadata: false,
+  metadata_groups: [],
 };
 
 type MetricKey = "mAP50" | "mAP50-95" | "precision" | "recall" | "f1" | "accuracy";
@@ -112,19 +117,38 @@ const DEFAULT_METRIC_KEYS = new Set(METRICS.filter((m) => m.on).map((m) => m.key
 const GRID_LINES = [0, 25, 50, 75, 100];
 
 
-function Track2MetricsBarChart({ rows, metrics }: { rows: Track2MetricsRow[]; metrics: MetricKey[] }) {
+/** "Run 58", or a plain statement that none is recorded. */
+export function runLabel(run: Track2RunForModel | undefined): string {
+  return run ? `Run ${run.run_number}` : "no run recorded";
+}
+
+function Track2MetricsBarChart({ rows, metrics, runs, onOpenRun }: {
+  rows: Track2MetricsRow[]; metrics: MetricKey[];
+  runs: Record<string, Track2RunForModel>; onOpenRun: (runId: string) => void;
+}) {
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-        {rows.map((row, i) => (
-          <span key={rowKey(row)} className="flex items-center gap-1.5 text-xs text-ink-secondary">
-            <span
-              className="h-2.5 w-2.5 shrink-0 rounded-sm"
-              style={{ background: TRACK2_COMPARE_COLORS[i] }}
-            />
-            {modelLabel(row)} ({row.status})
-          </span>
-        ))}
+      {/* Each compared version with the run that made it, and the way to
+          that run's exports: .pt, dataset, metadata or a complete package. */}
+      <div className="flex flex-wrap gap-x-5 gap-y-2">
+        {rows.map((row, i) => {
+          const run = runs[row.model_package_arn];
+          return (
+            <span key={rowKey(row)} className="flex flex-wrap items-center gap-1.5 text-xs text-ink-secondary">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                style={{ background: TRACK2_COMPARE_COLORS[i] }}
+              />
+              {modelLabel(row)} ({row.status}) &middot; <span className="tabular font-medium text-ink">{runLabel(run)}</span>
+              {run && (
+                <button type="button" onClick={() => onOpenRun(run.run_id)}
+                        className="rounded border border-hairline px-1.5 py-0.5 text-[11px] font-medium text-accent">
+                  Open run in catalog
+                </button>
+              )}
+            </span>
+          );
+        })}
       </div>
       {metrics.map((key) => {
         const label = METRICS.find((m) => m.key === key)?.label ?? key;
@@ -184,7 +208,7 @@ function Track2MetricsBarChart({ rows, metrics }: { rows: Track2MetricsRow[]; me
             <div className="mt-2 ml-10 flex gap-4 px-1">
               {rows.map((row) => (
                 <span key={rowKey(row)} className="tabular flex-1 truncate text-center text-[11px] text-ink-muted">
-                  {modelLabel(row)}
+                  {modelLabel(row)} &middot; {runLabel(runs[row.model_package_arn])}
                 </span>
               ))}
             </div>
@@ -228,6 +252,14 @@ export function Track2MetricsPage() {
   // Bumped by Refresh all: the catalog, its selected record and that
   // record's export status read again, keeping selections and filters.
   const [catalogRefresh, setCatalogRefresh] = useState(0);
+  // Which training run registered each version, keyed on package ARN.
+  const [runsByArn, setRunsByArn] = useState<Record<string, Track2RunForModel>>({});
+  // "Open run in catalog": a request the catalog acts on once. The nonce
+  // makes a second press on the same run a new request.
+  const [openRun, setOpenRun] = useState<{ runId: string; nonce: number } | null>(null);
+  function openRunInCatalog(runId: string) {
+    setOpenRun({ runId, nonce: Date.now() });
+  }
   // Only the newest load may write: a slow answer to an earlier Refresh
   // must not land over a newer one.
   const loads = useRef(0);
@@ -269,6 +301,11 @@ export function Track2MetricsPage() {
         // The audits already shown stay; the failure is said, not hidden.
         setAuditsState({ status: "failed", error: err instanceof ApiError ? err.detail : "Could not read the training audits." });
       });
+    // Run numbers: a small indexed read. A failure leaves the labels as they
+    // were rather than claiming no version has a run.
+    getTrack2RunsByModel()
+      .then((res) => { if (mine === loads.current) setRunsByArn(res.runs); })
+      .catch(() => undefined);
     setReloading(true);
     setError(null);
     getTrack2Metrics()
@@ -484,6 +521,7 @@ export function Track2MetricsPage() {
       {rows && (
         <Track2ModelPicker
           rows={rows}
+          runs={runsByArn}
           selected={selectedVersions}
           onToggle={toggleVersion}
           onClear={handleClear}
@@ -535,7 +573,7 @@ export function Track2MetricsPage() {
             ) : compareMetrics.length === 0 ? (
               <p className="text-sm text-ink-muted">Choose at least one metric.</p>
             ) : (
-              <Track2MetricsBarChart rows={compareRows} metrics={compareMetrics} />
+              <Track2MetricsBarChart rows={compareRows} metrics={compareMetrics} runs={runsByArn} onOpenRun={openRunInCatalog} />
             )}
           </Card>
         </div>
@@ -548,6 +586,8 @@ export function Track2MetricsPage() {
             rows={rows}
             settings={exportSettings}
             onChange={setExportSettings}
+            runsByArn={runsByArn}
+            onOpenRun={openRunInCatalog}
           />
         </div>
       )}
@@ -563,7 +603,7 @@ export function Track2MetricsPage() {
           consequence to take silently. */}
 
       <section id="data-catalog" className="mt-8 scroll-mt-48 border-t border-black/20 pt-6" aria-label="Data Catalog">
-        <Track2CatalogPage refreshKey={catalogRefresh} />
+        <Track2CatalogPage refreshKey={catalogRefresh} openRun={openRun} />
       </section>
     </div>
   );

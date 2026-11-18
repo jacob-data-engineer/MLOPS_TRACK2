@@ -1303,6 +1303,10 @@ export interface Track2ExportSettings {
    * restoring where an export goes without restoring what it does to
    * what is already there would reproduce half the job. */
   retention: Track2ExportRetention;
+  /** Send the best version's .pt with its training run's metadata
+   * embedded, and which categories. Absent on presets saved before. */
+  include_metadata?: boolean;
+  metadata_groups?: string[];
 }
 
 /** `keep_all` leaves them -- the folder is the history. `archive_oldest`
@@ -1421,7 +1425,13 @@ export function exportTrack2BestWeights(body: {
   bucket?: string;
   prefix?: string;
   retention?: Track2ExportRetention;
+  include_metadata?: boolean;
+  metadata_groups?: string[];
 }): Promise<{
+  /** Set when the run's metadata was embedded: which run it came from. */
+  run_number?: number;
+  run_id?: string;
+  metadata_groups?: string[];
   picked: Track2ExportPick;
   considered: number;
   destination: string;

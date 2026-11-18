@@ -19,15 +19,14 @@ Facts for when you ARE asked (not prompts to raise it): the GitHub repo is
 do not assume private). Push only when asked, and never commit Terraform
 state -- `.gitignore` keeps `*.tfstate*` out on purpose.
 
-**Everything goes on `export`** (decided 2026-11-05, replacing the
-feature-branch rule of 2026-10-29):
+**Everything goes on `ml_ops_track2`** (decided 2026-11-18, replacing the
+`export`-branch rule of 2026-11-05; `export` was merged in and deleted):
 
-- All work is committed on the `export` branch and pushed there. Do not
-  create a new branch for a piece of work -- not quietly, not as a
-  question. If you find yourself on another branch, move the work to
-  `export`.
-- `ml_ops_track2` is still GitHub's default branch. Leave it alone:
-  merging `export` into it is the user's call, made when they ask.
+- All work is committed on `ml_ops_track2`, GitHub's default branch, and
+  pushed there. Do not create a new branch for a piece of work -- not
+  quietly, not as a question. If you find yourself on another branch,
+  move the work to `ml_ops_track2`.
+- There is no `export` branch any more. Do not recreate it.
 - Commits and pushes still happen only when the user asks, with the
   user's own comment as the commit message.
 

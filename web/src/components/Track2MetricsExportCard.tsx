@@ -15,12 +15,14 @@ import {
   type Track2ExportCounts,
   type Track2ExportScore,
   type Track2ExportCriterion,
+  type Track2RunForModel,
   type Track2ExportGroup,
   type Track2ExportPick,
   type Track2ExportRetention,
   type Track2ExportSettings,
   type Track2MetricsRow,
 } from "../lib/api";
+import { METADATA_CATEGORIES } from "./Track2CatalogMetadata";
 import { formatSgt } from "../lib/format";
 import { statusLabel } from "../lib/slug";
 import { Badge } from "./Badge";
@@ -90,8 +92,11 @@ function statusTone(status: string): "confirmed" | "rejected" | "pending" {
   return "pending";
 }
 
-/** The chosen version, with the two things nothing filters on. */
-function Pick({ pick }: { pick: Track2ExportPick }) {
+/** The chosen version, with the two things nothing filters on -- and the
+ * training run that made it, with the way to that run's other exports. */
+function Pick({ pick, run, onOpenRun }: {
+  pick: Track2ExportPick; run?: Track2RunForModel; onOpenRun?: (runId: string) => void;
+}) {
   return (
     <div className="rounded-sm border border-hairline bg-page p-3">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -101,6 +106,15 @@ function Pick({ pick }: { pick: Track2ExportPick }) {
           label={pick.is_seed ? "Seed" : statusLabel(pick.status)}
         />
         <span className="tabular text-xs text-ink-muted">{pick.group_name}</span>
+        <span className="tabular text-xs font-medium text-ink">
+          {run ? `Run ${run.run_number}` : "No training run recorded"}
+        </span>
+        {run && onOpenRun && (
+          <button type="button" onClick={() => onOpenRun(run.run_id)}
+                  className="rounded border border-hairline px-1.5 py-0.5 text-[11px] font-medium text-accent">
+            Open run in catalog (dataset, metadata, package)
+          </button>
+        )}
       </div>
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
         <span className="text-ink-secondary">
@@ -150,14 +164,23 @@ export function Track2MetricsExportCard({
   rows,
   settings,
   onChange,
+  runsByArn = {},
+  onOpenRun,
 }: {
   rows: Track2MetricsRow[];
+  /** Which training run registered each version, keyed on package ARN. */
+  runsByArn?: Record<string, Track2RunForModel>;
+  /** Select that run in the Data Catalog below and scroll to its export. */
+  onOpenRun?: (runId: string) => void;
   /** Owned by the page, so the preset toolbar at the top and this card
    * edit one set of values rather than two that can disagree. */
   settings: Track2ExportSettings;
   onChange: (next: Track2ExportSettings) => void;
 }) {
   const { registry, generation, size, group_name: group, criterion, destination, bucket, prefix, retention } = settings;
+  // Embed the training run's metadata in the .pt. Saved in the preset.
+  const includeMetadata = !!settings.include_metadata;
+  const metadataGroups = settings.metadata_groups ?? [];
 
   // Patches are built from the LATEST settings, not from whatever this
   // render closed over. Several things here write back -- the three
@@ -385,7 +408,7 @@ export function Track2MetricsExportCard({
     // says what would go, but a delete that happens on the same single
     // press as an export is a delete nobody separately agreed to -- and
     // this is somebody else's bucket as often as not.
-    if (destination === "s3" && retention === "keep_latest" && siblings?.length) {
+    if (!includeMetadata && destination === "s3" && retention === "keep_latest" && siblings?.length) {
       // Line by line, joined -- a multi-line template literal here would
       // carry this file's own indentation into the dialog.
       const ok = window.confirm([
@@ -405,7 +428,10 @@ export function Track2MetricsExportCard({
       const res = await exportTrack2BestWeights({
         group_name: group, criterion, destination,
         ...(destination === "s3" ? { bucket, prefix, retention } : {}),
+        ...(includeMetadata ? { include_metadata: true, metadata_groups: metadataGroups } : {}),
       });
+      const carried = res.run_number != null
+        ? ` (Run ${res.run_number}, with ${res.metadata_groups?.length ?? 0} metadata categories embedded)` : "";
       if (res.url) {
         // Straight to S3 from the browser. A 19MB-110MB checkpoint
         // streamed through the API container would stall every request
@@ -414,14 +440,14 @@ export function Track2MetricsExportCard({
         link.href = res.url;
         link.download = res.filename;
         link.click();
-        setNote(`v${res.picked.version} downloading as ${res.filename}`);
+        setNote(`v${res.picked.version}${carried} downloading as ${res.filename}`);
       } else {
         const tidied = res.retention.deleted.length
           ? ` -- ${res.retention.deleted.length} earlier export${res.retention.deleted.length === 1 ? "" : "s"} deleted`
           : res.retention.archived.length
             ? ` -- ${res.retention.archived.length} earlier export${res.retention.archived.length === 1 ? "" : "s"} moved to archive/`
             : "";
-        setNote(`v${res.picked.version} written to ${res.written_to}${tidied}`);
+        setNote(`v${res.picked.version}${carried} written to ${res.written_to}${tidied}`);
       }
       setPick(res.picked);
     } catch (err) {
@@ -607,7 +633,7 @@ export function Track2MetricsExportCard({
           <p className="text-xs text-ink-muted">Reading the registry...</p>
         ) : pick ? (
           <>
-            <Pick pick={pick} />
+            <Pick pick={pick} run={runsByArn[pick.model_package_arn]} onOpenRun={onOpenRun} />
             {/* The server's own count, not the page's: the pick was made
                 against what the registry held a second ago, and saying so
                 is how a stale page becomes visible rather than silent. */}
@@ -777,11 +803,48 @@ export function Track2MetricsExportCard({
         )}
       </div>
 
+      {/* The run's metadata, inside the .pt -- the same categories Catalog
+          export offers. Only a version with a recorded run has any. */}
+      <div className="mt-3 rounded-sm border border-hairline p-3 text-xs">
+        <label className="flex items-start gap-2 text-ink">
+          <input type="checkbox" className="mt-0.5" checked={includeMetadata}
+                 onChange={(e) => set({ include_metadata: e.target.checked,
+                   metadata_groups: e.target.checked && !metadataGroups.length ? Object.keys(METADATA_CATEGORIES) : metadataGroups })} />
+          <span>
+            Include the training run&apos;s metadata in the .pt
+            <span className="block text-ink-muted">
+              The same version is chosen; the file is its training run&apos;s published checkpoint with
+              the categories below embedded. A version with no recorded run cannot carry metadata and is
+              refused, not sent plain. Earlier-export retention does not apply: each lands in its own run folder.
+            </span>
+          </span>
+        </label>
+        {includeMetadata && (
+          <div className="mt-2">
+            <div className="mb-1 flex gap-3">
+              <button type="button" className="underline" onClick={() => set({ metadata_groups: Object.keys(METADATA_CATEGORIES) })}>Select all</button>
+              <button type="button" className="underline" onClick={() => set({ metadata_groups: [] })}>Clear all</button>
+              <span className="text-ink-muted">{metadataGroups.length} of {Object.keys(METADATA_CATEGORIES).length} selected</span>
+            </div>
+            <div className="grid gap-1 md:grid-cols-2 lg:grid-cols-3">
+              {Object.entries(METADATA_CATEGORIES).map(([name, what]) => (
+                <label key={name} className="flex items-start gap-1.5" title={what}>
+                  <input type="checkbox" className="mt-0.5" checked={metadataGroups.includes(name)}
+                         onChange={(e) => set({ metadata_groups: e.target.checked
+                           ? [...metadataGroups, name] : metadataGroups.filter((g) => g !== name) })} />
+                  <span>{name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={exportNow}
-          disabled={!!busy || noGroup || nothingToExport || needsBucket}
+          disabled={!!busy || noGroup || nothingToExport || needsBucket || (includeMetadata && !metadataGroups.length)}
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
           {busy || (destination === "s3" ? "Export to S3 now" : "Download to this computer")}

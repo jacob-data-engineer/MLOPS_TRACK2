@@ -67,7 +67,12 @@ function emptyTable<T>(): Table<T> {
 const RUN_STATUSES = ["Completed", "Failed", "InProgress", "Stopped", "Stopping", "Queued"];
 const VERSION_STATES = ["frozen", "preserved", "deleted"];
 
-export function Track2CatalogPage({ refreshKey = 0 }: { refreshKey?: number }) {
+export function Track2CatalogPage({ refreshKey = 0, openRun = null }: {
+  refreshKey?: number;
+  /** "Open run in catalog" from Comparison or Model export: select that
+   * run, then scroll to its export. Acted on once per nonce. */
+  openRun?: { runId: string; nonce: number } | null;
+}) {
   const [status, setStatus] = useState<Track2CatalogStatus | null>(null);
   const [statusError, setStatusError] = useState("");
   const [tab, setTab] = useState<Tab>("runs");
@@ -180,6 +185,28 @@ export function Track2CatalogPage({ refreshKey = 0 }: { refreshKey?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [versions.rows]);
 
+  // Open a run asked for from above. It may be on no loaded page, so it is
+  // looked up by its ID -- the filters on screen are left as they are.
+  const handledOpen = useRef(0);
+  useEffect(() => {
+    if (!openRun || handledOpen.current === openRun.nonce) return;
+    handledOpen.current = openRun.nonce;
+    const goToExport = () => window.setTimeout(() =>
+      document.getElementById("catalog-export")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    setTab("runs");
+    const loaded = runs.rows.find((r) => r.run_id === openRun.runId);
+    if (loaded) { setPicked({ kind: "run", run: loaded }); goToExport(); return; }
+    getTrack2CatalogRuns(0, { search: openRun.runId }, 5)
+      .then((r) => {
+        const found = r.runs.find((x) => x.run_id === openRun.runId);
+        if (!found) { setError(`That run is not in the catalog yet (${openRun.runId}).`); return; }
+        setPicked({ kind: "run", run: found });
+        goToExport();
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not open that run."));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRun?.nonce]);
+
   // A picked run's dataset, for the export target's train/val counts.
   const pickedRunId = picked?.kind === "run" ? picked.run.run_id : "";
   const pickedRunVersion = picked?.kind === "run" ? picked.run.version_id : null;
@@ -267,7 +294,8 @@ export function Track2CatalogPage({ refreshKey = 0 }: { refreshKey?: number }) {
       <p className="mb-2 max-w-3xl text-sm text-ink-secondary">
         Every training run and every dataset version, with the files each used. Pick one to review
         its metadata, check its dataset can be rebuilt, or export it. Selecting a row here is
-        independent of the versions compared or exported above.
+        independent of the versions compared or exported above, except when you press
+        Open run in catalog there.
       </p>
       {status?.record_backend === "postgres" && (
         <p className="mb-4 text-xs text-ink-muted">Records stored in PostgreSQL. Changes are recorded directly.</p>

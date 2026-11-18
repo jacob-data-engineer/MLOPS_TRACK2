@@ -26,7 +26,9 @@ function MetadataTable({ value }: { value: unknown }) {
 }
 
 type Output = "model" | "dataset" | "metadata" | "complete";
-const descriptions: Record<string, string> = {
+/** The metadata categories, and what each holds. Exported so Model export
+ * offers the same ones Catalog export does. */
+export const METADATA_CATEGORIES: Record<string, string> = {
   Identity: "Run, model and project identifiers", Timestamps: "Submission, start and completion times",
   "Model and classes": "Architecture, model version and class mapping", "Starting checkpoint": "Base model and source checkpoint",
   "Dataset and preparation": "Dataset versions, sources and preparation settings", "Training settings": "Epochs, batch size, seed and parameters",
@@ -294,7 +296,7 @@ export function Track2CatalogMetadata({ selection, destination, renderDestinatio
           <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">{Object.entries(metadata?.groups || {}).map(([name, value]) =>
             <div key={name} className="rounded border border-hairline p-2 text-xs"><label className="flex gap-2"><input type="checkbox" checked={chosen.includes(name)} disabled={!available.includes(name)}
               onChange={(e) => void choose(e.target.checked ? [...chosen, name] : chosen.filter((n) => n !== name))} /><span className="font-medium">{name}{!available.includes(name) ? " — Not recorded" : ""}</span></label>
-              <p className="mt-1 text-ink-muted">{descriptions[name]}</p><details className="mt-1"><summary className="cursor-pointer">Preview fields</summary><MetadataTable value={value} /></details></div>)}</div>
+              <p className="mt-1 text-ink-muted">{METADATA_CATEGORIES[name]}</p><details className="mt-1"><summary className="cursor-pointer">Preview fields</summary><MetadataTable value={value} /></details></div>)}</div>
           <p className="mt-2 text-xs text-ink-muted">The same selection applies to model, JSON and complete-package metadata. Existing checkpoint contents are preserved. Dataset packages always retain their layout and file manifest.</p>
         </div>}
         <div><p className="mb-2 font-medium">{mode === "dataset" ? "2" : "3"}. Destination</p>{renderDestination(mode === "dataset" || mode === "complete")}</div>
