@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { useCardOpen } from "../lib/cardState";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, type BadgeTone } from "./Badge";
 import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
 import {
@@ -30,6 +30,24 @@ import { ConfirmDialog } from "./ConfirmDialog";
 export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number }) {
   const [audits, setAudits] = useState<Track2TrainingAudit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const [historyHeight, setHistoryHeight] = useState<number>();
+
+  useEffect(() => {
+    const list = historyRef.current;
+    if (!list || !audits?.length) return;
+    if (audits.length <= 4) { setHistoryHeight(undefined); return; }
+    const headers = Array.from(list.querySelectorAll<HTMLElement>("[data-history-summary]")).slice(0, 4);
+    const measure = () => {
+      const gap = parseFloat(getComputedStyle(list).rowGap) || 0;
+      setHistoryHeight(headers.reduce((height, header) => height + header.getBoundingClientRect().height + 2, 0)
+        + Math.max(0, headers.length - 1) * gap);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    headers.forEach((header) => observer.observe(header));
+    return () => observer.disconnect();
+  }, [audits]);
 
   const load = useCallback(async () => {
     try {
@@ -54,7 +72,9 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
       {audits === null ? (
         <p className="text-sm text-ink-muted">Loading...</p>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div ref={historyRef} role="region" aria-label="Training history" tabIndex={0}
+          className="flex flex-col gap-2 overflow-y-auto overscroll-contain [&>div]:shrink-0"
+          style={{ maxHeight: historyHeight }}>
           {audits.map((audit) => (
             <AuditRow key={audit.id} audit={audit} onDeleted={load} />
           ))}
@@ -222,7 +242,7 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
 
   return (
     <div className="rounded-sm border border-hairline bg-page">
-      <div className="flex items-center gap-2 px-3 py-2">
+      <div data-history-summary className="flex items-center gap-2 px-3 py-2">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
