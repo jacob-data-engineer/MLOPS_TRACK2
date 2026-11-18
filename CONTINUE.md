@@ -1,5 +1,25 @@
 # Continue here
 
+Review & Metrics / Data Catalog page reworked (18 Nov, dev `20261118-112124`,
+app + worker). Catalog: server-side search/status/SGT date filters with
+Load more (`_browse_filter`, all bound params); per-table Loading/Empty/
+Failed/Retry; request counters drop stale answers; Exports tab and the
+sticky selection bar removed. Catalog export card: exact target (run,
+model version, dataset ID, train/val), this record's own exports
+(`/exports?run_id|version_id`), result labelled with source/contents/
+destination/created/ID and "Previous export" when options differ
+(`sameChoice`), measured progress (stage, processed/total, updated_at,
+Stop), read-only "Check dataset availability" (ready / unavailable /
+legacy / check_failed -- access or network errors are NOT "missing").
+Metadata viewer labels "Selected catalog record" vs "Opened external
+file" and closes the file when the selection changes. Refresh all, jump
+links, `formatSgt` (18 Nov 2026, 5:30 PM SGT (GMT+8)). Schema 9 (export
+progress/options, additive). FOUND ON DEPLOY: in PostgreSQL mode nothing
+migrated before the export list read the new columns -> 400; `exports()`
+and `start_export()` now call `ensure_schema_once()`. Migrations take a
+pg advisory lock and record versions ON CONFLICT DO NOTHING (the 16 Nov
+start-up race). Baseline at HEAD had 8 failing tests; still 8, none new.
+
 "Data Preparation file for training" card (Multi-Auto Training) now shows,
 for the chosen/loaded _DP file: its saved class list, the classes the
 run's data.yaml declares, and that data.yaml (16 Nov, dev). Route

@@ -427,7 +427,7 @@ const METRICS_STEPS: StepList = [
     title: "Export the best version's checkpoint",
     body: (
       <>
-        <strong>Export control</strong> sends the{" "}
+        <strong>Model export</strong> sends the{" "}
         <span className={K}>.pt</span> itself. Pick Model Name, Model and Size,
         then what decides &ldquo;best&rdquo;: highest mAP50, F1, recall, or
         simply the newest version. Ties go to the higher version number.
@@ -605,7 +605,7 @@ const CONTENT: Record<TabKey, { blurb: ReactNode; steps: StepList; closing?: Rea
       <>
         Comparing what has been trained, and getting the one you want out.
         Nothing on this page starts a training run or costs GPU time; the
-        only thing that writes anything is Export control.
+        only things that write anything are Model export and Catalog export.
       </>
     ),
     steps: METRICS_STEPS,

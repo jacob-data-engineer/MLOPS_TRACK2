@@ -88,8 +88,34 @@ def runs_by_model() -> dict[str, dict]:
     return {row.pop("model_package_arn"): row for row in rows}
 
 
-def runs(limit: int = PAGE, offset: int = 0) -> dict:
-    total = _rows("SELECT count(*) AS n FROM training_runs")[0]["n"]
+def _browse_filter(kind, search='', status='', from_date='', to_date=''):
+    """WHERE clause + parameters for the catalog's run and version tables.
+    Every value is a bound parameter; only column names (fixed here) are
+    interpolated. Dates are calendar days in Singapore time, inclusive."""
+    alias, date, state, fields = (('r', 'submitted_at', 'status',
+                                   ['run_id', 'run_number', 'detector', 'architecture', 'version_id'])
+                                  if kind == 'run' else
+                                  ('v', 'created_at', 'state', ['id', 'version_number', 'class_names']))
+    clauses, params = [], []
+    if search.strip():
+        clauses.append('(' + ' OR '.join(f'CAST({alias}.{field} AS text) ILIKE %s' for field in fields) + ')')
+        params.extend(['%' + search.strip() + '%'] * len(fields))
+    if status:
+        clauses.append(f'{alias}.{state} ILIKE %s'); params.append(status)
+    for value, op in ((from_date, '>='), (to_date, '<=')):
+        if value:
+            try:
+                _dt.date.fromisoformat(value)
+            except ValueError:
+                raise ValueError(f"Use a date as YYYY-MM-DD, not {value!r}.") from None
+            clauses.append(f"({alias}.{date} AT TIME ZONE 'Asia/Singapore')::date {op} %s::date")
+            params.append(value)
+    return (' WHERE ' + ' AND '.join(clauses) if clauses else ''), tuple(params)
+
+
+def runs(limit: int = PAGE, offset: int = 0, **filters) -> dict:
+    where, params = _browse_filter('run', **filters)
+    total = _rows("SELECT count(*) AS n FROM training_runs r" + where, params)[0]["n"]
     rows = _rows(
         "SELECT r.run_number, r.run_id, r.submitted_at, r.ended_at, r.status, r.detector,"
         " r.architecture, r.version_id, v.version_number, v.kind AS version_kind,"
@@ -97,21 +123,22 @@ def runs(limit: int = PAGE, offset: int = 0) -> dict:
         " (SELECT count(*) FROM run_files f WHERE f.run_id = r.run_id AND f.kind = 'image')"
         "   AS images"
         " FROM training_runs r LEFT JOIN dataset_versions v ON v.id = r.version_id"
-        " ORDER BY r.run_number DESC LIMIT %s OFFSET %s",
-        (min(int(limit), 500), max(0, int(offset))))
+        + where + " ORDER BY r.run_number DESC LIMIT %s OFFSET %s",
+        params + (min(int(limit), 500), max(0, int(offset))))
     return {"total": total, "runs": _iso(rows)}
 
 
-def versions(limit: int = PAGE, offset: int = 0) -> dict:
-    total = _rows("SELECT count(*) AS n FROM dataset_versions")[0]["n"]
+def versions(limit: int = PAGE, offset: int = 0, **filters) -> dict:
+    where, params = _browse_filter('version', **filters)
+    total = _rows("SELECT count(*) AS n FROM dataset_versions v" + where, params)[0]["n"]
     rows = _rows(
         "SELECT v.version_number, v.id, v.kind, v.created_at, v.state, v.train_images,"
         " v.val_images, v.class_names,"
         " (SELECT count(*) FROM dataset_members m WHERE m.version_id = v.id) AS members,"
         " (SELECT array_agg(r.run_number ORDER BY r.run_number) FROM training_runs r"
         "   WHERE r.version_id = v.id) AS runs"
-        " FROM dataset_versions v ORDER BY v.version_number DESC LIMIT %s OFFSET %s",
-        (min(int(limit), 500), max(0, int(offset))))
+        " FROM dataset_versions v" + where + " ORDER BY v.version_number DESC LIMIT %s OFFSET %s",
+        params + (min(int(limit), 500), max(0, int(offset))))
     return {"total": total, "versions": _iso(rows)}
 
 
@@ -461,6 +488,15 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
     completed = False
     event = _stop_events.setdefault(export_id, threading.Event())
     checked = 0.0
+    reported = 0.0
+    total = sum(1 for entry in entries if entry[0])
+
+    def progress(stage, processed, force=False):
+        nonlocal reported
+        if force or time.monotonic() - reported >= 2:
+            _finish(export_id, "UPDATE exports SET stage=%s, processed_files=%s, total_files=%s, updated_at=now() "
+                    "WHERE id=%s AND state='building'", (stage, processed, total, export_id))
+            reported = time.monotonic()
 
     def check(force=False):
         nonlocal checked
@@ -486,6 +522,7 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
 
     try:
         check(True)
+        progress('Reading source files', 0, True)
         if not bucket:
             bucket, prefix = _export_bucket()
         folder = "/".join(p for p in (prefix, f"{label}-{export_id}") if p)
@@ -518,14 +555,17 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                         if body is None:
                             missing += 1
                             writer.writerow({**row, "missing": True, "note": note})
+                            progress('Packing files', packed + missing)
                             continue
                         if metadata and path == f"models/{label}.pt":
                             check(True)
                             body = catalog_metadata.embed(body, metadata, manifest.getvalue() if "File provenance" in metadata["groups"] else None)
                         zf.writestr(zipfile.ZipInfo(path, date_time=(2026, 1, 1, 0, 0, 0)), body)
                         packed += 1
+                        progress('Packing files', packed + missing)
                         writer.writerow({**row, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()})
             numbered = _numbered(names)
+            progress('Writing metadata and manifest', packed + missing, True)
             check(True)
             if numbered:
                 lines = "\n".join(f"  {k}: {v}" for k, v in sorted(numbered.items()))
@@ -557,15 +597,19 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                             "Only files selected for export and still available are included. Original model files are unchanged.\n")
         if sink:
             check(True)
+            progress('Finalizing ZIP upload', packed + missing, True)
             sink.finish()
             completed = True
         check(True)
         state = "partial" if missing else "ready"
         saved = _finish(export_id, "UPDATE exports SET state = %s, finished_at = now(), zip_uri = %s,"
-                           " bytes = %s, files = %s, missing = %s, destination_uri = %s WHERE id = %s AND state = 'building'",
+                           " bytes = %s, files = %s, missing = %s, destination_uri = %s,"
+                           " stage = %s, processed_files = %s, updated_at = now()"
+                           " WHERE id = %s AND state = 'building'",
                 (state, f"s3://{bucket}/{key}" if sink else None,
                  sink.size if sink else output.size, packed, missing,
-                 f"s3://{bucket}/{key}" if sink else f"s3://{bucket}/{folder}/", export_id))
+                 f"s3://{bucket}/{key}" if sink else f"s3://{bucket}/{folder}/",
+                 "Finished with missing files" if missing else "Finished", packed + missing, export_id))
         if saved is False:
             raise _ExportStopped()
     except _ExportStopped:
@@ -578,13 +622,16 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
             elif isinstance(output, _ObjectWriter):
                 for written_key in output.keys:
                     storage.s3.delete_object(Bucket=bucket, Key=written_key)
-            _finish(export_id, "UPDATE exports SET state = 'cancelled', finished_at = now(), files = 0, bytes = 0, zip_uri = NULL WHERE id = %s", (export_id,))
+            _finish(export_id, "UPDATE exports SET state = 'cancelled', finished_at = now(), files = 0, bytes = 0, zip_uri = NULL,"
+                               " stage = 'Stopped', updated_at = now() WHERE id = %s", (export_id,))
         except Exception as exc:
-            _finish(export_id, "UPDATE exports SET state = 'failed', finished_at = now(), error = %s WHERE id = %s", (f"Stopped; cleanup failed: {exc}", export_id))
+            _finish(export_id, "UPDATE exports SET state = 'failed', finished_at = now(), error = %s,"
+                               " stage = 'Failed', updated_at = now() WHERE id = %s", (f"Stopped; cleanup failed: {exc}", export_id))
     except Exception as exc:                                       # noqa: BLE001
         if sink:
             sink.abort()
-        _finish(export_id, "UPDATE exports SET state = 'failed', finished_at = now(), error = %s"
+        _finish(export_id, "UPDATE exports SET state = 'failed', finished_at = now(), error = %s,"
+                           " stage = 'Failed', updated_at = now()"
                            " WHERE id = %s", (f"{type(exc).__name__}: {exc}", export_id))
     finally:
         _stop_events.pop(export_id, None)
@@ -622,6 +669,7 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
     format = format or ("zip" if destination == "local" else "folder")
     if format not in ("zip", "folder") or (destination == "local" and format != "zip"):
         raise ValueError("Choose ZIP for a local download, or ZIP / folder for S3.")
+    catalog.ensure_schema_once()          # it writes schema-9 columns
     entries, names, label = _plan(kind, ident)
     metadata = catalog_metadata.describe(kind, ident) if include_metadata else None
     if metadata:
@@ -655,12 +703,14 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
         conn = catalog.connect()
         try:
             conn.cursor().execute(
-                "INSERT INTO exports (id, version_id, run_id, label, state, files, destination, destination_uri, format)"
-                " VALUES (%s, %s, %s, %s, 'building', %s, %s, %s, %s)",
+                "INSERT INTO exports (id, version_id, run_id, label, state, files, destination, destination_uri, format, options, updated_at)"
+                " VALUES (%s, %s, %s, %s, 'building', %s, %s, %s, %s, %s::jsonb, now())",
                 (export_id, ident if kind == "version" else None,
                  ident if kind == "run" else None, label,
                  sum(1 for path, _, _ in entries if path), destination,
-                 f"s3://{bucket}/" + "/".join(p for p in (prefix, f"{label}-{export_id}") if p) + "/", format))
+                 f"s3://{bucket}/" + "/".join(p for p in (prefix, f"{label}-{export_id}") if p) + "/", format,
+                 json.dumps({'include_metadata': include_metadata, 'include_images': include_images,
+                             'include_model': include_model, 'metadata_groups': metadata_groups})))
             conn.commit()
         finally:
             conn.close()
@@ -672,10 +722,98 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
     return {"id": export_id, "label": label, "state": "building"}
 
 
-def exports(limit: int = 50) -> list[dict]:
+def exports(limit: int = 50, run_id: str = "", version_id: str = "") -> list[dict]:
+    """Newest first. `run_id` / `version_id` narrow it to one source
+    record, so its latest export is found however many others came since."""
+    # The progress and options columns are schema 9. In PostgreSQL mode
+    # nothing else migrates before this is read, and the listing failed
+    # outright on the first deploy that added them.
+    catalog.ensure_schema_once()
+    where, params = "", ()
+    if run_id:
+        where, params = " WHERE run_id = %s", (run_id,)
+    elif version_id:
+        where, params = " WHERE version_id = %s", (version_id,)
     return _iso(_rows("SELECT id, label, version_id, run_id, state, created_at, finished_at,"
-                      " bytes, files, missing, error, destination, destination_uri, format FROM exports"
-                      " ORDER BY created_at DESC LIMIT %s", (min(int(limit), 200),)))
+                      " bytes, files, missing, error, destination, destination_uri, format,"
+                      " processed_files, total_files, stage, updated_at, options FROM exports"
+                      + where + " ORDER BY created_at DESC LIMIT %s", params + (min(int(limit), 200),)))
+
+
+def dataset_availability(kind: str, ident: str) -> dict:
+    """Read-only: could this record's dataset be rebuilt exactly?
+
+    Checks the SQL membership against the version's recorded counts, then
+    every preserved central-store image and label against its recorded
+    ETag. Copies, queues, changes and deletes NOTHING -- `verify_*` only
+    read. Model-class compatibility is not checked here; queueing checks it.
+
+    States: ready | unavailable (files missing or changed, or the SQL list
+    incomplete) | legacy (no permanent recipe to check) | check_failed (the
+    check itself could not finish -- access or network -- which says nothing
+    about whether the files are there).
+    """
+    from . import central_recipe, dataset_versions, prepared_training
+    if kind not in ('run', 'version'):
+        raise ValueError('Choose a run or dataset version.')
+    checked_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    out = {'kind': kind, 'id': ident, 'checked_at': checked_at}
+    note = ' Model class compatibility is checked separately, when a run is queued.'
+
+    def failed(exc, where):
+        if isinstance(exc, ClientError):
+            code = exc.response.get('Error', {}).get('Code', '')
+            reason = (f'access was refused ({code})' if code in ('AccessDenied', '403', 'Forbidden')
+                      else f'S3 answered {code or type(exc).__name__}')
+        else:
+            reason = f'{type(exc).__name__}: {exc}'
+        return {**out, 'state': 'check_failed',
+                'detail': f'Could not finish checking {where}: {reason}. This is an access or '
+                          'network problem, not evidence that files are missing. Retry.'}
+
+    try:
+        version_id = ident
+        if kind == 'run':
+            rows = _rows('SELECT version_id FROM training_runs WHERE run_id = %s', (ident,))
+            if not rows:
+                raise ValueError('Run not found.')
+            version_id = rows[0].get('version_id')
+        if not version_id:
+            return {**out, 'state': 'legacy',
+                    'detail': 'No saved dataset version is linked to this run, so there is nothing to rebuild from.'}
+    except ValueError:
+        raise
+    except Exception as exc:                                       # noqa: BLE001
+        return failed(exc, 'the catalog record')
+    try:
+        version = dataset_versions.get(version_id)
+    except ValueError as exc:
+        # The run names a version that is no longer recorded.
+        return {**out, 'version_id': version_id, 'state': 'unavailable', 'problem': 'version',
+                'detail': str(exc)}
+    except Exception as exc:                                       # noqa: BLE001
+        return failed(exc, 'the dataset version')
+    out.update(version_id=version_id, version_number=version.get('version_number'),
+               train_images=version.get('train_images'), val_images=version.get('val_images'))
+    if not version.get('central_recipe'):
+        return {**out, 'state': 'legacy',
+                'detail': 'This record was frozen before files were preserved in the central store, '
+                          'so it has no permanent recipe to rebuild from.'}
+    try:
+        prepared_training.verify_members(version)
+    except ValueError as exc:
+        return {**out, 'state': 'unavailable', 'problem': 'sql_membership', 'detail': f'{exc}{note}'}
+    except Exception as exc:                                       # noqa: BLE001
+        return failed(exc, 'the SQL file list')
+    try:
+        central_recipe.verify_central(version)
+    except ValueError as exc:
+        return {**out, 'state': 'unavailable', 'problem': 'files', 'detail': f'{exc}{note}'}
+    except Exception as exc:                                       # noqa: BLE001
+        return failed(exc, 'the preserved files')
+    return {**out, 'state': 'ready',
+            'detail': 'SQL membership and every preserved image and label match their recorded '
+                      f'identity and ETag.{note}'}
 
 
 def download_url(export_id: str) -> str:

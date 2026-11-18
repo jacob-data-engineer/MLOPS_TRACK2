@@ -50,7 +50,7 @@ CA_BUNDLE = pathlib.Path(__file__).with_name("rds-ca-bundle.pem")
 
 #: The schema's version: SCHEMA is version 1, and each entry in MIGRATIONS
 #: takes it one step further. Recorded in `schema_version`.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS schema_version (
@@ -226,6 +226,18 @@ MIGRATIONS = {
         "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS preserve_missing integer",
         "ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS preserve_error text",
     ],
+    # Version 9 (2026-11-18): an export's measured progress -- the stage it
+    # is in, files processed of files planned, when that was last written --
+    # and the options it was started with, so a result can be matched to the
+    # choices on screen. Additive and nullable: rows written before it read
+    # as "not recorded", never as zero.
+    9: [
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS processed_files integer",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS total_files integer",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS stage text",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS updated_at timestamptz",
+        "ALTER TABLE exports ADD COLUMN IF NOT EXISTS options jsonb",
+    ],
 }
 
 TABLES = ("files", "file_sources", "labels", "dataset_versions",
@@ -272,6 +284,8 @@ def connect(timeout=15):
 
 
 _schema_ensured = False
+#: Key for the PostgreSQL advisory lock that serialises migrations.
+SCHEMA_LOCK = 7_204_118_009
 
 
 def ensure_schema_once() -> None:
@@ -290,6 +304,12 @@ def ensure_schema(report: bool = True) -> dict:
     conn = connect()
     try:
         cur = conn.cursor()
+        # ONE migrator at a time, across processes: the dev app and its
+        # worker start together and both call this. Without it, both read
+        # version 7, both applied 8, and the second failed recording it
+        # (2026-11-16, production start-up). Released when the connection
+        # closes, whatever happens.
+        cur.execute("SELECT pg_advisory_lock(%s)", (SCHEMA_LOCK,))
         for statement in SCHEMA:
             cur.execute(statement)
         cur.execute("INSERT INTO schema_version (version) VALUES (1) "
@@ -304,7 +324,10 @@ def ensure_schema(report: bool = True) -> dict:
             # schema matching no version.
             for statement in MIGRATIONS[version]:
                 cur.execute(statement)
-            cur.execute("INSERT INTO schema_version (version) VALUES (%s)", (version,))
+            # ON CONFLICT: recording a step that is already recorded is not an
+            # error -- every step is IF NOT EXISTS, so it was a no-op anyway.
+            cur.execute("INSERT INTO schema_version (version) VALUES (%s) "
+                        "ON CONFLICT (version) DO NOTHING", (version,))
             conn.commit()
     finally:
         conn.close()

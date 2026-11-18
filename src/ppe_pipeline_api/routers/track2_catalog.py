@@ -63,8 +63,8 @@ def _guard(work):
 
 
 @router.get("/runs")
-def runs(limit: int = 100, offset: int = 0, session=Depends(require_session)) -> dict:
-    return _guard(lambda: catalog_view.runs(limit, offset))
+def runs(limit: int = 100, offset: int = 0, search: str = '', status: str = '', from_date: str = '', to_date: str = '', session=Depends(require_session)) -> dict:
+    return _guard(lambda: catalog_view.runs(limit, offset, search=search, status=status, from_date=from_date, to_date=to_date))
 
 
 @router.get("/runs-by-model")
@@ -81,8 +81,8 @@ def repeat_run(run_id: str, session=Depends(require_session)) -> dict:
 
 
 @router.get("/versions")
-def versions(limit: int = 100, offset: int = 0, session=Depends(require_session)) -> dict:
-    return _guard(lambda: catalog_view.versions(limit, offset))
+def versions(limit: int = 100, offset: int = 0, search: str = '', status: str = '', from_date: str = '', to_date: str = '', session=Depends(require_session)) -> dict:
+    return _guard(lambda: catalog_view.versions(limit, offset, search=search, status=status, from_date=from_date, to_date=to_date))
 
 
 @router.get("/runs/{run_id}/files")
@@ -155,6 +155,11 @@ def metadata(kind: str, id: str, session=Depends(require_session)) -> dict:
     return _guard(lambda: catalog_metadata.describe(kind, id))
 
 
+@router.get("/dataset-availability")
+def dataset_availability(kind: str, id: str, session=Depends(require_session)) -> dict:
+    return _guard(lambda: catalog_view.dataset_availability(kind, id))
+
+
 @router.post("/metadata/export")
 def export_metadata(payload: ExportRequest, session=Depends(require_session)) -> dict:
     return _guard(lambda: catalog_view.export_metadata(payload.kind, payload.id, destination=payload.destination,
@@ -172,8 +177,10 @@ def inspect_metadata(file: UploadFile, session=Depends(require_session)) -> dict
 
 
 @router.get("/exports")
-def list_exports(session=Depends(require_session)) -> dict:
-    return {"exports": _guard(catalog_view.exports)}
+def list_exports(run_id: str = "", version_id: str = "", limit: int = 50,
+                 session=Depends(require_session)) -> dict:
+    """Newest first; `run_id` or `version_id` narrows it to one record."""
+    return {"exports": _guard(lambda: catalog_view.exports(limit, run_id=run_id, version_id=version_id))}
 
 
 @router.get("/exports/{export_id}/download")

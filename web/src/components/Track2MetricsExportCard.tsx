@@ -21,6 +21,7 @@ import {
   type Track2ExportSettings,
   type Track2MetricsRow,
 } from "../lib/api";
+import { formatSgt } from "../lib/format";
 import { statusLabel } from "../lib/slug";
 import { Badge } from "./Badge";
 import { Card } from "./Card";
@@ -490,7 +491,12 @@ export function Track2MetricsExportCard({
     || auto.retention !== retention));
 
   return (
-    <Card title="Export control">
+    <Card title="Model export: best registered version (.pt)">
+      <p className="mb-2 text-xs text-ink-secondary">
+        <strong>Separate from Catalog export below.</strong> This picks a Model Name and exports
+        its best registered version by the measure chosen here. The versions ticked in
+        Comparison and the row selected in the Data Catalog are not used and are not changed.
+      </p>
       <p className="mb-3 text-xs text-ink-secondary">
         Sends the <strong>checkpoint itself</strong> &mdash; the{" "}
         <span className="tabular">.pt</span> you would deploy or hand to
@@ -957,7 +963,7 @@ export function Track2MetricsExportCard({
                 </dd>
                 <dt className="text-ink-muted">Switched on</dt>
                 <dd className="tabular text-ink">
-                  {auto.armed_at ? new Date(auto.armed_at).toLocaleString() : "--"}
+                  {auto.armed_at ? formatSgt(auto.armed_at) : "--"}
                 </dd>
               </>
             )}
@@ -968,7 +974,7 @@ export function Track2MetricsExportCard({
               {autoPending && <span className="text-ink-muted">{autoPending}</span>}
               {result?.at && (
                 <span className={`tabular break-all ${result.ok ? "text-ink-secondary" : "text-critical"}`}>
-                  Last check {new Date(result.at).toLocaleString()}: {result.detail}
+                  Last check {formatSgt(result.at)}: {result.detail}
                   {result.ok && result.thin_validation
                     && ` -- measured on ${result.validation_images} validation images`}
                 </span>
@@ -1029,6 +1035,6 @@ function stampText(stamp: string): string {
   const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(stamp);
   if (!m) return stamp;
   const when = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
-  return when.toLocaleString();
+  return formatSgt(when);
 }
 

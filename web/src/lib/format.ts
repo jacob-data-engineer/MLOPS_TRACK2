@@ -109,6 +109,17 @@ export function formatDatasetDateTime(value: string): string {
   return `${p.day} ${p.month} ${p.year}, ${p.hour}:${p.minute} ${p.dayPeriod.toUpperCase()} SGT (GMT+8)`;
 }
 
+/** THE page timestamp (2026-11-18): `18 Nov 2026, 5:30 PM SGT (GMT+8)`,
+ * whatever the browser's zone. For refresh times, catalog records, export
+ * results, availability checks and metadata. Stored values are never
+ * changed -- this only renders them. */
+export function formatSgt(value: string | Date | null | undefined, missing = "Not recorded"): string {
+  if (value === null || value === undefined || value === "") return missing;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return typeof value === "string" ? value : missing;
+  return formatDatasetDateTime(date.toISOString());
+}
+
 /** How long ago `from` was: `8s`, `2m 14s`, `1h 6m`.
  *
  * NOT `formatTimestamp`'s job, and not a competitor to it. That renders a

@@ -1,5 +1,5 @@
 import { AlertCircle, BarChart3, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "../components/Card";
 import { Track2CatalogPage } from "./Track2CatalogPage";
 import { Track2ExportSettingsBar } from "../components/Track2ExportSettingsBar";
@@ -14,6 +14,22 @@ import {
   type Track2MetricsRow,
   type Track2TrainingAudit,
 } from "../lib/api";
+import { formatSgt } from "../lib/format";
+
+/** Where each section of this long page starts, for the jump links in the
+ * pinned toolbar. `scroll-mt` on each target keeps its heading clear of
+ * that toolbar. */
+const JUMPS: { id: string; label: string }[] = [
+  { id: "comparison", label: "Comparison" },
+  { id: "model-export", label: "Model export" },
+  { id: "data-catalog", label: "Data Catalog" },
+  { id: "catalog-export", label: "Catalog export" },
+  { id: "catalog-metadata", label: "Metadata" },
+];
+
+function jump(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 /** Four, because four is the most the palette can separate. See
  * TRACK2_COMPARE_COLORS: a fifth slot failed the normal-vision floor
@@ -206,6 +222,15 @@ export function Track2MetricsPage() {
   // between a decision and a guess.
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [reloading, setReloading] = useState(false);
+  // The audits are a second read: their own loading and failure, never
+  // folded into "no audits".
+  const [auditsState, setAuditsState] = useState<{ status: "loading" | "ready" | "failed"; error: string }>({ status: "loading", error: "" });
+  // Bumped by Refresh all: the catalog, its selected record and that
+  // record's export status read again, keeping selections and filters.
+  const [catalogRefresh, setCatalogRefresh] = useState(0);
+  // Only the newest load may write: a slow answer to an earlier Refresh
+  // must not land over a newer one.
+  const loads = useRef(0);
 
   // No staging state. A "Compare" button earned its place when versions
   // were ticked in a table of fourteen rows -- the chart would have
@@ -224,24 +249,39 @@ export function Track2MetricsPage() {
   );
 
   function load() {
+    const mine = ++loads.current;
     // Which run produced each version. The picker shows it under the
     // version it belongs to, so "what were the numbers" and "what made
     // them" are one answer rather than two cards apart.
+    setAuditsState({ status: "loading", error: "" });
     getTrack2TrainingAudit(200)
       .then((res) => {
+        if (mine !== loads.current) return;
         const byArn: Record<string, Track2TrainingAudit> = {};
         for (const audit of res.audits) {
           if (audit.model?.model_package_arn) byArn[audit.model.model_package_arn] = audit;
         }
         setAuditsByArn(byArn);
+        setAuditsState({ status: "ready", error: "" });
       })
-      .catch(() => undefined);
+      .catch((err) => {
+        if (mine !== loads.current) return;
+        // The audits already shown stay; the failure is said, not hidden.
+        setAuditsState({ status: "failed", error: err instanceof ApiError ? err.detail : "Could not read the training audits." });
+      });
     setReloading(true);
     setError(null);
     getTrack2Metrics()
-      .then((res) => { setRows(res.rows); setLoadedAt(new Date()); })
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Couldn't load metrics."))
-      .finally(() => setReloading(false));
+      .then((res) => { if (mine === loads.current) { setRows(res.rows); setLoadedAt(new Date()); } })
+      .catch((err) => { if (mine === loads.current) setError(err instanceof ApiError ? err.detail : "Couldn't load metrics."); })
+      .finally(() => { if (mine === loads.current) setReloading(false); });
+  }
+
+  /** Everything on the page, read again. Selections, filters and export
+   * choices are kept. */
+  function refreshAll() {
+    load();
+    setCatalogRefresh((n) => n + 1);
   }
 
   useEffect(load, []);
@@ -372,17 +412,25 @@ export function Track2MetricsPage() {
       <div className="mb-4 flex flex-wrap items-center gap-3 text-xs">
         <button
           type="button"
-          onClick={load}
+          onClick={refreshAll}
           disabled={reloading}
           className="rounded-md border border-black/15 px-2.5 py-1 font-medium text-ink-secondary disabled:opacity-40"
+          title="Metrics, training audits, catalog runs and versions, the selected record's metadata and its export status. Selections and filters are kept."
         >
-          {reloading ? "Reading the registry..." : "Refresh"}
+          {reloading ? "Refreshing..." : "Refresh all"}
         </button>
         <span className="tabular text-ink-muted">
           {loadedAt
-            ? `As of ${loadedAt.toLocaleTimeString()} -- ${rows?.length ?? 0} version${rows?.length === 1 ? "" : "s"} across every registry`
-            : "Not loaded yet"}
+            ? `Metrics as of ${formatSgt(loadedAt)} -- ${rows?.length ?? 0} version${rows?.length === 1 ? "" : "s"} across every registry`
+            : reloading ? "Loading metrics..." : "Not loaded yet"}
         </span>
+        {auditsState.status === "loading" && <span className="text-ink-muted" role="status">Reading training audits...</span>}
+        {auditsState.status === "failed" && (
+          <span className="text-critical" role="alert">
+            Training audits could not be read ({auditsState.error}); run details under each version may be missing.{" "}
+            <button type="button" className="underline" onClick={load}>Retry</button>
+          </span>
+        )}
       </div>
 
       {/* Pinned under the title, the same place Multi-Auto Training keeps
@@ -398,20 +446,31 @@ export function Track2MetricsPage() {
 
           Use the same Card shell as Models so both edges, padding and
           borders align. z-20 keeps it under the stale-build banner. */}
-      <div className="sticky top-0 z-20 mb-5">
+      {/* `top` is the stale-build banner's height (0 when there is none),
+          which is sticky at the very top of the same scroll container --
+          without it the banner covered this toolbar. */}
+      <div className="sticky z-20 mb-5" style={{ top: "var(--stale-banner-h, 0px)" }}>
         <Card collapsible={false}>
         <Track2ExportSettingsBar
           settings={exportSettings}
           onChange={setExportSettings}
           defaults={EXPORT_DEFAULTS}
         />
+        <nav aria-label="Jump to a section" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-hairline pt-2 text-xs">
+          <span className="text-ink-muted">Jump to</span>
+          {JUMPS.map((j) => (
+            <a key={j.id} href={`#${j.id}`} className="font-medium text-accent underline"
+               onClick={(e) => { e.preventDefault(); jump(j.id); }}>{j.label}</a>
+          ))}
+        </nav>
         </Card>
       </div>
 
       {error && (
-        <div className="mb-6 flex items-center gap-2 rounded-sm border border-critical/30 bg-critical-subtle px-4 py-3 text-sm text-critical">
+        <div className="mb-6 flex items-center gap-2 rounded-sm border border-critical/30 bg-critical-subtle px-4 py-3 text-sm text-critical" role="alert">
           <AlertCircle size={16} />
-          {error}
+          {rows ? `Refreshing the metrics failed: ${error}. The versions below are from ${loadedAt ? formatSgt(loadedAt) : "an earlier read"}.` : `Could not load the metrics: ${error}`}
+          <button type="button" className="ml-2 underline" onClick={load}>Retry</button>
         </div>
       )}
 
@@ -435,8 +494,12 @@ export function Track2MetricsPage() {
         />
       )}
 
+      {rows && rows.length === 0 && (
+        <p className="mb-5 text-sm text-ink-muted">No model versions are registered yet, so there is nothing to compare or export.</p>
+      )}
+
       {rows && (
-        <div className="mb-5">
+        <div id="comparison" className="mb-5 scroll-mt-48">
           <Card title={"Comparison"}>
             <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1.5 border-b border-hairline pb-4">
               {METRICS.map(({ key, label, hint }) => (
@@ -480,11 +543,13 @@ export function Track2MetricsPage() {
 
 
       {rows && (
-        <Track2MetricsExportCard
-          rows={rows}
-          settings={exportSettings}
-          onChange={setExportSettings}
-        />
+        <div id="model-export" className="scroll-mt-48">
+          <Track2MetricsExportCard
+            rows={rows}
+            settings={exportSettings}
+            onChange={setExportSettings}
+          />
+        </div>
       )}
 
       {/* The "All versions" card was here: the per-registry table,
@@ -497,8 +562,8 @@ export function Track2MetricsPage() {
           quietly removed too -- that is a second decision, not a
           consequence to take silently. */}
 
-      <section id="data-catalog" className="mt-8 border-t border-black/20 pt-6" aria-label="Data Catalog">
-        <Track2CatalogPage />
+      <section id="data-catalog" className="mt-8 scroll-mt-48 border-t border-black/20 pt-6" aria-label="Data Catalog">
+        <Track2CatalogPage refreshKey={catalogRefresh} />
       </section>
     </div>
   );

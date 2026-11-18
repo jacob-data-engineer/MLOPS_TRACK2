@@ -239,9 +239,22 @@ function useBuildFreshness() {
  */
 export function StaleBuildBanner() {
   const { serving, loadedTag, stale } = useBuildFreshness();
+  // Its height, as --stale-banner-h, for toolbars that are sticky in the
+  // same scroll container: they sit below it rather than under it.
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const el = ref.current;
+    if (!stale || !el) { root.style.setProperty("--stale-banner-h", "0px"); return; }
+    const publish = () => root.style.setProperty("--stale-banner-h", `${el.offsetHeight}px`);
+    publish();
+    const watch = new ResizeObserver(publish);
+    watch.observe(el);
+    return () => { watch.disconnect(); root.style.setProperty("--stale-banner-h", "0px"); };
+  }, [stale]);
   if (!stale) return null;
   return (
-    <div className="sticky top-0 z-40 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-critical/30 bg-critical-subtle px-4 py-2 text-xs text-critical md:px-8">
+    <div ref={ref} className="sticky top-0 z-40 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-critical/30 bg-critical-subtle px-4 py-2 text-xs text-critical md:px-8">
       <span className="font-semibold">This page is out of date.</span>
       <span className="tabular text-critical/80">
         running {loadedTag} &middot; the server is serving {serving}

@@ -3925,6 +3925,11 @@ export interface Track2CatalogFile {
 }
 
 export interface Track2CatalogExport {
+  processed_files?: number | null;
+  total_files?: number | null;
+  stage?: string | null;
+  updated_at?: string | null;
+  options?: {include_images: boolean; include_model: boolean; include_metadata: boolean; metadata_groups: string[] | null} | null;
   id: string;
   label: string;
   version_id: string | null;
@@ -3955,14 +3960,24 @@ export function getTrack2RunsByModel(): Promise<{ runs: Record<string, Track2Run
   return apiGet("/track2/catalog/runs-by-model");
 }
 
-export function getTrack2CatalogRuns(offset = 0): Promise<{ total: number; runs: Track2CatalogRun[] }> {
-  return apiGet(`/track2/catalog/runs?limit=100&offset=${offset}`);
+/** Catalog search. Applied by the server across the whole table, not to
+ * a loaded page. Dates are YYYY-MM-DD calendar days in Singapore time. */
+export type Track2CatalogFilter = { search?: string; status?: string; from_date?: string; to_date?: string };
+
+function catalogQuery(offset: number, limit: number, filter: Track2CatalogFilter = {}): string {
+  const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  for (const [key, value] of Object.entries(filter)) if (value && value.trim()) q.set(key, value.trim());
+  return q.toString();
 }
 
-export function getTrack2CatalogVersions(offset = 0): Promise<{
+export function getTrack2CatalogRuns(offset = 0, filter: Track2CatalogFilter = {}, limit = 50): Promise<{ total: number; runs: Track2CatalogRun[] }> {
+  return apiGet(`/track2/catalog/runs?${catalogQuery(offset, limit, filter)}`);
+}
+
+export function getTrack2CatalogVersions(offset = 0, filter: Track2CatalogFilter = {}, limit = 50): Promise<{
   total: number; versions: Track2CatalogVersion[];
 }> {
-  return apiGet(`/track2/catalog/versions?limit=100&offset=${offset}`);
+  return apiGet(`/track2/catalog/versions?${catalogQuery(offset, limit, filter)}`);
 }
 
 export function getTrack2CatalogRunFiles(
@@ -4047,8 +4062,24 @@ export function startTrack2CatalogExport(kind: "run" | "version", id: string,
   return apiPost("/track2/catalog/exports", { kind, id, ...options });
 }
 
-export function getTrack2CatalogExports(): Promise<{ exports: Track2CatalogExport[] }> {
-  return apiGet("/track2/catalog/exports");
+/** Newest first. Narrowed to one run or version when given, so that
+ * record's latest export is found however many others came since. */
+export function getTrack2CatalogExports(record?: { kind: "run" | "version"; id: string }, limit = 50): Promise<{ exports: Track2CatalogExport[] }> {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (record) q.set(record.kind === "run" ? "run_id" : "version_id", record.id);
+  return apiGet(`/track2/catalog/exports?${q}`);
+}
+
+/** Read-only: could this record's dataset be rebuilt exactly? */
+export interface DatasetAvailability {
+  state: 'ready' | 'legacy' | 'unavailable' | 'check_failed'; detail: string; checked_at: string;
+  kind?: 'run' | 'version'; id?: string;
+  /** What was wrong when unavailable: the SQL list, the files, or the version itself. */
+  problem?: 'sql_membership' | 'files' | 'version';
+  version_id?: string; version_number?: number | null; train_images?: number | null; val_images?: number | null;
+}
+export function checkCatalogDataset(kind: 'run' | 'version', id: string): Promise<DatasetAvailability> {
+  return apiGet(`/track2/catalog/dataset-availability?kind=${kind}&id=${encodeURIComponent(id)}`);
 }
 
 export function stopTrack2CatalogExport(exportId: string): Promise<{ id: string; state: string }> {
