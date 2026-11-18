@@ -28,7 +28,6 @@ import { RequireAuth } from "./components/RequireAuth";
 import { RouteBoundary } from "./components/RouteBoundary";
 import { LoginPage } from "./routes/LoginPage";
 import { Track2CostPage } from "./routes/Track2CostPage";
-import { Track2CatalogPage } from "./routes/Track2CatalogPage";
 import { Track2DataPrepPage } from "./routes/Track2DataPrepPage";
 import { Track2DeployPage } from "./routes/Track2DeployPage";
 import { Track2EvalPage } from "./routes/Track2EvalPage";
@@ -100,7 +99,7 @@ export function App() {
         {/* The data side of the data/training split (2026-10-28): the
             cards that decide what a run trains on. */}
         <Route path="/track2/data-preparation" element={<Track2DataPrepPage />} />
-        <Route path="/track2/catalog" element={<Track2CatalogPage />} />
+        <Route path="/track2/catalog" element={<Navigate to="/track2/metrics" replace />} />
         {/* Read-only SQL against a Postgres database, answered as images. */}
         <Route path="/track2/sql" element={<Track2SqlPage />} />
         {/* A suggested read-only view of the same settings as one picture.

@@ -1,6 +1,7 @@
 import { AlertCircle, BarChart3, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "../components/Card";
+import { Track2CatalogPage } from "./Track2CatalogPage";
 import { Track2ExportSettingsBar } from "../components/Track2ExportSettingsBar";
 import { Track2MetricsExportCard } from "../components/Track2MetricsExportCard";
 import { Track2ModelPicker, modelLabel, rowKey } from "../components/Track2ModelPicker";
@@ -350,7 +351,7 @@ export function Track2MetricsPage() {
     <div>
       <h1 className="mb-1 flex items-center gap-2 text-xl font-semibold text-ink">
         <BarChart3 size={20} className="text-accent" strokeWidth={2} />
-        Track2 Review &amp; Metrics
+        Track2 Review &amp; Metrics / Data Catalog
       </h1>
       <p className="mb-6 max-w-3xl text-sm text-ink-secondary">
         Model generations in use:{" "}
@@ -496,6 +497,9 @@ export function Track2MetricsPage() {
           quietly removed too -- that is a second decision, not a
           consequence to take silently. */}
 
+      <section id="data-catalog" className="mt-8 border-t border-black/20 pt-6" aria-label="Data Catalog">
+        <Track2CatalogPage />
+      </section>
     </div>
   );
 }
