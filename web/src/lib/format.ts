@@ -97,6 +97,18 @@ export function formatDayTime(value: string | Date): string {
   return `${p.day} ${p.month} ${p.hour}:${p.minute} SGT`;
 }
 
+/** Dataset selection: explicit Singapore date and time, independent of browser zone. */
+export function formatDatasetDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || 'Date not recorded';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Singapore', day: '2-digit', month: 'short', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).formatToParts(date);
+  const p = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${p.day} ${p.month} ${p.year}, ${p.hour}:${p.minute} ${p.dayPeriod.toUpperCase()} SGT (GMT+8)`;
+}
+
 /** How long ago `from` was: `8s`, `2m 14s`, `1h 6m`.
  *
  * NOT `formatTimestamp`'s job, and not a competitor to it. That renders a

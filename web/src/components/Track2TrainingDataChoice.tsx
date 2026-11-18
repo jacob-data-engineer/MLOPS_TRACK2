@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { formatDatasetDateTime } from '../lib/format';
 import { ApiError, checkTrack2SavedDataset, getTrack2TrainingAudit, listTrack2DatasetVersions,
   type SavedDatasetCheck, type Track2DatasetVersion, type Track2TrainingAudit } from '../lib/api';
 
@@ -54,15 +56,20 @@ export function Track2TrainingDataChoice({value, onChange, detectorSlug, classKe
     </fieldset>
     {value.mode === 'saved' && <>
       <p className="my-2">Rebuild files from the SQL record using your current model and training settings. The temporary copy is removed once training finishes and the queue is clear.</p>
-      <label>Saved dataset record<select aria-label="Saved dataset record" className="mt-1 block w-full" value={value.id} disabled={disabled || busy}
+      <label className="block font-semibold">Saved dataset record
+      <span className="relative mt-2 block">
+      <select aria-label="Saved dataset record" className="block min-h-12 w-full cursor-pointer appearance-none rounded-md border-2 border-ink-muted bg-white px-3 py-3 pr-12 text-sm font-medium text-ink shadow-sm hover:border-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50" value={value.id} disabled={disabled || busy}
         onChange={e => onChange({...value,id:e.target.value,checked:false})}>
         <option value="">Choose a dataset</option>
         {value.id && !selected && <option value={value.id}>{value.id}</option>}
-        {versions.map(v => <option key={v.version_id} value={v.version_id}>{v.version_id} · {v.created_at} · {v.train_images ?? 0} train / {v.val_images ?? 0} validation</option>)}
-      </select></label>
+        {versions.map(v => <option key={v.version_id} value={v.version_id}>{formatDatasetDateTime(v.created_at)} · {v.version_id} · {v.train_images ?? 0} train / {v.val_images ?? 0} validation</option>)}
+      </select>
+      <ChevronDown aria-hidden="true" size={22} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink" />
+      </span></label>
       {selected && <div className="my-2 space-y-1 break-all">
         <p>Dataset record ID: {selected.version_id}</p>
-        <p>Source run: {sourceRun ? `${sourceRun.run_number ?? sourceRun.id} · ${sourceRun.submitted_at}` : selected.run_id || 'No run recorded'}</p>
+        <p>Created: {formatDatasetDateTime(selected.created_at)}</p>
+        <p>Source run: {sourceRun ? `${sourceRun.run_number ?? sourceRun.id} · ${formatDatasetDateTime(sourceRun.submitted_at)}` : selected.run_id || 'No run recorded'}</p>
         <p>{selected.train_images} training / {selected.val_images} validation images</p>
         <p>Classes: {selected.classes?.join(', ')}</p>
         <p>Original central store: {checked?.store_uri || selected.central_recipe?.store_uri || 'Not recorded — this older dataset may not support reuse.'}</p>

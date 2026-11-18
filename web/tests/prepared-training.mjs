@@ -26,7 +26,7 @@ test('training supports prepared data and checked saved SQL data', async () => {
     server = await createServer({ root, server: { host: '127.0.0.1', port: 0 } });
     await server.listen();
     browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE });
-    const page = await browser.newPage();
+    const page = await browser.newPage({timezoneId:'America/Los_Angeles'});
     const queued = [], errors = [];
     let rejectCheck = false;
     let job = null;
@@ -43,7 +43,7 @@ test('training supports prepared data and checked saved SQL data', async () => {
       else if (url.pathname.endsWith('/queue-after-pull')) response = {settings:{enabled:false,triggers:[]},next:{act:false,reason:'Manual'}};
       else if (url.pathname.endsWith('/retrain')) response = {settings:{enabled:false},next:{}};
       else if (url.pathname.endsWith('/retrain/preparation')) response = {job};
-      else if (url.pathname.endsWith('/versions')) response = {versions:[{version_id:'dv-saved',created_at:'2026-11-17',
+      else if (url.pathname.endsWith('/versions')) response = {versions:[{version_id:'dv-saved',created_at:'2026-11-17T18:30:00Z',
         train_images:100,val_images:20,classes:['helmet'],central_recipe:{store_uri:'s3://original/store'}}]};
       else if (url.pathname.endsWith('/audit')) response = {audits:[{id:'run-old',run_number:10,detector_slug:'helmet',
         dataset_version_id:'dv-saved',submitted_at:'2026-11-17',status:'Succeeded',generation:'11',size:'s',
@@ -83,6 +83,11 @@ test('training supports prepared data and checked saved SQL data', async () => {
       base_version:'arn:aws:sagemaker:test:model-package/helmet/2',delete_decay_after_run:true}});
     await page.getByRole('radio',{name:'Use a saved dataset',exact:true}).check();
     await page.getByLabel('Saved dataset record').selectOption('dv-saved');
+    assert.match(await page.locator('option[value="dv-saved"]').textContent(), /18 Nov 2026, 2:30 AM SGT \(GMT\+8\)/);
+    const selectStyle = await page.getByLabel('Saved dataset record').evaluate(el => ({border:getComputedStyle(el).borderTopWidth,height:el.getBoundingClientRect().height,background:getComputedStyle(el).backgroundColor}));
+    assert.equal(selectStyle.border,'2px');
+    assert.ok(selectStyle.height >= 48);
+    assert.equal(selectStyle.background,'rgb(255, 255, 255)');
     assert.equal(await page.getByRole('button',{name:'Add to Queue',exact:true}).isDisabled(),true);
     assert.equal(await cleanup.count(),0);
     rejectCheck = true;
