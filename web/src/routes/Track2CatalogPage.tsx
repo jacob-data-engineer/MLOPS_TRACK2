@@ -1,4 +1,4 @@
-import { AlertCircle, FileText, Library, Loader2 } from "lucide-react";
+import { AlertCircle, Library } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Card } from "../components/Card";
 import { Track2CatalogMetadata } from "../components/Track2CatalogMetadata";
@@ -8,19 +8,13 @@ import {
   getTrack2Buckets,
   listTrack2Folders,
   type Track2Bucket,
-  downloadTrack2CatalogCsv,
   getTrack2CatalogExports,
-  getTrack2CatalogRunFiles,
   getTrack2CatalogRuns,
   getTrack2CatalogStatus,
-  getTrack2CatalogVersionFiles,
   getTrack2CatalogVersions,
-  getTrack2SqlPreviews,
   getTrack2PullControl,
   saveTrack2PullConfig,
-  repeatTrack2CatalogRun,
   type Track2CatalogExport,
-  type Track2CatalogFile,
   type Track2CatalogRun,
   type Track2CatalogStatus,
   type Track2CatalogVersion,
@@ -58,7 +52,6 @@ function runModel(r: { detector: string | null; architecture: string | null; mod
     group: group || "--",
   };
 }
-const shortName = (uri: string) => uri.split("/").slice(-1)[0];
 
 
 export function Track2CatalogPage() {
@@ -133,8 +126,8 @@ export function Track2CatalogPage() {
         Track2 Data Catalog
       </h2>
       <p className="mb-2 max-w-3xl text-sm text-ink-secondary">
-        Every training run and every dataset version, with the files each used. Pick one to see
-        its files, download the list, or export the files themselves as a zip.
+        Every training run and every dataset version, with the files each used. Pick one to review
+        its metadata or export its model and dataset files.
       </p>
       {status?.record_backend === "postgres" && (
         <p className="mb-4 text-xs text-ink-muted">Records stored in PostgreSQL. Changes are recorded directly.</p>
@@ -160,7 +153,7 @@ export function Track2CatalogPage() {
       <div className="flex flex-col gap-5">
         {tab === "runs" && (
           <Card title="Training runs" collapsible={false}
-                caption="Latest 10 runs shown first. Scroll inside the table for older runs. Click a run to see its files and export options below.">
+                caption="Latest 10 runs shown first. Scroll inside the table for older runs. Click a run to see its metadata and export options below.">
             {runsLoading ? <p className="text-sm text-ink-muted">Reading...</p> : runs === null ? (
               <div className="text-sm text-ink-secondary">
                 Could not load training runs.
@@ -209,7 +202,7 @@ export function Track2CatalogPage() {
 
         {tab === "versions" && (
           <Card title="Dataset versions and snapshots" collapsible={false}
-                caption="Newest first. A version is frozen when a run is queued; a snapshot when a dataset is frozen by hand. Click one to see its files.">
+                caption="Newest first. A version is frozen when a run is queued; a snapshot when a dataset is frozen by hand. Click one to see its metadata and export options.">
             {versions === null ? <p className="text-sm text-ink-muted">Reading...</p> : (
               <div className="max-h-[28rem] overflow-auto rounded border border-hairline">
                 <table className="tabular min-w-full text-xs">
@@ -252,10 +245,7 @@ export function Track2CatalogPage() {
           selection={picked ? picked.kind === "run" ? { kind: "run", id: picked.run.run_id, label: `Run ${picked.run.run_number}` }
             : { kind: "version", id: picked.version.id, label: `Version ${picked.version.version_number}` } : null}
           destination={destination} onExported={refreshExports} exportsList={exportsList}
-          renderDestination={(showFormat) => <ExportDestination destination={destination} onDestination={changeDestination} showFormat={showFormat} />}>
-          <FilesCard key={picked?.kind === "run" ? picked.run.run_id : picked?.version.id || "empty"}
-            picked={picked} emptyMessage="No run or dataset version selected" />
-        </Track2CatalogMetadata>
+          renderDestination={(showFormat) => <ExportDestination destination={destination} onDestination={changeDestination} showFormat={showFormat} />} />
       </div>
     </div>
   );
@@ -328,162 +318,3 @@ function ExportDestination({ destination, onDestination, showFormat = true }: De
     <p className="mt-2 text-ink-muted">{destination.destination === "local" ? "Your browser will download the selected output." : "Files are written to a new subfolder in the selected S3 destination."}</p>
   </div>;
 }
-
-function FilesCard({ picked, emptyMessage }: { picked: Picked | null; emptyMessage: string }) {
-  const [split, setSplit] = useState("");
-  const [role, setRole] = useState("");
-  const [offset, setOffset] = useState(0);
-  const [files, setFiles] = useState<Track2CatalogFile[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [thumbs, setThumbs] = useState(false);
-  const [previews, setPreviews] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const id = picked?.kind === "run" ? picked.run.run_id : picked?.version.id ?? "";
-  const title = picked?.kind === "run"
-    ? `Run ${picked.run.run_number}`
-    : picked ? `Version ${picked.version.version_number} (${picked.version.kind})` : emptyMessage;
-  const [repeatNote, setRepeatNote] = useState("");
-
-  async function repeatRun() {
-    if (picked?.kind !== "run") return;
-    setBusy("repeat"); setError(""); setRepeatNote("");
-    try {
-      const result = await repeatTrack2CatalogRun(id);
-      setRepeatNote(`Queued ${result.entry_id} with the preserved dataset, starting weights and training settings. Start Queue when ready.`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not repeat this run.");
-    } finally { setBusy(""); }
-  }
-
-  useEffect(() => {
-    if (!picked) { setFiles([]); return; }
-    setFiles(null);
-    const load = picked.kind === "run"
-      ? getTrack2CatalogRunFiles(id, { split, role, offset })
-      : getTrack2CatalogVersionFiles(id, { split, offset });
-    load.then((r) => { setFiles(r.files); setTotal(r.total); })
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not read the files."));
-  }, [id, split, role, offset]);
-
-  // Thumbnails for the page on screen, signed for 15 minutes.
-  useEffect(() => {
-    if (!thumbs || !files?.length) return;
-    getTrack2SqlPreviews(files.map((f) => f.uri))
-      .then((r) => setPreviews(Object.fromEntries(r.previews.map((p) => [p.uri, p.url]))))
-      .catch(() => undefined);
-  }, [thumbs, files]);
-
-  async function downloadCsv() {
-    if (!picked) return;
-    setBusy("csv");
-    setError("");
-    try {
-      const blob = await downloadTrack2CatalogCsv(picked.kind, id);
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `${title.replace(/\W+/g, "-").toLowerCase()}-files.csv`;
-      link.click();
-      URL.revokeObjectURL(link.href);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Download failed.");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  const select = "rounded border border-black/15 bg-page px-2 py-1 text-xs text-ink";
-
-  return (
-    <Card title={picked ? `Files in ${title}` : "Files and exports"} collapsible={false}
-          caption={!picked ? `${emptyMessage}. Select a row above to view and export its files.` : picked.kind === "run"
-            ? "The images this run trained and evaluated on, as the training audit recorded them."
-            : "The images in this version, with the split each was given."}>
-      <fieldset disabled={!picked} className={!picked ? "opacity-50" : undefined}>
-      <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
-        <select className={select} value={split} onChange={(e) => { setSplit(e.target.value); setOffset(0); }}>
-          <option value="">All splits</option>
-          <option value="train">train</option>
-          <option value="val">val</option>
-        </select>
-        {picked?.kind === "run" && (
-          <select className={select} value={role} onChange={(e) => { setRole(e.target.value); setOffset(0); }}>
-            <option value="">Training and evaluation</option>
-            <option value="train">Training only</option>
-            <option value="eval">Evaluation only</option>
-          </select>
-        )}
-        <label className="flex items-center gap-1.5 text-ink">
-          <input type="checkbox" checked={thumbs} onChange={(e) => setThumbs(e.target.checked)} />
-          Show thumbnails
-        </label>
-        <span className="text-ink-muted">{total.toLocaleString()} image(s)</span>
-        <span className="flex-1" />
-        {picked?.kind === "run" && <button type="button" disabled={!!busy}
-          onClick={() => void repeatRun()}
-          className="rounded-md border border-black/15 bg-page px-2.5 py-1 font-medium text-ink disabled:opacity-40">
-          {busy === "repeat" ? "Queueing…" : "Queue same run again"}
-        </button>}
-        <button type="button" onClick={() => void downloadCsv()} disabled={!!busy}
-                className="inline-flex items-center gap-1.5 rounded-md border border-black/15 bg-page px-2.5 py-1 font-medium text-ink disabled:opacity-40">
-          {busy === "csv" ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
-          File paths only (CSV)
-        </button>
-
-      </div>
-      </fieldset>
-      {repeatNote && <p role="status" className="mb-2 text-sm text-ink-secondary">{repeatNote}</p>}
-      {error && <p className="mb-2 text-xs text-critical">{error}</p>}
-
-      {!picked ? <p role="status" className="rounded border border-hairline p-6 text-center text-sm text-ink-muted">{emptyMessage}</p>
-      : files === null ? <p className="text-sm text-ink-muted">Reading...</p> : thumbs ? (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-          {files.map((f) => (
-            <a key={f.uri} href={previews[f.uri]} target="_blank" rel="noreferrer" title={f.uri}
-               className="block overflow-hidden rounded border border-hairline bg-black/80">
-              {previews[f.uri]
-                ? <img src={previews[f.uri]} alt="" loading="lazy" className="aspect-video w-full object-contain" />
-                : <div className="aspect-video" />}
-              <p className="truncate bg-surface px-1 text-[10px] text-ink-muted">{f.split} &middot; {shortName(f.uri)}</p>
-            </a>
-          ))}
-        </div>
-      ) : (
-        <div className="max-h-[28rem] overflow-auto rounded border border-hairline">
-          <table className="tabular min-w-full text-xs">
-            <thead className="sticky top-0 bg-surface text-left text-ink">
-              <tr>
-                <th className="border-b border-hairline px-2 py-1.5 font-medium">File</th>
-                <th className="border-b border-hairline px-2 py-1.5 font-medium">Split</th>
-                {picked.kind === "run"
-                  ? <th className="border-b border-hairline px-2 py-1.5 font-medium">Used for</th>
-                  : <th className="border-b border-hairline px-2 py-1.5 font-medium">Week</th>}
-                <th className="border-b border-hairline px-2 py-1.5 font-medium">Where it is</th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((f) => (
-                <tr key={f.uri} className="border-b border-hairline/50">
-                  <td className="px-2 py-1 text-ink">{shortName(f.uri)}</td>
-                  <td className="px-2 py-1">{f.split ?? "--"}</td>
-                  <td className="px-2 py-1">{picked.kind === "run" ? (f.role === "eval" ? "evaluation" : "training") : (f.week ?? "--")}</td>
-                  <td className="max-w-md truncate px-2 py-1 text-ink-muted" title={f.uri}>{f.uri}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {total > 100 && (
-        <div className="mt-2 flex items-center gap-3 text-xs">
-          <button type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}
-                  className="underline disabled:opacity-40">Previous</button>
-          <span className="text-ink-muted">{(offset + 1).toLocaleString()}&ndash;{Math.min(offset + 100, total).toLocaleString()} of {total.toLocaleString()}</span>
-          <button type="button" disabled={offset + 100 >= total} onClick={() => setOffset(offset + 100)}
-                  className="underline disabled:opacity-40">Next</button>
-        </div>
-      )}
-    </Card>
-  );
-}
-
