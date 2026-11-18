@@ -745,8 +745,8 @@ export function TrainingForm({
       help={
         <>
           <p>
-            Choose newly prepared data, a saved SQL dataset with your current
-            step 1 settings, or a previous run with its recorded settings.
+            Choose newly prepared data or a saved SQL dataset with your current
+            step 1 settings.
           </p>
           <p className="mt-2">
             Newly prepared data uses the decayed dataset already produced in Data Preparation.
@@ -786,8 +786,8 @@ export function TrainingForm({
           did nothing. Both remaining modes submit from here. */}
       <Track2TrainingDataChoice value={dataChoice} onChange={setDataChoice}
         detectorSlug={detectorSlug} classKey={JSON.stringify(chosenDetector?.classes || {})}
-        disabled={busy || !!preparing} onSubmitted={onSubmitted} />
-      {dataChoice.mode !== 'repeat' && <fieldset>
+        disabled={busy || !!preparing} />
+      <fieldset>
 
       {/* The detector, the generation, the size and the version to start
           from are all chosen in step 1 now. Repeating those controls here
@@ -916,7 +916,7 @@ export function TrainingForm({
           Start All Over
         </button>
       </div>
-      </fieldset>}
+      </fieldset>
 
       {/* Automatic queueing uses the prepared dataset too. */}
       <div className="mt-3 rounded-md border border-black/15 p-3">
