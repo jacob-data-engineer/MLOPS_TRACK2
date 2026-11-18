@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {createServer} from 'vite';
 import {chromium} from 'playwright';
 
-test('history initially fits four rows and scrolls to remaining runs', async()=>{
+test('history fits three complete sections, including expanded details, and scrolls to remaining runs', async()=>{
   const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
   const harness=path.join(root,`.history-scroll-${process.pid}.local`);
   await mkdir(harness);
@@ -31,11 +31,16 @@ test('history initially fits four rows and scrolls to remaining runs', async()=>
     await page.waitForFunction(()=>document.querySelector('[aria-label="Training history"]')?.style.maxHeight);
     const geometry=await region.evaluate(el=>{
       const bounds=el.getBoundingClientRect();const rows=[...el.children].map(x=>x.getBoundingClientRect());
-      return {fourthBottom:rows[3].bottom,bottom:bounds.bottom,fifthTop:rows[4].top,overflow:el.scrollHeight>el.clientHeight};
+      return {thirdBottom:rows[2].bottom,bottom:bounds.bottom,fourthTop:rows[3].top,overflow:el.scrollHeight>el.clientHeight};
     });
-    assert.ok(Math.abs(geometry.fourthBottom-geometry.bottom)<2);
-    assert.ok(geometry.fifthTop>geometry.bottom);
+    assert.ok(Math.abs(geometry.thirdBottom-geometry.bottom)<2);
+    assert.ok(geometry.fourthTop>geometry.bottom);
     assert.ok(geometry.overflow);
+    const collapsedHeight=await region.evaluate(el=>el.clientHeight);
+    await region.locator('[data-history-summary]').first().locator('button').first().click();
+    await page.waitForFunction(height=>document.querySelector('[aria-label="Training history"]').clientHeight>height,collapsedHeight);
+    const expanded=await region.evaluate(el=>({bottom:el.getBoundingClientRect().bottom,thirdBottom:el.children[2].getBoundingClientRect().bottom}));
+    assert.ok(Math.abs(expanded.thirdBottom-expanded.bottom)<2);
     await region.evaluate(el=>{el.scrollTop=el.scrollHeight;});
     assert.ok(await region.evaluate(el=>el.scrollTop>0));
   }finally{

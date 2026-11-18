@@ -36,16 +36,16 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
   useEffect(() => {
     const list = historyRef.current;
     if (!list || !audits?.length) return;
-    if (audits.length <= 4) { setHistoryHeight(undefined); return; }
-    const headers = Array.from(list.querySelectorAll<HTMLElement>("[data-history-summary]")).slice(0, 4);
+    if (audits.length <= 3) { setHistoryHeight(undefined); return; }
+    const sections = Array.from(list.children).slice(0, 3);
     const measure = () => {
       const gap = parseFloat(getComputedStyle(list).rowGap) || 0;
-      setHistoryHeight(headers.reduce((height, header) => height + header.getBoundingClientRect().height + 2, 0)
-        + Math.max(0, headers.length - 1) * gap);
+      setHistoryHeight(sections.reduce((height, section) => height + section.getBoundingClientRect().height, 0)
+        + Math.max(0, sections.length - 1) * gap);
     };
     measure();
     const observer = new ResizeObserver(measure);
-    headers.forEach((header) => observer.observe(header));
+    sections.forEach((section) => observer.observe(section));
     return () => observer.disconnect();
   }, [audits]);
 
