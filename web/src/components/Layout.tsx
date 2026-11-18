@@ -63,6 +63,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/track2/data-preparation", label: "Track2 Data Preparation", icon: Database, status: "ready" },
   // Every run and dataset version, their files, and exports (2026-10-29).
   { to: "/track2/multi-auto-training", label: "Track2 Multi-Auto Training", icon: Layers, status: "ready" },
+  { to: "/track2/metrics", label: "Track2 Review & Metrics", icon: BarChart3, status: "prototype" },
   { to: "/track2/catalog", label: "Track2 Data Catalog", icon: Library },
   // What the clocks will start, and when -- read-only, every control
   // stays on Multi-Auto Training.
@@ -81,7 +82,6 @@ const NAV_ITEMS: NavItem[] = [
   // Lineage dropped from the nav, same as Schedule, Export and Cost
   // above: the route is kept, so a bookmark or a link in somebody's
   // notes still resolves rather than 404ing -- it just is not offered.
-  { to: "/track2/metrics", label: "Track2 Review & Metrics", icon: BarChart3, status: "prototype" },
   // Evaluation dropped from the nav. Route kept, same as the others.
   { to: "/track2/notifications", label: "Track2 Notifications", icon: Bell },
   { to: "/track2/help", label: "Track2 Help", icon: HelpCircle },
