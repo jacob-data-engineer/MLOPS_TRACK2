@@ -1,3 +1,4 @@
+import { TrainingParameterInput } from "./TrainingParameterInput";
 import type { Track2HyperparamValue, Track2Hyperparams } from "../lib/api";
 import { useCardOpen } from "../lib/cardState";
 
@@ -309,15 +310,7 @@ export function Track2TrainingAdvanced({
                         <option value="false">false</option>
                       </select>
                     ) : (
-                      <input
-                        type="text"
-                        inputMode={p.kind === "freeze" ? "text" : "decimal"}
-                        className="tabular w-full rounded-md border border-black/15 bg-page px-2 py-1.5 text-xs"
-                        value={value[p.key] ?? ""}
-                        placeholder={p.fallback}
-                        onChange={(e) => set(p.key, e.target.value)}
-                        onBlur={onCommit}
-                      />
+                      <TrainingParameterInput parameter={p.key} label={p.label} value={value[p.key] ?? ""} fallback={p.fallback} onChange={raw => set(p.key, raw)} onCommit={onCommit} />
                     )}
                   </label>
                 ))}

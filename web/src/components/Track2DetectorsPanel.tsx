@@ -1,3 +1,5 @@
+import { TrainingParameterInput } from "./TrainingParameterInput";
+import { trainingSettingsErrors } from "../lib/trainingValidation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { groupNameFor, slugFromName, slugProblem } from "../lib/slug";
 import {
@@ -359,7 +361,7 @@ export function Track2DetectorsPanel({
   }
 
   async function saveShape() {
-    if (shapeSaved) return;
+    if (shapeSaved || trainingSettingsErrors({...shape, hyperparams: effectiveHyperparams(hyperparams, hyperparamsOn)}).length) return;
     try {
       await saveTrack2PullConfig({
         default_training: {
@@ -1627,13 +1629,7 @@ export function Track2DetectorsPanel({
           ] as [string, keyof typeof shape, number][]).map(([label, key, value]) => (
             <label key={key} className="block">
               <span className="mb-1 block text-xs text-ink-muted">{label}</span>
-              <input
-                type="number"
-                className="tabular w-full rounded-md border border-black/15 bg-page px-2 py-1.5 text-sm"
-                value={value}
-                onChange={(e) => editShape({ [key]: Number(e.target.value) } as Partial<typeof shape>)}
-                onBlur={() => void saveShape()}
-              />
+              <TrainingParameterInput parameter={key === "imgSize" ? "img_size" : key} label={label} value={value} onChange={raw => editShape({[key]: Number(raw)} as Partial<typeof shape>)} onCommit={() => void saveShape()} />
             </label>
           ))}
         </div>

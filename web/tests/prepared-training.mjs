@@ -14,12 +14,18 @@ test('training supports prepared data and checked saved SQL data', async () => {
   await writeFile(path.join(harness, 'main.tsx'), `import React, {useState} from 'react';
     import {createRoot} from 'react-dom/client';
     import {TrainingForm} from '../src/routes/Track2ModelsPage';
+    import {Track2TrainingAdvanced,effectiveHyperparams} from '../src/components/Track2TrainingAdvanced';
+    import {TrainingParameterInput} from '../src/components/TrainingParameterInput';
     import '../src/index.css';
     function Harness(){const [selection,setSelection]=useState({epochs:25,imgSize:640,batch:8,seed:42,patience:10,
       hyperparams:{lr0:0.001},datasetFolder:'',evalFolder:'',detectorSlug:'helmet',architecture:'yolo11s',
       basePackageArn:'arn:aws:sagemaker:test:model-package/helmet/2',notes:'repeatable test'});
-      return <TrainingForm selection={selection} setSelection={p=>setSelection(s=>({...s,...p}))}
-        onSubmitted={()=>document.body.dataset.submitted='yes'} detectorsVersion={0}/>;}
+      const [extra,setExtra]=useState({});
+      return <><TrainingForm selection={selection} setSelection={p=>setSelection(s=>({...s,...p}))}
+        onSubmitted={()=>document.body.dataset.submitted='yes'} detectorsVersion={0}/>
+        <TrainingParameterInput parameter="epochs" label="Test epochs" value={selection.epochs} onChange={raw=>setSelection(s=>({...s,epochs:Number(raw)}))} onCommit={()=>{}}/>
+        <Track2TrainingAdvanced value={extra} enabled={true} onEnabledChange={()=>{}} onCommit={()=>{}}
+          onChange={next=>{setExtra(next);setSelection(s=>({...s,hyperparams:effectiveHyperparams(next,true)}));}}/></>;}
     createRoot(document.getElementById('root')!).render(<Harness/>);`);
   let server, browser;
   try {
@@ -123,6 +129,30 @@ test('training supports prepared data and checked saved SQL data', async () => {
     await page.getByLabel('Saved dataset record').waitFor();
     assert.equal(await page.getByLabel('Saved dataset record').inputValue(),'dv-saved');
     assert.equal(await page.getByRole('button',{name:'Add to Queue',exact:true}).isDisabled(),true);
+    await page.getByRole('radio',{name:'Use newly prepared data',exact:true}).check();
+    await page.getByRole('button',{name:'Show the rest of the training parameters'}).click();
+    const mosaic = page.getByRole('textbox',{name:'Mosaic',exact:true});
+    await mosaic.fill('5.1');
+    assert.equal(await mosaic.getAttribute('aria-invalid'),'true');
+    await page.getByRole('alert').filter({hasText:'Mosaic:'}).waitFor();
+    assert.match(await page.getByRole('alert').filter({hasText:'Mosaic:'}).textContent(),/Minimum: 0; maximum: 1/);
+    assert.equal(await page.getByRole('button',{name:'Add to Queue',exact:true}).isDisabled(),true);
+    await mosaic.fill('1');
+    assert.equal(await mosaic.getAttribute('aria-invalid'),'false');
+    assert.equal(await page.getByRole('button',{name:'Add to Queue',exact:true}).isDisabled(),false);
+    for (const [name,bad,good,expected] of [
+      ['Dataset fraction','0','1','greater than 0'],['Nominal batch','2.5','64','whole number'],
+      ['Rotation','361','-360','maximum: 360'],['Shear','-181','180','Minimum: -180'],
+      ['Box','-1','7.5','maximum: no fixed limit'],['Freeze layers','-1','0,1,2','Minimum: 0'],
+      ['Test epochs','1001','25','maximum: 1000'],
+    ]) {
+      const input=page.getByRole('textbox',{name,exact:true});
+      await input.fill(bad);
+      assert.equal(await input.getAttribute('aria-invalid'),'true',name);
+      assert.match(await page.getByRole('alert').filter({hasText:name+':'}).textContent(),new RegExp(expected));
+      await input.fill(good);
+      assert.equal(await input.getAttribute('aria-invalid'),'false',name);
+    }
     assert.deepEqual(errors,[]);
   } finally {
     await browser?.close(); await server?.close();

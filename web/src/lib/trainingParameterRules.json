@@ -1,0 +1,208 @@
+{
+  "optimizer": {
+    "kind": "choice",
+    "choices": [
+      "auto",
+      "SGD",
+      "Adam",
+      "Adamax",
+      "AdamW",
+      "NAdam",
+      "RAdam",
+      "RMSprop",
+      "MuSGD"
+    ]
+  },
+  "lr0": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "lrf": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "momentum": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "weight_decay": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "warmup_epochs": {
+    "kind": "float",
+    "min": 0.0
+  },
+  "warmup_momentum": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "warmup_bias_lr": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "cos_lr": {
+    "kind": "bool"
+  },
+  "freeze": {
+    "kind": "freeze"
+  },
+  "dropout": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "multi_scale": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "rect": {
+    "kind": "bool"
+  },
+  "amp": {
+    "kind": "amp"
+  },
+  "fraction": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0,
+    "exclusive_min": true
+  },
+  "box": {
+    "kind": "float",
+    "min": 0.0
+  },
+  "cls": {
+    "kind": "float",
+    "min": 0.0
+  },
+  "dfl": {
+    "kind": "float",
+    "min": 0.0
+  },
+  "nbs": {
+    "kind": "int",
+    "min": 1
+  },
+  "hsv_h": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "hsv_s": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "hsv_v": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "degrees": {
+    "kind": "float",
+    "min": -360.0,
+    "max": 360.0
+  },
+  "translate": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "scale": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "shear": {
+    "kind": "float",
+    "min": -180.0,
+    "max": 180.0
+  },
+  "perspective": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "flipud": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "fliplr": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "mosaic": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "close_mosaic": {
+    "kind": "int",
+    "min": 0
+  },
+  "mixup": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "cutmix": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "copy_paste": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "erasing": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "bgr": {
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "auto_augment": {
+    "kind": "choice",
+    "choices": [
+      "randaugment",
+      "autoaugment",
+      "augmix"
+    ]
+  },
+  "epochs": {
+    "kind": "int",
+    "min": 1,
+    "max": 1000
+  },
+  "img_size": {
+    "kind": "int",
+    "min": 32,
+    "max": 4096
+  },
+  "batch": {
+    "kind": "int",
+    "min": 1,
+    "max": 512
+  },
+  "seed": {
+    "kind": "int"
+  },
+  "patience": {
+    "kind": "int",
+    "min": 0
+  }
+}

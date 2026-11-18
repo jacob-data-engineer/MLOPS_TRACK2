@@ -1,4 +1,5 @@
 import { Track2TrainingDataFile } from "../components/Track2TrainingDataFile";
+import { trainingSettingsErrors } from '../lib/trainingValidation';
 import { Track2TrainingDataChoice, type TrainingDataChoice } from "../components/Track2TrainingDataChoice";
 import { AlertCircle, Cpu, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -616,6 +617,8 @@ export function TrainingForm({
   const analysis = (() => {
     const lines: { tone: "ok" | "warn" | "bad"; text: string }[] = [];
     let blocking = false;
+    const parameterErrors = trainingSettingsErrors({epochs,imgSize,batch,seed,patience,hyperparams});
+    if (parameterErrors.length) return {blocking:true, lines:parameterErrors.map(text => ({tone:'bad' as const,text}))};
 
     if (dataChoice.mode === 'saved') {
       blocking = !dataChoice.checked || !chosenDetector || !basePackageArn;
@@ -709,6 +712,8 @@ export function TrainingForm({
   // exposes both start endpoints, so this is a UI decision, not a
   // capability that has gone.
   async function handleAddToQueue() {
+    const parameterErrors = trainingSettingsErrors({epochs,imgSize,batch,seed,patience,hyperparams});
+    if (parameterErrors.length) {setError(parameterErrors.join(' ')); return;}
     setBusy(true);
     setError(null);
     try {
