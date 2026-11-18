@@ -29,6 +29,10 @@ test('training supports prepared data and checked saved SQL data', async () => {
     const page = await browser.newPage({timezoneId:'America/Los_Angeles'});
     const queued = [], errors = [];
     let rejectCheck = false;
+    let releaseDatasets;
+    const datasetsGate = new Promise(resolve => {releaseDatasets = resolve;});
+    let releaseHistory;
+    const historyGate = new Promise(resolve => {releaseHistory = resolve;});
     let job = null;
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/track2/**', async route => {
@@ -43,11 +47,11 @@ test('training supports prepared data and checked saved SQL data', async () => {
       else if (url.pathname.endsWith('/queue-after-pull')) response = {settings:{enabled:false,triggers:[]},next:{act:false,reason:'Manual'}};
       else if (url.pathname.endsWith('/retrain')) response = {settings:{enabled:false},next:{}};
       else if (url.pathname.endsWith('/retrain/preparation')) response = {job};
-      else if (url.pathname.endsWith('/versions')) response = {versions:[{version_id:'dv-saved',created_at:'2026-11-17T18:30:00Z',
-        train_images:100,val_images:20,classes:['helmet'],central_recipe:{store_uri:'s3://original/store'}}]};
-      else if (url.pathname.endsWith('/audit')) response = {audits:[{id:'run-old',run_number:10,detector_slug:'helmet',
+      else if (url.pathname.endsWith('/versions')) {await datasetsGate; response = {versions:[{version_id:'dv-saved',created_at:'2026-11-17T18:30:00Z',
+        train_images:100,val_images:20,classes:['helmet'],central_recipe:{store_uri:'s3://original/store'}}]};}
+      else if (url.pathname.endsWith('/audit')) {await historyGate; response = {audits:[{id:'run-old',run_number:10,detector_slug:'helmet',
         dataset_version_id:'dv-saved',submitted_at:'2026-11-17',status:'Succeeded',generation:'11',size:'s',
-        parameters:{epochs:3,img_size:320,batch:2,seed:7},base_model:{source:'s3://original/model.pt'},train_dataset:{}}]};
+        parameters:{epochs:3,img_size:320,batch:2,seed:7},base_model:{source:'s3://original/model.pt'},train_dataset:{}}]};}
       else if (url.pathname.endsWith('/dv-saved/check')) {
         assert.deepEqual(req.postDataJSON(),{detector_slug:'helmet'});
         if (rejectCheck) {await route.fulfill({status:400,json:{detail:'Preserved image is missing'}});return;}
@@ -82,7 +86,15 @@ test('training supports prepared data and checked saved SQL data', async () => {
       seed:42,patience:10,hyperparams:{lr0:0.001},detector_slug:'helmet',architecture:'yolo11s',notes:'repeatable test',
       base_version:'arn:aws:sagemaker:test:model-package/helmet/2',delete_decay_after_run:true}});
     await page.getByRole('radio',{name:'Use a saved dataset',exact:true}).check();
+    const loading = page.getByRole('status').filter({hasText:'Loading datasets…'});
+    await loading.waitFor();
+    assert.equal(await page.getByLabel('Saved dataset record').isDisabled(),true);
+    assert.equal(await loading.evaluate(el => getComputedStyle(el).animationName),'pulse');
+    releaseDatasets();
     await page.getByLabel('Saved dataset record').selectOption('dv-saved');
+    assert.equal(await loading.count(),0);
+    // The picker becomes usable before the slower source-run history returns.
+    releaseHistory();
     assert.match(await page.locator('option[value="dv-saved"]').textContent(), /18 Nov 2026, 2:30 AM SGT \(GMT\+8\)/);
     const selectStyle = await page.getByLabel('Saved dataset record').evaluate(el => ({border:getComputedStyle(el).borderTopWidth,height:el.getBoundingClientRect().height,background:getComputedStyle(el).backgroundColor}));
     assert.equal(selectStyle.border,'2px');
