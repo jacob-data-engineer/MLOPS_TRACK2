@@ -426,6 +426,7 @@ export function Track2MetricsExportCard({
     setError("");
     try {
       const res = await exportTrack2BestWeights({
+        model_package_arn: pick?.model_package_arn,
         group_name: group, criterion, destination,
         ...(destination === "s3" ? { bucket, prefix, retention } : {}),
         ...(includeMetadata ? { include_metadata: true, metadata_groups: metadataGroups } : {}),
@@ -491,7 +492,7 @@ export function Track2MetricsExportCard({
   }
 
   const noGroup = !group;
-  const nothingToExport = !pick;
+    const nothingToExport = !pick || picking;
   const needsBucket = destination === "s3" && !bucket;
   const result = auto?.last_result;
 

@@ -553,6 +553,8 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                     for (path, uri, row), (body, note) in zip(chunk, pool.map(fetch, chunk)):
                         check()
                         if body is None:
+                            if row.get("role") == "model":
+                                raise ValueError("The requested checkpoint became unavailable during export.")
                             missing += 1
                             writer.writerow({**row, "missing": True, "note": note})
                             progress('Packing files', packed + missing)
@@ -572,6 +574,8 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                 val_path = "eval/images/val" if any(p.startswith("eval/images/val/") for p, _, _ in entries) else "images/val"
                 zf.writestr("data.yaml", f"path: .\ntrain: images/train\nval: {val_path}\n"
                                          f"names:\n{lines}\n")
+            else:
+                zf.writestr("data.yaml", "path: .\ntrain: images/train\nval: images/val\nnames: {}\n# Class mapping was not recorded.\n")
             zf.writestr("manifest.csv", manifest.getvalue())
             if kind == "run":
                 saved = _rows("SELECT record FROM training_runs WHERE run_id = %s", (ident,))
@@ -587,8 +591,6 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                     zf.writestr("metrics.json", catalog_metadata.dumps(metadata["groups"]["Evaluation"]))
                 if "Training history" in metadata["groups"]:
                     zf.writestr("training-history.json", catalog_metadata.dumps(metadata["groups"]["Training history"]))
-                if not numbered:
-                    zf.writestr("data.yaml", "path: .\ntrain: images/train\nval: images/val\nnames: {}\n# Class mapping was not recorded.\n")
                 zf.writestr("README.txt", "Track2 export\nmetadata.json: recorded run/dataset information; unavailable fields are listed.\n"
                             "manifest.csv: source addresses, relative paths, missing files, byte sizes and SHA-256 checksums.\n"
                             "models/*.pt: a copy of the model with extra/track2_metadata.json and extra/track2_manifest.csv embedded.\n"
@@ -660,7 +662,7 @@ def _finish(export_id: str, sql: str, params: tuple) -> bool | None:
 def start_export(kind: str, ident: str, *, destination: str = "local",
                  bucket: str = "", prefix: str = "", format: str | None = None,
                  include_metadata: bool = False, include_images: bool = True, include_model: bool = False,
-                 metadata_groups: list[str] | None = None) -> dict:
+                 metadata_groups: list[str] | None = None, model_package_arn: str = "") -> dict:
     """Start building a zip of a run or a dataset version. Returns at once;
     `exports()` shows its progress."""
     if kind not in ("run", "version"):
@@ -672,22 +674,34 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
     catalog.ensure_schema_once()          # it writes schema-9 columns
     entries, names, label = _plan(kind, ident)
     metadata = catalog_metadata.describe(kind, ident) if include_metadata else None
+    if model_package_arn or include_model:
+        if kind != "run":
+            raise ValueError("Select a training run to export a model.")
+        saved = _rows("SELECT model_package_arn, record FROM training_runs WHERE run_id = %s", (ident,))
+        if not saved or (model_package_arn and saved[0].get("model_package_arn") != model_package_arn):
+            raise ValueError("The selected model does not match this training run. Refresh and select it again.")
+        record = saved[0].get("record") or {}
+        if isinstance(record, str):
+            record = json.loads(record)
+        checkpoint_uri = str(record.get("weights_uri") or "")
+        if include_model:
+            if not checkpoint_uri.startswith("s3://") or not checkpoint_uri.lower().endswith(".pt"):
+                raise ValueError("No .pt checkpoint has been published for this run.")
+            source_bucket, source_key = _split_uri(checkpoint_uri)
+            try:
+                storage.s3.head_object(Bucket=source_bucket, Key=source_key)
+            except Exception as exc:
+                raise ValueError("The selected checkpoint is missing or inaccessible; no export was started.") from exc
+    if not include_images:
+        entries = [("", uri, {**row, "included": False, "reason": "Not selected for export"}) for _, uri, row in entries]
+    if include_model:
+        path = f"models/{label}.pt"
+        entries.append((path, checkpoint_uri, {"path": path, "source": checkpoint_uri, "role": "model", "included": True}))
     if metadata:
         metadata["export_options"] = {"images": include_images, "model": include_model,
                                       "destination": destination, "format": format,
                                       "checkpoint_embedding": "JSON and CSV stored inside the .pt archive; model tensors are unchanged"}
-        if not include_images:
-            entries = [("", uri, {**row, "included": False, "reason": "Not selected for export"}) for _, uri, row in entries]
-        if include_model and kind == "run":
-            selected = metadata["records"]["selected"]["record"]
-            if isinstance(selected, str):
-                selected = json.loads(selected)
-            uri = str(selected.get("weights_uri") or "")
-            if uri:
-                path = f"models/{label}.pt"
-                entries.append((path, uri, {"path": path, "source": uri, "role": "model", "included": True}))
-            else:
-                metadata["notes"].append("No published checkpoint was recorded for this run; no .pt is included.")
+        metadata["export_options"]["model_package_arn"] = model_package_arn
     if metadata and metadata_groups is not None:
         options = metadata["export_options"]
         metadata = catalog_metadata.select_groups(metadata, metadata_groups)

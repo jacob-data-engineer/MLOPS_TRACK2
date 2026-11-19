@@ -317,6 +317,7 @@ class BestVersionRequest(BaseModel):
 
 
 class WeightsExportRequest(BestVersionRequest):
+    model_package_arn: str = ""
     destination: str = "local"
     bucket: str = ""
     prefix: str = ""
@@ -408,6 +409,8 @@ def _export_best_with_metadata(payload: "WeightsExportRequest") -> dict:
                             detail="Choose at least one metadata category, or untick Include metadata.")
     try:
         rows = mx.group_versions(payload.group_name)
+        if payload.model_package_arn:
+            rows = [r for r in rows if r.get("model_package_arn") == payload.model_package_arn]
     except Exception as exc:                                       # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not read {payload.group_name}: {exc}")
     best, why = mx.pick_best(rows, payload.criterion)
@@ -458,6 +461,7 @@ def export_best_weights(payload: WeightsExportRequest,
             destination=payload.destination,
             bucket=payload.bucket, prefix=payload.prefix,
             retention=payload.retention,
+            model_package_arn=payload.model_package_arn,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

@@ -123,6 +123,7 @@ class ExportRequest(BaseModel):
     include_metadata: bool = False
     include_images: bool = True
     include_model: bool = False
+    model_package_arn: str = ""
     metadata_groups: list[str] | None = None
 
 
@@ -147,7 +148,8 @@ def start_export(payload: ExportRequest, session=Depends(require_session)) -> di
         payload.kind, payload.id, destination=payload.destination,
         bucket=payload.bucket, prefix=payload.prefix, format=payload.format,
         include_metadata=payload.include_metadata, include_images=payload.include_images,
-        include_model=payload.include_model, metadata_groups=payload.metadata_groups))
+        include_model=payload.include_model, metadata_groups=payload.metadata_groups,
+        model_package_arn=payload.model_package_arn))
 
 
 @router.get("/metadata")

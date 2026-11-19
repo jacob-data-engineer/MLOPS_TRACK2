@@ -191,7 +191,7 @@ export function Track2CatalogMetadata({ selection, destination, renderDestinatio
   // any package shown then is a previous one.
   const choice: ExportChoice = {
     include_metadata: mode === "complete", include_images: mode === "dataset" || includeImages,
-    include_model: mode === "complete" && includeModel && selection?.kind === "run" && !!metadata?.checkpoint_available,
+    include_model: mode === "complete" && includeModel && selection?.kind === "run",
     metadata_groups: chosen, destination: destination.destination,
     format: destination.destination === "local" ? "zip" : destination.format,
   };

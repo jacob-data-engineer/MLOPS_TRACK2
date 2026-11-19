@@ -112,6 +112,7 @@ class ConfigRequest(BaseModel):
     # Pull Control's weeks table: `{watching, show_all_weeks}`.
     pull_control_view: dict | None = None
     catalog_export: dict | None = None
+    comparison_export: dict | None = None
     catalog_export_destination: dict | None = None
     catalog_pt_metadata: dict | None = None
     # Which cards are open. Restored with everything else so a loaded

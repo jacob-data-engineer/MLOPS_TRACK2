@@ -187,8 +187,8 @@ def test_a_file_that_cannot_be_read_is_reported_missing_not_fatal(monkeypatch):
 
 def test_the_page_is_routed_and_offered():
     web = ROOT / "web" / "src"
-    assert 'path="/track2/catalog" element={<Track2CatalogPage />}' in (web / "App.tsx").read_text(encoding="utf-8")
-    assert '"Track2 Data Catalog"' in (web / "components" / "Layout.tsx").read_text(encoding="utf-8")
+    assert 'path="/track2/catalog" element={<Navigate to="/track2/metrics" replace />}' in (web / "App.tsx").read_text(encoding="utf-8")
+    assert '<Track2CatalogPage' in (web / "routes" / "Track2MetricsPage.tsx").read_text(encoding="utf-8")
     # The catalog section left the Central data store card (2026-11-13);
     # the page is reached from the nav.
     card = (web / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
@@ -325,7 +325,7 @@ def test_export_route_forwards_destination_and_old_requests_default_to_local(mon
     monkeypatch.setattr(cv, "start_export", lambda *args, **kwargs: got.append((args, kwargs)) or {"state": "building"})
     router.start_export(router.ExportRequest(kind="run", id="r", destination="s3", bucket="chosen-bucket", prefix="exports"), session={})
     assert got[-1] == (("run", "r"), {"destination": "s3", "bucket": "chosen-bucket", "prefix": "exports", "format": None,
-                                      "include_metadata": False, "include_images": True, "include_model": False, "metadata_groups": None})
+                                      "include_metadata": False, "include_images": True, "include_model": False, "metadata_groups": None, "model_package_arn": ""})
     router.start_export(router.ExportRequest(kind="version", id="v"), session={})
     assert got[-1][1]["destination"] == "local"
 

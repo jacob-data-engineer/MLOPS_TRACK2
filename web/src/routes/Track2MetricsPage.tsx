@@ -1,6 +1,7 @@
 import { AlertCircle, BarChart3, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "../components/Card";
+import { Track2ComparisonExport } from "../components/Track2ComparisonExport";
 import { Track2CatalogPage } from "./Track2CatalogPage";
 import { Track2ExportSettingsBar } from "../components/Track2ExportSettingsBar";
 import { Track2MetricsExportCard } from "../components/Track2MetricsExportCard";
@@ -383,6 +384,12 @@ export function Track2MetricsPage() {
     }
 
     if (picked.length < 2) return notes;
+    const datasets = picked.map(r => r.metrics?.dataset?.dataset_version || "");
+    if (datasets.some(id => !id)) {
+      notes.push("Evaluation provenance is incomplete for this comparison. Dataset identity and evaluation settings must be checked before treating the ranking as a common benchmark.");
+    } else if (new Set(datasets).size > 1) {
+      notes.push("These models record different dataset versions. Their scores are not verified against a common evaluation set; use Evaluation to compare on the same images.");
+    }
     const taxonomies = new Set(picked.map((r) => (r.metrics?.classes ?? []).join(" | ")));
     if (taxonomies.size > 1) {
       notes.push(
@@ -539,6 +546,7 @@ export function Track2MetricsPage() {
       {rows && (
         <div id="comparison" className="mb-5 scroll-mt-48">
           <Card title={"Comparison"}>
+            {compareRows.length > 0 && <Track2ComparisonExport rows={compareRows} runs={runsByArn} />}
             <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1.5 border-b border-hairline pb-4">
               {METRICS.map(({ key, label, hint }) => (
                 <label

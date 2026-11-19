@@ -1419,6 +1419,7 @@ export function previewTrack2BestVersion(body: {
  * copy, and a download comes back as a presigned link the browser follows
  * straight to S3. */
 export function exportTrack2BestWeights(body: {
+  model_package_arn?: string;
   group_name: string;
   criterion: string;
   destination: "local" | "s3";
@@ -2178,6 +2179,7 @@ export interface Track2PullConfig {
   catalog_export?: { include_images?: boolean; include_model?: boolean; output_type?: string };
   catalog_pt_metadata?: { selected_groups?: string[] };
   catalog_export_destination?: CatalogExportDestination;
+  comparison_export?: { metric?: string; images?: boolean; model?: boolean; metadata?: boolean; groups?: string[]; destination?: CatalogExportDestination };
   sql_explorer?: {
     database?: string;
     bucket?: string;
@@ -4038,6 +4040,7 @@ export interface CatalogExportDestination {
   metadata_groups?: string[];
   include_images?: boolean;
   include_model?: boolean;
+  model_package_arn?: string;
 }
 
 export interface CatalogMetadata {

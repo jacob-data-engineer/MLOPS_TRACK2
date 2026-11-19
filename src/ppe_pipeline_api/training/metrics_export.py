@@ -515,7 +515,7 @@ def export_checkpoint(row: dict, *, destination: str, bucket: str = "",
 
 def run_export(group_name: str, criterion: str, *, destination: str,
                bucket: str = "", prefix: str = "",
-               retention: str = "keep_all") -> dict:
+               retention: str = "keep_all", model_package_arn: str = "") -> dict:
     """Pick, then export. The one path both the button and the watcher take.
 
     One implementation on purpose: a manual export and an automatic one
@@ -524,6 +524,8 @@ def run_export(group_name: str, criterion: str, *, destination: str,
     was consuming the folder.
     """
     rows = group_versions(group_name)
+    if model_package_arn:
+        rows = [r for r in rows if r.get("model_package_arn") == model_package_arn]
     best, why = pick_best(rows, criterion)
     if best is None:
         raise ValueError(why)

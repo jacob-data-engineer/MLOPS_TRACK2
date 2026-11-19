@@ -198,6 +198,7 @@ DEFAULTS = {
     # Catalog package choices belong in saved settings; uploaded documents do not.
     "catalog_export": {"include_images": True, "include_model": True, "output_type": "complete"},
     "catalog_export_destination": {},  # Destination shared by all catalog export modes.
+    "comparison_export": {},  # Ranking metric and package options; never resumes an export.
     "catalog_pt_metadata": {},  # Selected categories for direct checkpoint exports.
     # The Assemble card's own choices: the folders it merges into a
     # dataset, the detector it writes classes for, whether it may replace
@@ -3062,7 +3063,7 @@ SCOPES = {
         "auto_create_weeks", "first_week_takes_all", "week_by",
         "image_extensions", "label_extensions", "overwrite",
         "retention", "golden_set", "dataset_assemble", "auto_training",
-        "sql_explorer", "readiness_flow", "central_store", "pull_control_view", "catalog_export", "catalog_pt_metadata", "catalog_export_destination",
+        "sql_explorer", "readiness_flow", "central_store", "pull_control_view", "catalog_export", "catalog_pt_metadata", "catalog_export_destination", "comparison_export",
     ),
     "at": (
         "mode", "schedule_expression", "schedule_every_days", "schedule_from",
