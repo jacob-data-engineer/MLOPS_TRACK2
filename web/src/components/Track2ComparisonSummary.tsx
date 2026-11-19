@@ -27,7 +27,7 @@ export function Track2ComparisonSummary({ rows, audits, status }: {
     <div className="overflow-x-auto rounded-sm border border-hairline">
       <table className="w-full min-w-[850px] table-fixed text-left text-xs">
         <caption className="px-3 py-2 text-left font-semibold">Compared models — data and training summary</caption>
-        <thead className="border-y border-hairline bg-page"><tr>{["Model / run", "Training images and folders", "Evaluation images and folders", "Training settings", "Dataset / snapshot"].map(label => <th key={label} className="px-3 py-2 align-top">{label}</th>)}</tr></thead>
+        <thead className="border-y border-hairline bg-page"><tr>{["Model / run", "Training images and folders", "Evaluation images and folders", "Training settings", "Dataset record"].map(label => <th key={label} className="px-3 py-2 align-top">{label}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => {
           const audit = audits[row.model_package_arn];
           const actual = audit?.actual;
@@ -37,7 +37,7 @@ export function Track2ComparisonSummary({ rows, audits, status }: {
             <td className="px-3 py-2 align-top"><DatasetSummary data={audit?.train_dataset}/>{changedData && <p className="mt-2 break-all text-critical">Actual job location: {actual?.train_data_s3_uri}. Counts above are from the saved submission.</p>}</td>
             <td className="px-3 py-2 align-top"><DatasetSummary data={audit?.eval_dataset}/>{audit?.eval_is_train_dataset && <p className="mt-2 text-critical">Overlaps training data — not held out.</p>}</td>
             <td className="px-3 py-2 align-top"><TrainingSettingsCell entries={shownParameters} index={index}/>{!shownParameters.length && <p>No recorded differences.</p>}</td>
-            <td className="break-all px-3 py-2 align-top"><p>{audit?.dataset_version_id || audit?.train_dataset.dataset_version_id || audit?.eval_dataset.dataset_version_id || "Dataset ID not recorded"}</p><p className="mt-2">Snapshot: {audit?.snapshot?.snapshot_id || "Not recorded"}</p>{audit?.snapshot?.snapshot_id && <p className="break-normal text-ink-muted">{audit.snapshot.pinned ? "Files pinned by name" : "Week folders only; not repeatable"}</p>}</td>
+            <td className="break-all px-3 py-2 align-top"><p>{audit?.dataset_version_id || audit?.train_dataset.dataset_version_id || audit?.eval_dataset.dataset_version_id || "Dataset ID not recorded"}</p></td>
           </tr>;
         })}</tbody>
       </table>
