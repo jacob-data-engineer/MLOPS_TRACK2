@@ -86,6 +86,29 @@ def test_listing_is_newest_first(settings_dir):
     assert names[0] == "newer"
 
 
+def test_last_loaded_is_remembered_without_changing_preset_order(settings_dir):
+    save("first")
+    save("second")
+    assert mod.list_export_settings(session=None)["last_loaded"] == "second"
+    mod.load_export_settings(mod.ExportSettingsRequest(name="first"), session=None)
+    assert mod.list_export_settings(session=None)["last_loaded"] == "first"
+    with pytest.raises(HTTPException):
+        mod.load_export_settings(mod.ExportSettingsRequest(name="absent"), session=None)
+    assert mod.list_export_settings(session=None)["last_loaded"] == "first"
+    mod.delete_export_settings(mod.ExportSettingsRequest(name="second"), session=None)
+    assert mod.list_export_settings(session=None)["last_loaded"] == "first"
+    mod.delete_export_settings(mod.ExportSettingsRequest(name="first"), session=None)
+    assert mod.list_export_settings(session=None)["last_loaded"] == ""
+
+
+def test_new_forgets_selection_without_deleting_files(settings_dir):
+    save("keep")
+    mod.forget_export_settings(session=None)
+    listed = mod.list_export_settings(session=None)
+    assert listed["last_loaded"] == ""
+    assert [f["name"] for f in listed["files"]] == ["keep"]
+
+
 def test_a_missing_folder_is_not_an_error(settings_dir):
     """Nothing saved yet. The card should offer Save, not report a fault."""
     out = mod.list_export_settings(session=None)

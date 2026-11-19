@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ApiError,
   deleteTrack2ExportSettings,
+  forgetTrack2ExportSettings,
   listTrack2ExportSettings,
   loadTrack2ExportSettings,
   saveTrack2ExportSettings,
@@ -29,12 +30,14 @@ export function Track2ExportSettingsBar({
   settings,
   onChange,
   defaults,
+  onRestoringChange,
 }: {
   settings: Track2ExportSettings;
   onChange: (next: Track2ExportSettings) => void;
   /** What New goes back to. Held by the page so "blank" means one thing
    * wherever it is pressed. */
   defaults: Track2ExportSettings;
+  onRestoringChange?: (restoring: boolean) => void;
 }) {
   const [files, setFiles] = useState<Track2ExportSettingsFile[]>([]);
   const [writable, setWritable] = useState(true);
@@ -42,7 +45,7 @@ export function Track2ExportSettingsBar({
   const [pick, setPick] = useState("");
   const [loaded, setLoaded] = useState("");
   const [savedAt, setSavedAt] = useState("");
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState("Restoring...");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
 
@@ -55,7 +58,41 @@ export function Track2ExportSettingsBar({
       })
       .catch(() => undefined);
   }
-  useEffect(refreshFiles, []);
+  useEffect(() => {
+    let disposed = false;
+    onRestoringChange?.(true);
+    async function restore() {
+      try {
+        const listed = await listTrack2ExportSettings();
+        if (disposed) return;
+        setFiles(listed.files); setWritable(listed.writable);
+        setPick(listed.last_loaded || listed.files[0]?.name || "");
+        if (listed.last_loaded) {
+          try {
+            const got = await loadTrack2ExportSettings(listed.last_loaded);
+            if (disposed) return;
+            onChange(got.settings); setLoaded(got.name);
+            setSavedAt(got.saved_at ? new Date(got.saved_at).toLocaleString() : "");
+            setNote(`Automatically loaded ${got.name} with ${got.settings.comparison_versions?.length ?? 0} compared model(s)`);
+          } catch (err) {
+            if (disposed) return;
+            if (err instanceof ApiError && err.status === 404) {
+              await forgetTrack2ExportSettings();
+              if (disposed) return;
+              setPick(listed.files[0]?.name || "");
+            }
+            setError(`Could not restore ${listed.last_loaded}: ${err instanceof ApiError ? err.detail : "Please load the file again."}`);
+          }
+        }
+      } catch (err) {
+        if (!disposed) setError(err instanceof ApiError ? err.detail : "Could not read saved files. Refresh to retry.");
+      } finally {
+        if (!disposed) { setBusy(""); onRestoringChange?.(false); }
+      }
+    }
+    void restore();
+    return () => { disposed = true; };
+  }, []);
 
   async function withBusy(label: string, work: () => Promise<void>) {
     setBusy(label);
@@ -74,12 +111,14 @@ export function Track2ExportSettingsBar({
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <button
         type="button"
-        onClick={() => {
+        disabled={!!busy}
+        onClick={() => withBusy("Clearing...", async () => {
+          await forgetTrack2ExportSettings();
           onChange(defaults);
           setLoaded("");
           setSavedAt("");
           setNote("Blank settings. Nothing saved until you press Save.");
-        }}
+        })}
         className="rounded-md border border-black/15 px-2.5 py-1 font-medium text-ink-secondary"
       >
         New
@@ -103,6 +142,7 @@ export function Track2ExportSettingsBar({
           const name = saveAs.trim() || loaded;
           await saveTrack2ExportSettings(name, settings);
           setLoaded(name);
+          setPick(name);
           setSaveAs("");
           setSavedAt(new Date().toLocaleString());
           setNote(`Saved ${name} with ${settings.comparison_versions?.length ?? 0} compared model(s)`);
@@ -123,7 +163,7 @@ export function Track2ExportSettingsBar({
       <select
         value={pick}
         onChange={(e) => setPick(e.target.value)}
-        disabled={files.length === 0}
+        disabled={!!busy || files.length === 0}
         className="ml-auto min-w-[10rem] rounded-sm border border-black/15 bg-page px-2 py-1 text-xs text-ink disabled:opacity-40"
       >
         {files.length === 0 && <option value="">no saved files</option>}
@@ -159,6 +199,7 @@ export function Track2ExportSettingsBar({
       </button>
 
       <span className="w-full text-ink-muted">
+        {busy && <span role="status" className="mr-3">{busy}</span>}
         {savedAt ? `Saved ${savedAt}` : "Not saved yet"}
         <span className="ml-3">Loaded: {loaded || "no file loaded"}</span>
         {note && <span className="ml-3 text-ink-secondary">{note}</span>}

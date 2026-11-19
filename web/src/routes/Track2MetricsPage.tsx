@@ -240,6 +240,7 @@ export function Track2MetricsPage() {
   // would write something nobody was looking at.
   const [exportSettings, setExportSettings] =
     useState<Track2ExportSettings>(EXPORT_DEFAULTS);
+  const [restoringSettings, setRestoringSettings] = useState(true);
   const selectedVersions = exportSettings.comparison_versions ?? [];
   const selectedMetrics = new Set<MetricKey>((exportSettings.comparison_metrics ?? [...DEFAULT_METRIC_KEYS])
     .filter((key): key is MetricKey => METRICS.some(m => m.key === key)));
@@ -502,6 +503,7 @@ export function Track2MetricsPage() {
       <div className="sticky z-20 mb-5" style={{ top: "var(--stale-banner-h, 0px)" }}>
         <Card collapsible={false}>
         <Track2ExportSettingsBar
+          onRestoringChange={setRestoringSettings}
           settings={exportSettings}
           onChange={setExportSettings}
           defaults={EXPORT_DEFAULTS}
@@ -531,6 +533,7 @@ export function Track2MetricsPage() {
         </div>
       )}
 
+      <fieldset disabled={restoringSettings} aria-busy={restoringSettings}>
       {rows && (
         <Track2ModelPicker
           rows={rows}
@@ -621,6 +624,7 @@ export function Track2MetricsPage() {
       <section id="data-catalog" className="mt-8 scroll-mt-48 border-t border-black/20 pt-6" aria-label="Data Catalog">
         <Track2CatalogPage refreshKey={catalogRefresh} openRun={openRun} />
       </section>
+      </fieldset>
     </div>
   );
 }

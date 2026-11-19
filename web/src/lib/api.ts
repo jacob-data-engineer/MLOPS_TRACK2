@@ -1531,6 +1531,7 @@ export interface Track2ExportSettingsFile {
 }
 
 export function listTrack2ExportSettings(): Promise<{
+  last_loaded?: string;
   directory: string;
   files: Track2ExportSettingsFile[];
   writable: boolean;
@@ -1557,6 +1558,10 @@ export function deleteTrack2ExportSettings(
   name: string,
 ): Promise<{ name: string; deleted: boolean }> {
   return apiPost("/track2/metrics/export/settings/delete", { name });
+}
+
+export function forgetTrack2ExportSettings(): Promise<{ last_loaded: string }> {
+  return apiPost("/track2/metrics/export/settings/forget", {});
 }
 
 /** The 8-color CVD-safe palette the old app used for the metrics

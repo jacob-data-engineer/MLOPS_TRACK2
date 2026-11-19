@@ -218,6 +218,42 @@ class ExportSettingsRequest(BaseModel):
     settings: ExportSettings | None = None
 
 
+def _last_export_settings() -> str:
+    try:
+        with open(os.path.join(EXPORT_SETTINGS_DIR, ".last-loaded"), encoding="utf-8") as handle:
+            name = handle.read().strip()
+        if name:
+            _settings_path(name)
+        return name
+    except (OSError, ValueError):
+        return ""
+
+
+def _remember_export_settings(name: str) -> None:
+    import tempfile
+    if name:
+        _settings_path(name)
+    os.makedirs(EXPORT_SETTINGS_DIR, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=EXPORT_SETTINGS_DIR,
+                                     prefix=".last-loaded-", delete=False) as handle:
+        handle.write(name.strip())
+        temporary = handle.name
+    try:
+        os.replace(temporary, os.path.join(EXPORT_SETTINGS_DIR, ".last-loaded"))
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+
+
+@router.post("/export/settings/forget")
+def forget_export_settings(session=Depends(require_session)) -> dict:
+    try:
+        _remember_export_settings("")
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not clear the last loaded file: {exc}")
+    return {"last_loaded": ""}
+
+
 @router.get("/export/settings")
 def list_export_settings(session=Depends(require_session)) -> dict:
     """Saved export presets on the EC2 host, newest first."""
@@ -226,7 +262,7 @@ def list_export_settings(session=Depends(require_session)) -> dict:
     except OSError:
         # Missing is not an error: nothing has been saved yet, and the
         # card should offer Save rather than report a fault.
-        return {"directory": EXPORT_SETTINGS_DIR, "files": [],
+        return {"directory": EXPORT_SETTINGS_DIR, "files": [], "last_loaded": "",
                 "writable": os.access(os.path.dirname(EXPORT_SETTINGS_DIR) or "/", os.W_OK)}
     files = []
     for name in names:
@@ -241,7 +277,7 @@ def list_export_settings(session=Depends(require_session)) -> dict:
         except (OSError, ValueError):
             continue
     files.sort(key=lambda f: f["modified"], reverse=True)
-    return {"directory": EXPORT_SETTINGS_DIR, "files": files,
+    return {"directory": EXPORT_SETTINGS_DIR, "files": files, "last_loaded": _last_export_settings(),
             "writable": os.access(EXPORT_SETTINGS_DIR, os.W_OK)}
 
 
@@ -266,6 +302,7 @@ def save_export_settings(payload: ExportSettingsRequest,
             json.dump({"saved_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
                        "settings": payload.settings.model_dump()}, handle, indent=2)
         os.replace(temporary, path)
+        _remember_export_settings(payload.name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except OSError as exc:
@@ -280,6 +317,8 @@ def load_export_settings(payload: ExportSettingsRequest,
     try:
         with open(_settings_path(payload.name), encoding="utf-8") as handle:
             body = json.load(handle)
+        settings = ExportSettings(**(body.get("settings") or {})).model_dump()
+        _remember_export_settings(payload.name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except FileNotFoundError:
@@ -289,7 +328,7 @@ def load_export_settings(payload: ExportSettingsRequest,
     # Defaults filled in, so a preset written before a field existed loads
     # as the default rather than as undefined.
     return {"name": payload.name, "saved_at": body.get("saved_at", ""),
-            "settings": ExportSettings(**(body.get("settings") or {})).model_dump()}
+            "settings": settings}
 
 
 @router.post("/export/settings/delete")
@@ -297,6 +336,8 @@ def delete_export_settings(payload: ExportSettingsRequest,
                            session=Depends(require_session)) -> dict:
     try:
         os.remove(_settings_path(payload.name))
+        if _last_export_settings() == payload.name.strip():
+            _remember_export_settings("")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except FileNotFoundError:
