@@ -94,6 +94,10 @@ def lambda_handler(event=None, _context=None):
         print(f"Auto export: {training.check_auto_export()}")
     except Exception as exc:                                       # noqa: BLE001
         print(f"Auto export check failed: {exc}")
+    try:
+        print(f"Scheduled exports: {training.check_scheduled_exports()}")
+    except Exception as exc:
+        print(f"Scheduled export check failed: {exc}")
 
     before = training.queue_snapshot() if hasattr(training, "queue_snapshot") else None
     try:

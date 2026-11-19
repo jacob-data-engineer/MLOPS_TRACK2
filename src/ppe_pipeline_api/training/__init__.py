@@ -19,6 +19,7 @@ __all__ = [
     # what the clock (chain/ticker.py, chain/queue_runner.py) drives
     "restore_queue", "queue_snapshot", "try_advance_queue", "current_training_reason",
     "reconcile_training_audits", "sweep_idle_endpoint", "check_auto_export",
+    "check_scheduled_exports",
 ]
 
 get_detector = _through(__name__, "track2_shared", "get_detector")
@@ -38,3 +39,4 @@ try_advance_queue = _through(__name__, "track2_shared", "try_advance_queue")
 reconcile_training_audits = _through(__name__, "track2_shared", "reconcile_training_audits")
 sweep_idle_endpoint = _through(__name__, "track2_shared", "sweep_idle_endpoint")
 check_auto_export = _through(__name__, "metrics_export", "check")
+check_scheduled_exports = _through(__name__, "export_schedules", "check")

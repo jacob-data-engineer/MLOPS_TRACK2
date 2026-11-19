@@ -1279,6 +1279,11 @@ export function getTrack2Metrics(): Promise<{ rows: Track2MetricsRow[] }> {
  * is its own call, so loading a preset named after something else cannot
  * quietly start writing to a shared bucket on a watch. */
 export interface Track2ExportSettings {
+  auto_scope?: "comparison" | "model_name";
+  auto_model_name?: string;
+  auto_time_sgt?: string;
+  auto_every_days?: number;
+  auto_start_date?: string;
   comparison_versions?: string[];
   comparison_metrics?: string[];
   export_mode?: "auto" | "selected";
@@ -1562,6 +1567,39 @@ export function deleteTrack2ExportSettings(
 
 export function forgetTrack2ExportSettings(): Promise<{ last_loaded: string }> {
   return apiPost("/track2/metrics/export/settings/forget", {});
+}
+
+export interface ModelExportPlan {
+  scope: "comparison" | "model_name";
+  model_package_arns: string[];
+  model_name: string;
+  criterion: string;
+  destination: "local" | "s3";
+  bucket: string;
+  prefix: string;
+  expected_arn?: string;
+  enabled?: boolean;
+  time_sgt?: string;
+  every_days?: number;
+  start_date?: string;
+}
+export interface ModelExportSchedule extends Partial<ModelExportPlan> {
+  scope: ModelExportPlan["scope"];
+  enabled: boolean;
+  next_run_at?: string;
+  last_result?: {state: string; at: string; detail?: string; written_to?: string; picked?: Track2ExportPick};
+}
+export function previewModelExport(plan: ModelExportPlan): Promise<{best: Track2ExportPick | null; reason: string; considered: number}> {
+  return apiPost("/track2/metrics/export/selection/preview", plan);
+}
+export function runModelExport(plan: ModelExportPlan): Promise<{picked: Track2ExportPick; url: string; written_to: string; filename: string}> {
+  return apiPost("/track2/metrics/export/selection/run", plan);
+}
+export function getModelExportSchedules(): Promise<{schedules: ModelExportSchedule[]}> {
+  return apiGet("/track2/metrics/export/schedules");
+}
+export function saveTrack2ModelExportSchedule(scope: ModelExportPlan["scope"], plan: Partial<ModelExportPlan>): Promise<{schedule: ModelExportSchedule}> {
+  return apiPost(`/track2/metrics/export/schedules/${scope}`, plan);
 }
 
 /** The 8-color CVD-safe palette the old app used for the metrics

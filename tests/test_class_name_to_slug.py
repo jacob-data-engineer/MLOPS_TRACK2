@@ -448,7 +448,7 @@ def test_seed_ness_is_not_version_one():
 def test_every_place_a_version_shows_a_status_knows_about_seeds():
     base = (WEB / "components" / "Track2BaseModelPicker.tsx").read_text(encoding="utf-8")
     metrics = (WEB / "components" / "Track2ModelPicker.tsx").read_text(encoding="utf-8")
-    export = (WEB / "components" / "Track2MetricsExportCard.tsx").read_text(encoding="utf-8")
+    export = (WEB / "components" / "Track2AutoExportPanel.tsx").read_text(encoding="utf-8")
 
     # Both go through the shared `statusLabel`, so "Approved" reads
     # "Ready" in one place rather than three that can drift.
@@ -483,7 +483,6 @@ def test_the_three_dropdowns_read_the_same_way_everywhere():
     for name, path in [
         ("Track2DetectorsPanel.tsx", WEB / "components" / "Track2DetectorsPanel.tsx"),
         ("Track2ModelPicker.tsx", WEB / "components" / "Track2ModelPicker.tsx"),
-        ("Track2MetricsExportCard.tsx", WEB / "components" / "Track2MetricsExportCard.tsx"),
     ]:
         text = path.read_text(encoding="utf-8")
         assert "Model Name" in text, name
@@ -514,7 +513,7 @@ def test_approved_reads_as_ready_in_one_place():
     slug_ts = SLUG.read_text(encoding="utf-8")
     assert 'if (status === "Approved") return "Ready";' in slug_ts
     for name in ("Track2BaseModelPicker.tsx", "Track2ModelPicker.tsx",
-                 "Track2MetricsExportCard.tsx"):
+                 "Track2AutoExportPanel.tsx"):
         text = (WEB / "components" / name).read_text(encoding="utf-8")
         assert "statusLabel" in text, name
         assert 'from "../lib/slug"' in text, name

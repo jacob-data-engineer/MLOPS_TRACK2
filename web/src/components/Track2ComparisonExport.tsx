@@ -1,19 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, checkCatalogDataset, getTrack2CatalogMetadata, getTrack2CatalogExports,
-  getTrack2PullControl, saveTrack2PullConfig,
+  getTrack2PullControl, saveTrack2PullConfig, exportTrack2BestWeights,
   getTrack2CatalogExportUrl, startTrack2CatalogExport, type Track2MetricsRow,
   type Track2RunForModel, type Track2CatalogExport, type CatalogExportDestination } from "../lib/api";
 import { modelLabel } from "./Track2ModelPicker";
 import { METADATA_CATEGORIES } from "./Track2CatalogMetadata";
 import { Track2ExportProgress } from "./Track2ExportProgress";
+import { isSeedVersion, statusLabel } from "../lib/slug";
 
 const METRICS = ["mAP50-95", "mAP50", "precision", "recall", "f1", "accuracy"] as const;
 type Metric = typeof METRICS[number];
-type Target = { row: Track2MetricsRow; run: Track2RunForModel };
+type Target = { row: Track2MetricsRow; run?: Track2RunForModel };
 const message = (e: unknown) => e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "Export failed.";
 
-export function Track2ComparisonExport({ rows, runs }: {
-  rows: Track2MetricsRow[]; runs: Record<string, Track2RunForModel>;
+export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRun }: {
+  rows: Track2MetricsRow[]; runs: Record<string, Track2RunForModel>; browseAll?: boolean;
+  onOpenRun?: (id:string)=>void;
 }) {
   const [metric, setMetric] = useState<Metric>("mAP50-95");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -30,6 +32,8 @@ export function Track2ComparisonExport({ rows, runs }: {
   const [settingsReady, setSettingsReady] = useState(false);
   const [saved, setSaved] = useState("");
   const [jobs, setJobs] = useState<Track2CatalogExport[]>([]);
+  const [search, setSearch] = useState("");
+  const [direct, setDirect] = useState<{label: string; url: string; uri: string}[]>([]);
   const cancel = useRef(false);
   useEffect(() => () => { cancel.current = true; }, []);
   useEffect(() => {
@@ -66,7 +70,10 @@ export function Track2ComparisonExport({ rows, runs }: {
       const targets: Target[] = []; const warnings: string[] = [];
       for (const row of ranked.filter(r => arns.includes(r.model_package_arn))) {
         const run = runs[row.model_package_arn];
-        if (!run) throw new Error(`${modelLabel(row)} has no recorded training run. Use the existing model export for a plain checkpoint.`);
+        if (!run) {
+          if (images || metadata || !model) throw new Error(`${modelLabel(row)} has no recorded training run. Select only Model (.pt) to export its registered checkpoint.`);
+          targets.push({row}); continue;
+        }
         const info = await getTrack2CatalogMetadata("run", run.run_id);
         if (model && !info.checkpoint_available) throw new Error(`Run ${run.run_number} has no published checkpoint.`);
         if (images) {
@@ -91,6 +98,12 @@ export function Track2ComparisonExport({ rows, runs }: {
     try {
       for (const target of targets) {
         if (cancel.current) break;
+        if (!target.run) {
+          const result = await exportTrack2BestWeights({group_name:target.row.group_name,criterion:"newest",
+            model_package_arn:target.row.model_package_arn,destination:options.destination,bucket:options.bucket,prefix:options.prefix,retention:"keep_all"});
+          setDirect(old=>[...old,{label:`${target.row.registry} · ${modelLabel(target.row)}`,url:result.url,uri:result.written_to}]);
+          continue;
+        }
         const started = await startTrack2CatalogExport("run", target.run.run_id,
           { ...options, model_package_arn: target.row.model_package_arn });
         let finished = false;
@@ -113,14 +126,17 @@ export function Track2ComparisonExport({ rows, runs }: {
   const button = "rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40";
   return <section className="mb-5 space-y-3 border-b border-hairline pb-4" aria-label="Rank and export compared models">
     <fieldset disabled={busy || running || !settingsReady} className="space-y-3 disabled:opacity-60">
-      <label className="text-sm font-medium">Rank selected models by <select aria-label="Ranking metric" value={metric} onChange={e => setMetric(e.target.value as Metric)} className="ml-2 rounded border p-1">
+      {browseAll&&<label className="block text-xs">Find a model <input aria-label="Find manual model" className="ml-2 rounded border p-2" placeholder="Model name, version, run or status" value={search} onChange={e=>setSearch(e.target.value)}/></label>}
+      <label className="text-sm font-medium">{browseAll?"Sort models by":"Rank selected models by"} <select aria-label="Ranking metric" value={metric} onChange={e => setMetric(e.target.value as Metric)} className="ml-2 rounded border p-1">
         {METRICS.map(key => <option key={key}>{key}</option>)}
       </select></label>
       <p className="text-xs text-ink-muted">Highest recorded score first; missing scores are unranked. Ties share a score. Choose any model to export.</p>
-      <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th>Export</th><th>Model / run</th><th>{metric}</th><th>Recorded dataset / validation images</th></tr></thead><tbody>
-        {ranked.map(row => <tr key={row.model_package_arn} className="border-t border-hairline">
+      <p className="text-xs">{rows.length} available models · {chosen.filter(a=>rows.some(r=>r.model_package_arn===a)).length} selected for export</p>
+      <div className="max-h-80 overflow-auto"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-page"><tr><th>Export</th><th>Model / run</th><th>{metric}</th><th>Recorded dataset / validation images</th></tr></thead><tbody>
+        {ranked.filter(row=>`${row.registry} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase())).map(row => <tr key={row.model_package_arn} className="border-t border-hairline">
           <td><input aria-label={`Export ${modelLabel(row)}`} type="checkbox" checked={chosen.includes(row.model_package_arn)} onChange={e => setChosen(old => e.target.checked ? [...old, row.model_package_arn] : old.filter(a => a !== row.model_package_arn))} /></td>
-          <td className="py-2">{modelLabel(row)} · {runs[row.model_package_arn] ? `Run ${runs[row.model_package_arn].run_number}` : "No run recorded"}<br />{row.status}</td>
+          <td className="py-2">{row.registry} · {modelLabel(row)} · {runs[row.model_package_arn] ? `Run ${runs[row.model_package_arn].run_number}` : "No run recorded"}<br />{isSeedVersion(row.description) ? "Seed" : statusLabel(row.status)}
+            {onOpenRun&&runs[row.model_package_arn]&&<button className="ml-2 underline" onClick={()=>onOpenRun(runs[row.model_package_arn].run_id)}>Open run in catalog</button>}</td>
           <td>{row.metrics?.[metric]?.toFixed(4) ?? "Not measured"}</td>
           <td>{row.metrics?.dataset?.dataset_version || "Unknown"} / {row.metrics?.dataset?.validation_count ?? "Unknown"}</td>
         </tr>)}
@@ -143,12 +159,13 @@ export function Track2ComparisonExport({ rows, runs }: {
     {notes.map((note, i) => <p className="text-xs" key={i}>{note}</p>)}
     {preview.length > 0 && <div className="space-y-2 rounded border border-hairline p-3 text-xs">
       <p className="font-medium">Ready to export these exact versions:</p>
-      {preview.map(t => <p className="break-all" key={t.row.model_package_arn}>{modelLabel(t.row)} · Run {t.run.run_number} · {t.row.model_package_arn}</p>)}
+      {preview.map(t => <p className="break-all" key={t.row.model_package_arn}>{modelLabel(t.row)} · {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint only"} · {t.row.model_package_arn}</p>)}
       <p>{model ? ".pt; " : ""}{images ? "images and labels; " : "dataset references only; "}{metadata ? `${groups.length} metadata categories; ` : ""}{destination.destination === "local" ? "downloadable ZIP" : `s3://${destination.bucket}/${destination.prefix}`}</p>
       <button className={button} disabled={running} onClick={() => void exportPackages()}>Export {preview.length} package(s)</button>
     </div>}
     {running && <p className="text-xs" role="status">Exporting packages sequentially. Keep this page open for remaining packages; completed exports also appear in the catalog.</p>}
     {error && <p className="text-xs text-critical" role="alert">{error}</p>}
+    {direct.map((result,i)=><p key={i} className="text-xs">{result.label}: {result.url?<a className="underline" href={result.url}>Download .pt</a>:result.uri}</p>)}
     {jobs.map(job => <div key={job.id} className="rounded border border-hairline p-2"><p className="text-xs">{job.label} · {job.id}</p><Track2ExportProgress exp={job} />
       {(job.state === "ready" || job.state === "partial") && job.format === "zip" && <button className={button} onClick={() => void getTrack2CatalogExportUrl(job.id).then(r => window.location.assign(r.url)).catch(e => setError(message(e)))}>Download {job.state === "partial" ? "incomplete " : ""}ZIP</button>}
       {job.destination_uri && <p className="break-all text-xs">{job.destination_uri}</p>}

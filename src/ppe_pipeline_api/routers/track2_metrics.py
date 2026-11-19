@@ -10,12 +10,14 @@ import io
 import json
 import os
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from .. import metrics_export as mx
 from .. import track2_shared as t2
+from ..training import export_schedules as schedules
 from ..auth import require_session
 
 router = APIRouter()
@@ -175,6 +177,11 @@ def export_metrics(payload: MetricsExportRequest,
 
 class ExportSettings(BaseModel):
     export_mode: str = "selected"
+    auto_scope: str = "comparison"
+    auto_model_name: str = ""
+    auto_time_sgt: str = "09:00"
+    auto_every_days: int = 1
+    auto_start_date: str = ""
     comparison_versions: list[str] = []
     comparison_metrics: list[str] = ["mAP50", "mAP50-95", "precision", "recall", "f1"]
     #: The three dropdowns, stored so the card restores the selection a
@@ -348,6 +355,52 @@ def delete_export_settings(payload: ExportSettingsRequest,
 
 
 # --- exporting the best checkpoint of one Class ------------------------
+class SelectionExportRequest(BaseModel):
+    scope: Literal["comparison", "model_name"] = "comparison"
+    model_package_arns: list[str] = []
+    model_name: str = ""
+    criterion: str = "mAP50"
+    destination: Literal["local", "s3"] = "local"
+    bucket: str = ""
+    prefix: str = ""
+    expected_arn: str = ""
+    enabled: bool = False
+    time_sgt: str = "09:00"
+    every_days: int = 1
+    start_date: str = ""
+
+
+@router.post("/export/selection/preview")
+def preview_selection(payload: SelectionExportRequest, session=Depends(require_session)):
+    try:
+        return schedules.preview(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/export/selection/run")
+def export_selection(payload: SelectionExportRequest, session=Depends(require_session)):
+    try:
+        if not payload.expected_arn:
+            raise ValueError("Preview the best model before exporting.")
+        return schedules.export_now(payload.model_dump(), payload.expected_arn)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/export/schedules")
+def get_export_schedules(session=Depends(require_session)):
+    return {"schedules": schedules.list_schedules()}
+
+
+@router.post("/export/schedules/{scope}")
+def save_export_schedule(scope: str, payload: SelectionExportRequest, session=Depends(require_session)):
+    try:
+        return {"schedule": schedules.save(scope, payload.model_dump())}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 #
 # What goes out is the .pt itself, not a spreadsheet about it. The picking,
 # the naming and the watcher all live in `metrics_export`; these routes are

@@ -50,7 +50,7 @@ test('page Save and Load restore comparison models and metric checkboxes', async
     await page.getByRole('button',{name:'Load',exact:true}).click();
     await page.getByText('Loaded comparison with 2 compared model(s)',{exact:true}).waitFor();
     assert.equal(await page.locator('#comparison').getByLabel('Precision',{exact:true}).isChecked(),false);
-    await page.getByRole('radio',{name:'Selected models',exact:true}).check();
+    await page.getByRole('radio',{name:'Manual',exact:true}).check();
     assert.equal(await page.locator('[aria-label="Rank and export compared models"] tbody tr').count(),2);
     await page.reload();
     await page.getByText('Automatically loaded comparison with 2 compared model(s)',{exact:true}).waitFor();
@@ -63,7 +63,7 @@ test('page Save and Load restore comparison models and metric checkboxes', async
     await page.getByText('Blank settings. Nothing saved until you press Save.',{exact:true}).waitFor();
     await page.reload();
     await page.getByRole('button',{name:'Select this',exact:true}).waitFor();
-    assert.equal(await page.locator('[aria-label="Rank and export compared models"]').count(),0);
+    await page.locator('#comparison').getByText('Pick a version above and press', {exact:false}).waitFor();
     lastLoaded='comparison';saved=undefined;
     await page.reload();
     await page.getByText('Could not restore comparison: File was deleted',{exact:true}).waitFor();

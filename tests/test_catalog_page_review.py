@@ -283,7 +283,7 @@ def test_filters_go_to_the_server_with_load_more():
 
 def test_the_two_export_workflows_are_named_apart():
     card = (WEB / "components" / "Track2MetricsExportCard.tsx").read_text(encoding="utf-8")
-    assert "Model export: best registered version (.pt)" in card and "Separate from Catalog export" in card
+    assert "Model export" in card and "Manual" in card and "Auto" in card
     assert "Catalog export: the selected run or dataset version" in META
 
 

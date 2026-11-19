@@ -47,5 +47,5 @@ def test_the_queue_card_lists_folders_one_per_line_and_scrolls():
 
 def test_the_metrics_export_can_make_a_new_folder():
     """2026-10-26: Review & metrics' S3 destination offers New folder."""
-    card = " ".join((WEB / "components" / "Track2MetricsExportCard.tsx").read_text(encoding="utf-8").split())
+    card = " ".join((WEB / "components" / "Track2AutoExportPanel.tsx").read_text(encoding="utf-8").split())
     assert "onNavigate={(next) => set({ prefix: next })} allowCreate />" in card

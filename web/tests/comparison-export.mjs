@@ -15,10 +15,11 @@ test('comparison ranks models and exports exact selections with independent opti
     import '../src/index.css';
     const rows=[1,2].map(n=>({model_package_arn:'arn:'+n,group_name:'helmet',registry:'helmet',generation:'11',size:'s',version:String(n),status:'Approved',metrics:{mAP50:n/10,recall:(3-n)/10,dataset:{dataset_version:'dataset-'+n,validation_count:100}}}));
     function App(){const [settings,setSettings]=React.useState({export_mode:'selected',registry:'helmet',generation:'11',size:'s',group_name:'helmet',criterion:'mAP50',destination:'local',bucket:'',prefix:'',retention:'keep_all'});
-      return <Track2MetricsExportCard rows={rows} selectedRows={rows} settings={settings} onChange={setSettings} runsByArn={{'arn:1':{run_id:'r1',run_number:1},'arn:2':{run_id:'r2',run_number:2}}}/>;}
+      return <Track2MetricsExportCard rows={rows} selectedRows={rows.slice(0,1)} settings={settings} onChange={setSettings} runsByArn={{'arn:1':{run_id:'r1',run_number:1},'arn:2':{run_id:'r2',run_number:2}}}/>;}
     createRoot(document.getElementById('root')!).render(<App/>);`);
   let server, browser;
   const requests = []; let unavailable = false;
+  const scheduleRequests=[]; const savedSchedules={};
   try {
     server = await createServer({root, server:{host:'127.0.0.1',port:0}}); await server.listen();
     browser = await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});
@@ -26,6 +27,13 @@ test('comparison ranks models and exports exact selections with independent opti
     await page.route('**/track2/**', route => {
       const req = route.request(); const url = new URL(req.url());
       if (url.pathname.endsWith('/pull-control')) return route.fulfill({json:{config:{}}});
+      if (url.pathname.endsWith('/export/schedules')) return route.fulfill({json:{schedules:Object.values(savedSchedules)}});
+      if (url.pathname.includes('/export/schedules/')) {
+        const scope=url.pathname.split('/').at(-1),body=req.postDataJSON();scheduleRequests.push({scope,...body});
+        savedSchedules[scope]={...savedSchedules[scope],...body,scope,next_run_at:'2026-12-01T01:00:00Z'};
+        return route.fulfill({json:{schedule:savedSchedules[scope]}});
+      }
+      if(url.pathname.endsWith('/selection/preview'))return route.fulfill({json:{best:{group_name:'helmet',model_package_arn:'arn:1',version:'1',criterion:'mAP50',value:.1},considered:1}});
       if (url.pathname.endsWith('/export/groups')) return route.fulfill({json:{groups:[{registry:'helmet',generation:'11',size:'s',group_name:'helmet',export_stem:'helmet'}]}});
       if (url.pathname.endsWith('/export/auto')) return route.fulfill({json:{settings:{enabled:false}}});
       if (url.pathname.endsWith('/export/preview')) return route.fulfill({json:{best:null,considered:0,reason:'No evaluated models'}});
@@ -41,6 +49,11 @@ test('comparison ranks models and exports exact selections with independent opti
     });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`);
     await page.getByLabel('Ranking metric').selectOption('mAP50');
+    await page.getByLabel('Find manual model').fill('Run 2');
+    // Search includes the run number even when the word "Run" is omitted.
+    await page.getByLabel('Find manual model').fill('2');
+    assert.equal(await page.locator('tbody tr').count(),1);
+    await page.getByLabel('Find manual model').fill('');
     assert.match(await page.locator('tbody tr').first().innerText(), /Run 2/);
     await page.getByLabel('Ranking metric').selectOption('recall');
     assert.match(await page.locator('tbody tr').first().innerText(), /Run 1/);
@@ -57,12 +70,28 @@ test('comparison ranks models and exports exact selections with independent opti
     await page.getByRole('alert').filter({hasText:'no published checkpoint'}).waitFor();
     assert.equal(await page.getByRole('button',{name:'Export 2 package(s)',exact:true}).count(),0);
     await page.getByRole('radio',{name:'Auto',exact:true}).check();
-    await page.getByText('Auto is scoped to one Model Name.',{exact:true}).waitFor();
+    await page.getByRole('radio',{name:'Best of compared models',exact:true}).waitFor();
     assert.equal(await page.getByLabel('Ranking metric').count(),0);
-    assert.equal(await page.getByRole('combobox',{name:'Model Name',exact:true}).isVisible(),true);
-    await page.getByRole('radio',{name:'Selected models',exact:true}).check();
+    await page.getByRole('button',{name:'Preview best model',exact:true}).click();
+    await page.getByRole('button',{name:'Export this winner now',exact:true}).waitFor();
+    await page.getByLabel('Auto S3 bucket').fill('test-exports');
+    await page.getByRole('button',{name:'Save and enable schedule',exact:true}).click();
+    await page.getByRole('button',{name:'Stop comparison schedule',exact:true}).waitFor();
+    assert.deepEqual(scheduleRequests[0].model_package_arns,['arn:1']);
+    await page.getByRole('radio',{name:'Best for a Model Name',exact:true}).check();
+    await page.getByLabel('Auto Model Name').selectOption('helmet');
+    await page.getByRole('button',{name:'Save and enable schedule',exact:true}).click();
+    await page.getByRole('button',{name:'Stop Model Name schedule',exact:true}).waitFor();
+    assert.equal(scheduleRequests[1].model_name,'helmet');
+    assert.deepEqual(scheduleRequests[1].model_package_arns,[]);
+    assert.equal(savedSchedules.comparison.enabled,true);
+    assert.equal(savedSchedules.model_name.enabled,true);
+    await page.getByRole('button',{name:'Stop comparison schedule',exact:true}).click();
+    await page.getByText('Best of compared models: Off',{exact:true}).waitFor();
+    assert.equal(savedSchedules.model_name.enabled,true);
+    await page.getByRole('radio',{name:'Manual',exact:true}).check();
     await page.getByLabel('Ranking metric').waitFor();
-    assert.equal(await page.getByText('Auto is scoped to one Model Name.',{exact:true}).isVisible(),false);
+    assert.equal(await page.getByRole('radio',{name:'Best of compared models',exact:true}).count(),0);
   } finally {
     await browser?.close(); await server?.close(); await rm(harness,{recursive:true,force:true});
   }

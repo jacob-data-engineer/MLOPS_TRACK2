@@ -10,7 +10,7 @@ from ppe_pipeline_api import metrics_export as mx  # noqa: E402
 from ppe_pipeline_api.routers import track2_metrics as tm  # noqa: E402
 
 CARD = " ".join((pathlib.Path(__file__).resolve().parents[1] / "web" / "src" / "components"
-                 / "Track2MetricsExportCard.tsx").read_text(encoding="utf-8").split())
+                 / "Track2AutoExportPanel.tsx").read_text(encoding="utf-8").split())
 
 
 def test_counts_the_folder_and_its_archive_with_the_same_rule(monkeypatch):
@@ -27,9 +27,9 @@ def test_the_status_route_carries_them():
 
 
 def test_the_card_words_them_for_the_rule_in_force():
-    assert "In the folder" in CARD
-    assert 'watched.retention === "archive_oldest" && (' in CARD
-    assert "archived in" in CARD
+    assert "Earlier exports are kept" in CARD
+    assert "Next:" in CARD
+    assert "Last result:" in CARD
 
 
 def test_the_newest_file_names_the_version_in_the_folder(monkeypatch):
@@ -47,6 +47,6 @@ def test_the_route_scores_it_and_names_the_best():
 
 
 def test_the_card_shows_both_and_flags_a_thin_score():
-    assert "Version in the folder" in CARD
-    assert "Best by {watchedCriterionLabel}" in CARD
-    assert "too few for that score to mean much" in CARD
+    assert "Winner:" in CARD
+    assert "pick.criterion" in CARD
+    assert "Few validation images" in CARD

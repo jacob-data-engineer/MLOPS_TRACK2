@@ -118,7 +118,6 @@ STILL_ON_BROWSER_CONFIRM = {
     # NavGuardContext. Deliberately last.
     "Layout.tsx",
     # On the Metrics screen, not Multi-Auto Training. Next in line.
-    "Track2MetricsExportCard.tsx",
 }
 
 

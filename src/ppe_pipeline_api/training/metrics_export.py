@@ -177,7 +177,7 @@ def newest_version(group_name: str) -> int:
 _versions_cache: dict[str, tuple[float, list]] = {}
 
 
-def group_versions(group_name: str, *, max_age: float = 0.0) -> list[dict]:
+def group_versions(group_name: str, *, max_age: float = 0.0, strict: bool = False) -> list[dict]:
     """Every version of ONE group, with its metrics -- rows shaped like
     `scan_all_model_metrics` produces, but for one group rather than the
     whole estate.
@@ -207,6 +207,8 @@ def group_versions(group_name: str, *, max_age: float = 0.0) -> list[dict]:
         try:
             described = t2.sm.describe_model_package(ModelPackageName=arn)
         except Exception as exc:                                   # noqa: BLE001
+            if strict:
+                raise
             print(f"Could not describe {arn}: {exc}")
             continue
         metrics, description, _lineage = t2.fetch_metrics_and_lineage(arn)

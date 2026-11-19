@@ -71,12 +71,12 @@ def test_the_choice_is_saved_in_the_preset():
 
 def test_run_numbers_and_the_way_to_the_run_are_on_the_page():
     page = (WEB / "routes" / "Track2MetricsPage.tsx").read_text(encoding="utf-8")
-    card = (WEB / "components" / "Track2MetricsExportCard.tsx").read_text(encoding="utf-8")
+    card = (WEB / "components" / "Track2AutoExportPanel.tsx").read_text(encoding="utf-8")
     picker = (WEB / "components" / "Track2ModelPicker.tsx").read_text(encoding="utf-8")
     catalog = (WEB / "routes" / "Track2CatalogPage.tsx").read_text(encoding="utf-8")
     assert "getTrack2RunsByModel()" in page and "runLabel(run)" in page
     assert "Open run in catalog" in page and "Open run in catalog" in card
     assert "openRun={openRun}" in page and "openRun?.nonce" in catalog
     assert "Run ${runs[r.model_package_arn].run_number}" in picker
-    assert "Include the training run&apos;s metadata in the .pt" in card
-    assert "METADATA_CATEGORIES" in card
+    manual = (WEB / "components" / "Track2ComparisonExport.tsx").read_text(encoding="utf-8")
+    assert "METADATA_CATEGORIES" in manual and "Metadata categories" in manual
