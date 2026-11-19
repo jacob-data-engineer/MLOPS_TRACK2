@@ -36,7 +36,7 @@ interface Param {
   hint?: string;
 }
 
-const GROUPS: { title: string; why: string; params: Param[] }[] = [
+export const GROUPS: { title: string; why: string; params: Param[] }[] = [
   {
     title: "Optimiser",
     why: "How the weights move. The first thing to reach for when a run will not converge, or converges and then wanders.",

@@ -495,7 +495,9 @@ export interface Track2TrainingAudit {
   ended_at: string | null;
   generation: string;
   size: string;
-  parameters: { epochs: number; img_size: number; batch: number; seed: number };
+  parameters: { epochs: number; img_size: number; batch: number; seed: number; patience?: number };
+  hyperparams?: Record<string, unknown>;
+  training_options?: Record<string, unknown>;
   notes: string;
   /** This run's own copy of the yaml and file lists it was sent, under
    * `_runs/<id>/`. Copied at submit time, so it survives the live slots
