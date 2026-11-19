@@ -34,12 +34,13 @@ export function comparedParameters({ rows, audits }: {
 export function TrainingSettingsCell({ entries, index }: {
   entries: ReturnType<typeof comparedParameters>; index: number;
 }) {
+  const recordedEntries = entries.filter(e => e.values[index] !== undefined && e.values[index] !== null);
   return <dl className="space-y-1" aria-label="Recorded training settings">
-    {entries.map((e, position) => {
+    {recordedEntries.map((e, position) => {
       const value = e.values[index];
       const different = e.different && value !== undefined && value !== null;
       return <div key={`${e.kind}/${e.key}`}>
-        {(position === 0 || entries[position - 1].group !== e.group) && <p className="mt-2 font-semibold text-ink-secondary">{e.group}</p>}
+        {(position === 0 || recordedEntries[position - 1].group !== e.group) && <p className="mt-2 font-semibold text-ink-secondary">{e.group}</p>}
         <div className={`rounded px-1 py-0.5 ${different ? "bg-amber-100/80 font-medium" : ""}`} data-parameter={e.key}>
           <dt className="inline" title={e.key}>{e.label}: </dt>
           <dd className="inline break-words tabular">{parameterText(value)}</dd>

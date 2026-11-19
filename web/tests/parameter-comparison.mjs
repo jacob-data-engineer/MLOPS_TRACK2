@@ -16,7 +16,8 @@ assert.doesNotMatch(await firstSettings.locator('[data-parameter="cos_lr"]').inn
 assert.match(await firstSettings.locator('[data-parameter="patience"]').innerText(),/0/);
 assert.match(await firstSettings.locator('[data-parameter="future_param"]').innerText(),/7/);
 const missing=page.locator('tbody > tr').last().locator('[data-parameter="warmup_epochs"]');
-assert.match(await missing.innerText(),/Not recorded/);assert.doesNotMatch(await missing.innerText(),/Different/);
+assert.equal(await missing.count(),0);
+assert.equal(await page.locator('tbody > tr').last().getByLabel('Recorded training settings').innerText(),'');
 await page.getByRole('checkbox',{name:/Show differences only/}).check();
 assert.equal(await firstSettings.locator('[data-parameter]').count(),2);
 assert.equal(await page.locator('tbody > tr').count(),3);
