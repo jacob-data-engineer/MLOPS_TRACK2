@@ -5,7 +5,6 @@ import { Track2CatalogPage } from "./Track2CatalogPage";
 import { Track2ExportSettingsBar } from "../components/Track2ExportSettingsBar";
 import { Track2MetricsExportCard } from "../components/Track2MetricsExportCard";
 import { Track2ComparisonSummary } from "../components/Track2ComparisonSummary";
-import { Track2ParameterComparison } from "../components/Track2ParameterComparison";
 import { Track2ModelPicker, modelLabel, rowKey } from "../components/Track2ModelPicker";
 import {
   ApiError,
@@ -558,7 +557,6 @@ export function Track2MetricsPage() {
         <div id="comparison" className="mb-5 scroll-mt-48">
           <Card title={"Comparison"}>
             <Track2ComparisonSummary rows={compareRows} audits={auditsByArn} status={auditsState.status} />
-            <Track2ParameterComparison rows={compareRows} audits={auditsByArn} />
             {rows && selectedVersions.some(key => !rows.some(row => rowKey(row) === key)) &&
               <p className="mb-3 text-xs text-critical" role="alert">Some saved model versions are unavailable in the current registry. Their identifiers remain saved: {selectedVersions.filter(key => !rows.some(row => rowKey(row) === key)).join(", ")}. Refresh to retry or clear the comparison to remove them.</p>}
             <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1.5 border-b border-hairline pb-4">
