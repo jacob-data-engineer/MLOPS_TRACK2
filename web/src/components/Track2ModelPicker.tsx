@@ -4,6 +4,7 @@ import { Badge } from "./Badge";
 import { Card } from "./Card";
 import type { Track2MetricsRow, Track2TrainingAudit } from "../lib/api";
 import { AuditRow } from "./Track2TrainingAuditPanel";
+import { Track2RunSummary } from "./Track2RunSummary";
 
 /** Choosing which trained models to compare.
  *
@@ -339,6 +340,7 @@ export function Track2ModelPicker({
                   a run, so the two cannot drift. */}
               {audit ? (
                 <div className="mt-3 border-t border-hairline pt-3">
+                  <Track2RunSummary audit={audit} />
                   <AuditRow audit={audit} onDeleted={() => onAuditDeleted?.()} />
                 </div>
               ) : (
