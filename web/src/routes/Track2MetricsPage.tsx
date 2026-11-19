@@ -1,7 +1,6 @@
 import { AlertCircle, BarChart3, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "../components/Card";
-import { Track2ComparisonExport } from "../components/Track2ComparisonExport";
 import { Track2CatalogPage } from "./Track2CatalogPage";
 import { Track2ExportSettingsBar } from "../components/Track2ExportSettingsBar";
 import { Track2MetricsExportCard } from "../components/Track2MetricsExportCard";
@@ -50,6 +49,7 @@ const MAX_COMPARE = 4;
  * download writes nothing anybody else can see -- the safe reading of
  * silence. */
 const EXPORT_DEFAULTS: Track2ExportSettings = {
+  export_mode: "selected",
   registry: "",
   generation: "",
   size: "",
@@ -546,7 +546,6 @@ export function Track2MetricsPage() {
       {rows && (
         <div id="comparison" className="mb-5 scroll-mt-48">
           <Card title={"Comparison"}>
-            {compareRows.length > 0 && <Track2ComparisonExport rows={compareRows} runs={runsByArn} />}
             <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1.5 border-b border-hairline pb-4">
               {METRICS.map(({ key, label, hint }) => (
                 <label
@@ -591,6 +590,7 @@ export function Track2MetricsPage() {
       {rows && (
         <div id="model-export" className="scroll-mt-48">
           <Track2MetricsExportCard
+            selectedRows={compareRows}
             rows={rows}
             settings={exportSettings}
             onChange={setExportSettings}

@@ -27,6 +27,7 @@ import { formatSgt } from "../lib/format";
 import { statusLabel } from "../lib/slug";
 import { Badge } from "./Badge";
 import { Card } from "./Card";
+import { Track2ComparisonExport } from "./Track2ComparisonExport";
 import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
 
 /** Export control -- the best checkpoint of one Class, by hand or on a watch.
@@ -161,6 +162,7 @@ function Pick({ pick, run, onOpenRun }: {
 }
 
 export function Track2MetricsExportCard({
+  selectedRows = [],
   rows,
   settings,
   onChange,
@@ -168,6 +170,7 @@ export function Track2MetricsExportCard({
   onOpenRun,
 }: {
   rows: Track2MetricsRow[];
+  selectedRows?: Track2MetricsRow[];
   /** Which training run registered each version, keyed on package ARN. */
   runsByArn?: Record<string, Track2RunForModel>;
   /** Select that run in the Data Catalog below and scroll to its export. */
@@ -518,12 +521,19 @@ export function Track2MetricsExportCard({
     || auto.retention !== retention));
 
   return (
-    <Card title="Model export: best registered version (.pt)">
-      <p className="mb-2 text-xs text-ink-secondary">
-        <strong>Separate from Catalog export below.</strong> This picks a Model Name and exports
-        its best registered version by the measure chosen here. The versions ticked in
-        Comparison and the row selected in the Data Catalog are not used and are not changed.
-      </p>
+    <Card title="Model export">
+      <fieldset className="mb-4 flex flex-wrap gap-4 border-b border-hairline pb-3">
+        <legend className="mb-2 text-xs font-medium">Export mode</legend>
+        <label className="flex items-center gap-2 text-sm"><input type="radio" name="model-export-mode" checked={(settings.export_mode ?? "selected") === "auto"} onChange={() => set({ export_mode: "auto" })} />Auto</label>
+        <label className="flex items-center gap-2 text-sm"><input type="radio" name="model-export-mode" checked={(settings.export_mode ?? "selected") === "selected"} onChange={() => set({ export_mode: "selected" })} />Selected models</label>
+      </fieldset>
+      {(settings.export_mode ?? "selected") === "selected" && <div>
+        <p className="mb-3 text-xs text-ink-secondary">Export the exact versions you chose in Comparison. Tick the models you have decided on below, then choose the package contents and destination.</p>
+        {armed && <p className="mb-3 rounded border border-hairline p-3 text-xs" role="status">An automatic export is still watching <strong>{auto?.group_name}</strong>. Selecting models here does not change that watcher. <button className="underline" onClick={() => set({ export_mode: "auto" })}>Manage Auto</button></p>}
+        {selectedRows.length ? <Track2ComparisonExport rows={selectedRows} runs={runsByArn} /> : <p className="text-sm">Choose models in Comparison first. <a href="#comparison" className="underline text-accent">Go to Comparison</a></p>}
+      </div>}
+      <div hidden={(settings.export_mode ?? "selected") !== "auto"}>
+      <p className="mb-2 text-xs text-ink-secondary"><strong>Auto is scoped to one Model Name.</strong> Choose its model type and size, then the metric used to pick its best version. Models selected in Comparison are not part of Auto.</p>
       <p className="mb-3 text-xs text-ink-secondary">
         Sends the <strong>checkpoint itself</strong> &mdash; the{" "}
         <span className="tabular">.pt</span> you would deploy or hand to
@@ -1066,6 +1076,7 @@ export function Track2MetricsExportCard({
             Switch it off and on again to pick up the new ones.
           </p>
         )}
+      </div>
       </div>
     </Card>
   );

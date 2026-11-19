@@ -174,6 +174,7 @@ def export_metrics(payload: MetricsExportRequest,
 # rather than by whichever settings file happened to be loaded.
 
 class ExportSettings(BaseModel):
+    export_mode: str = "selected"
     #: The three dropdowns, stored so the card restores the selection a
     #: preset was saved against -- not just the group it resolved to.
     #: "Class helmet, YOLO26, size M" is what somebody chose; the group

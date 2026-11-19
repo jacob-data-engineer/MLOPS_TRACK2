@@ -1279,6 +1279,7 @@ export function getTrack2Metrics(): Promise<{ rows: Track2MetricsRow[] }> {
  * is its own call, so loading a preset named after something else cannot
  * quietly start writing to a shared bucket on a watch. */
 export interface Track2ExportSettings {
+  export_mode?: "auto" | "selected";
   /** The three dropdowns, stored so a preset restores the SELECTION it
    * was saved against and not merely the group that selection resolved
    * to. "Class helmet, YOLO26, size M" is what somebody chose; the group

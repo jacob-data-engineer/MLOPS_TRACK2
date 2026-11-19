@@ -36,11 +36,12 @@ def test_a_preset_round_trips(settings_dir):
     """Checks the fields it SET, not an exhaustive dict. An exhaustive
     comparison fails every time a field is added, which teaches whoever
     adds one to edit the assertion rather than to think about it."""
-    save("weekly", registry="helmet", generation="26", size="m",
+    save("weekly", export_mode="auto", registry="helmet", generation="26", size="m",
          group_name="yolo26m-helmet-detector", criterion="recall",
          bucket="track2-s3", prefix="exports")
     got = mod.load_export_settings(mod.ExportSettingsRequest(name="weekly"), session=None)["settings"]
     assert got["group_name"] == "yolo26m-helmet-detector"
+    assert got["export_mode"] == "auto"
     assert got["criterion"] == "recall"
     assert got["bucket"] == "track2-s3"
     assert got["prefix"] == "exports"
