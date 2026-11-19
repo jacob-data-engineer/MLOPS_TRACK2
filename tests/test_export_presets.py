@@ -47,6 +47,26 @@ def test_a_preset_round_trips(settings_dir):
     assert got["prefix"] == "exports"
 
 
+def test_comparison_models_and_metrics_round_trip_in_order(settings_dir):
+    versions = ["helmet/7", "vest/3", "helmet/2"]
+    save("comparison", comparison_versions=versions, comparison_metrics=["recall", "f1"])
+    got = mod.load_export_settings(mod.ExportSettingsRequest(name="comparison"), session=None)["settings"]
+    assert got["comparison_versions"] == versions
+    assert got["comparison_metrics"] == ["recall", "f1"]
+    save("comparison", comparison_versions=[], comparison_metrics=[])
+    got = mod.load_export_settings(mod.ExportSettingsRequest(name="comparison"), session=None)["settings"]
+    assert got["comparison_versions"] == []
+    assert got["comparison_metrics"] == []
+
+
+def test_old_file_loads_with_empty_comparison(settings_dir):
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "old.json").write_text(json.dumps({"settings": {"registry": "helmet"}}))
+    got = mod.load_export_settings(mod.ExportSettingsRequest(name="old"), session=None)["settings"]
+    assert got["comparison_versions"] == []
+    assert "recall" in got["comparison_metrics"]
+
+
 def test_it_lives_under_its_own_folder_not_the_pull_config(monkeypatch, tmp_path):
     """Same host volume -- so it survives a deploy -- different folder."""
     monkeypatch.setenv("PULL_CONTROL_SETTINGS_DIR", str(tmp_path))

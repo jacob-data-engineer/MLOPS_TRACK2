@@ -105,7 +105,7 @@ export function Track2ExportSettingsBar({
           setLoaded(name);
           setSaveAs("");
           setSavedAt(new Date().toLocaleString());
-          setNote(`Saved ${name}`);
+          setNote(`Saved ${name} with ${settings.comparison_versions?.length ?? 0} compared model(s)`);
           refreshFiles();
         })}
         className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40"
@@ -137,7 +137,7 @@ export function Track2ExportSettingsBar({
           onChange(got.settings);
           setLoaded(got.name);
           setSavedAt(got.saved_at ? new Date(got.saved_at).toLocaleString() : "");
-          setNote(`Loaded ${got.name}`);
+          setNote(`Loaded ${got.name} with ${got.settings.comparison_versions?.length ?? 0} compared model(s)`);
         })}
         className="rounded-md border border-black/15 px-2.5 py-1 font-medium text-ink-secondary disabled:opacity-40"
       >

@@ -175,6 +175,8 @@ def export_metrics(payload: MetricsExportRequest,
 
 class ExportSettings(BaseModel):
     export_mode: str = "selected"
+    comparison_versions: list[str] = []
+    comparison_metrics: list[str] = ["mAP50", "mAP50-95", "precision", "recall", "f1"]
     #: The three dropdowns, stored so the card restores the selection a
     #: preset was saved against -- not just the group it resolved to.
     #: "Class helmet, YOLO26, size M" is what somebody chose; the group

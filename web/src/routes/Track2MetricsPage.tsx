@@ -49,6 +49,8 @@ const MAX_COMPARE = 4;
  * download writes nothing anybody else can see -- the safe reading of
  * silence. */
 const EXPORT_DEFAULTS: Track2ExportSettings = {
+  comparison_versions: [],
+  comparison_metrics: ["mAP50", "mAP50-95", "precision", "recall", "f1"],
   export_mode: "selected",
   registry: "",
   generation: "",
@@ -238,8 +240,9 @@ export function Track2MetricsPage() {
   // would write something nobody was looking at.
   const [exportSettings, setExportSettings] =
     useState<Track2ExportSettings>(EXPORT_DEFAULTS);
-  const [selectedVersions, setSelectedVersions] = useState<string[]>([]);
-  const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(DEFAULT_METRIC_KEYS));
+  const selectedVersions = exportSettings.comparison_versions ?? [];
+  const selectedMetrics = new Set<MetricKey>((exportSettings.comparison_metrics ?? [...DEFAULT_METRIC_KEYS])
+    .filter((key): key is MetricKey => METRICS.some(m => m.key === key)));
   // When the rows were read. A training run that finishes while this page
   // is open changes nothing on it, and without a stated "as of" there is
   // no way to tell a page from five minutes ago from one from five hours
@@ -326,25 +329,28 @@ export function Track2MetricsPage() {
 
 
   function toggleMetric(key: MetricKey) {
-    setSelectedMetrics((current) => {
-      const next = new Set(current);
+    setExportSettings((current) => {
+      const next = new Set(current.comparison_metrics ?? [...DEFAULT_METRIC_KEYS]);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      return next;
+      return { ...current, comparison_metrics: [...next] };
     });
   }
 
   function toggleVersion(key: string) {
-    setSelectedVersions((current) => current.includes(key)
-      ? current.filter((k) => k !== key)
-      : current.length >= MAX_COMPARE ? current : [...current, key]);
+    setExportSettings((current) => {
+      const versions = current.comparison_versions ?? [];
+      return { ...current, comparison_versions: versions.includes(key)
+        ? versions.filter(k => k !== key)
+        : versions.length >= MAX_COMPARE ? versions : [...versions, key] };
+    });
   }
 
   function handleClear() {
     // The comparison only. This also reset the metric checkboxes, which
     // is not what the button next to "Comparing" says it does -- having
     // unticked three metrics to look at one, Clear put them all back.
-    setSelectedVersions([]);
+    setExportSettings(current => ({ ...current, comparison_versions: [] }));
   }
 
   /** Why the selected versions may not be comparable.
@@ -546,6 +552,8 @@ export function Track2MetricsPage() {
       {rows && (
         <div id="comparison" className="mb-5 scroll-mt-48">
           <Card title={"Comparison"}>
+            {rows && selectedVersions.some(key => !rows.some(row => rowKey(row) === key)) &&
+              <p className="mb-3 text-xs text-critical" role="alert">Some saved model versions are unavailable in the current registry. Their identifiers remain saved: {selectedVersions.filter(key => !rows.some(row => rowKey(row) === key)).join(", ")}. Refresh to retry or clear the comparison to remove them.</p>}
             <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1.5 border-b border-hairline pb-4">
               {METRICS.map(({ key, label, hint }) => (
                 <label
