@@ -41,6 +41,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const [generationFilter, setGenerationFilter] = useState("");
   const [sizeFilter, setSizeFilter] = useState("");
   const [showBy, setShowBy] = useState<"model" | "run">("model");
+  const [runOrder, setRunOrder] = useState<"desc" | "asc">("desc");
   const [runFilter, setRunFilter] = useState("");
   const [direct, setDirect] = useState<{label: string; url: string; uri: string}[]>([]);
   const cancel = useRef(false);
@@ -75,8 +76,18 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
     } catch (e) { setError(message(e)); }
     finally { setBusy(false); }
   }
-  const ranked = [...rows].sort((a, b) => (b.metrics?.[metric] ?? -1) - (a.metrics?.[metric] ?? -1)
-    || a.model_package_arn.localeCompare(b.model_package_arn));
+  const ranked = [...rows].sort((a, b) => {
+    if (browseAll && showBy === "run") {
+      const left = runs[a.model_package_arn]?.run_number;
+      const right = runs[b.model_package_arn]?.run_number;
+      if (left == null && right != null) return 1;
+      if (right == null && left != null) return -1;
+      return (left != null && right != null ? (left - right) * (runOrder === "asc" ? 1 : -1) : 0)
+        || a.model_package_arn.localeCompare(b.model_package_arn);
+    }
+    return (b.metrics?.[metric] ?? -1) - (a.metrics?.[metric] ?? -1)
+      || a.model_package_arn.localeCompare(b.model_package_arn);
+  });
   const nameOf = (row: Track2MetricsRow) => runs[row.model_package_arn]?.detector || row.registry;
   const displayName = (name: string) => {
     const definition = detectors.find(d => d.slug === name);
@@ -93,7 +104,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const runOptions = [...new Map(matchingModels.flatMap(row => {
     const run = runs[row.model_package_arn];
     return run ? [[run.run_id, run] as const] : [];
-  })).values()].sort((a, b) => b.run_number - a.run_number);
+  })).values()].sort((a, b) => (a.run_number - b.run_number) * (runOrder === "asc" ? 1 : -1));
   const visibleRows = matchingModels.filter(row => (showBy !== "run" || !runFilter || runs[row.model_package_arn]?.run_id === runFilter)
     && `${nameOf(row)} ${displayName(nameOf(row))} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const selectionKey = rows.map(r => r.model_package_arn).join("|");
@@ -183,10 +194,15 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
         <span>{visibleRows.length} shown</span>
       </div>}
       {browseAll && modelNamesError && <p role="status" className="text-xs text-critical">{modelNamesError}</p>}
-      <label className="text-sm font-medium">{browseAll?"Sort models by":"Rank selected models by"} <select aria-label="Ranking metric" value={metric} onChange={e => setMetric(e.target.value as Metric)} className="ml-2 rounded border p-1">
+      {browseAll && showBy === "run" ? <>
+        <label className="text-sm font-medium">Sort by run number <select aria-label="Run number sort order" value={runOrder} onChange={e => setRunOrder(e.target.value as "asc" | "desc")} className="ml-2 rounded border p-1">
+          <option value="desc">Descending (highest first)</option><option value="asc">Ascending (lowest first)</option>
+        </select></label>
+        <p className="text-xs text-ink-muted">Sorted by run number only. Models without a recorded run appear last.</p>
+      </> : <><label className="text-sm font-medium">{browseAll?"Sort models by":"Rank selected models by"} <select aria-label="Ranking metric" value={metric} onChange={e => setMetric(e.target.value as Metric)} className="ml-2 rounded border p-1">
         {METRICS.map(key => <option key={key}>{key}</option>)}
       </select></label>
-      <p className="text-xs text-ink-muted">Highest recorded score first; missing scores are unranked. Ties share a score. Choose any model to export.</p>
+      <p className="text-xs text-ink-muted">Highest recorded score first; missing scores are unranked. Ties share a score. Choose any model to export.</p></>}
       <p className="text-xs">{rows.length} available models · {chosen.filter(a=>rows.some(r=>r.model_package_arn===a)).length} selected for export</p>
       <div className="max-h-[calc(22rem+2px)] overflow-auto rounded border border-hairline" tabIndex={0} role="region" aria-label="Models available for manual export">
         <table className="tabular min-w-full whitespace-nowrap text-xs [&_tr]:h-8">

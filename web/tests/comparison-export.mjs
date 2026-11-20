@@ -68,6 +68,13 @@ test('comparison ranks models and exports exact selections with independent opti
     assert.equal(await page.getByLabel('Filter manual models by YOLO type').count(), 0);
     assert.equal(await page.getByLabel('Filter manual models by size').count(), 0);
     assert.equal(await page.locator('tbody tr').count(), 2);
+    assert.equal(await page.getByLabel('Ranking metric').count(), 0);
+    assert.match(await page.locator('tbody tr').first().innerText(), /Run 2/);
+    await page.getByLabel('Run number sort order').selectOption('asc');
+    assert.match(await page.locator('tbody tr').first().innerText(), /Run 1/);
+    assert.deepEqual(await page.getByLabel('Filter manual models by run').locator('option').allTextContents(), ['All runs', 'Run 1', 'Run 2']);
+    await page.getByLabel('Run number sort order').selectOption('desc');
+    assert.match(await page.locator('tbody tr').first().innerText(), /Run 2/);
     await page.getByLabel('Filter manual models by run').selectOption('r2');
     assert.equal(await page.locator('tbody tr').count(), 1);
     assert.equal(await page.locator('tbody input').isChecked(), true);
