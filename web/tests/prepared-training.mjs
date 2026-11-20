@@ -53,7 +53,7 @@ test('training supports prepared data and checked saved SQL data', async () => {
       else if (url.pathname.endsWith('/queue-after-pull')) response = {settings:{enabled:false,triggers:[]},next:{act:false,reason:'Manual'}};
       else if (url.pathname.endsWith('/retrain')) response = {settings:{enabled:false},next:{}};
       else if (url.pathname.endsWith('/retrain/preparation')) response = {job};
-      else if (url.pathname.endsWith('/versions')) {await datasetsGate; response = {versions:[{version_id:'dv-saved',created_at:'2026-11-17T18:30:00Z',
+      else if (url.pathname.endsWith('/versions')) {await datasetsGate; response = {versions:[{version_id:'dv-saved',run_number:70,created_at:'2026-11-17T18:30:00Z',
         train_images:100,val_images:20,classes:['helmet'],central_recipe:{store_uri:'s3://original/store'}}]};}
       else if (url.pathname.endsWith('/audit')) {await historyGate; response = {audits:[{id:'run-old',run_number:10,detector_slug:'helmet',
         dataset_version_id:'dv-saved',submitted_at:'2026-11-17',status:'Succeeded',generation:'11',size:'s',
@@ -97,6 +97,7 @@ test('training supports prepared data and checked saved SQL data', async () => {
     assert.equal(await page.getByLabel('Saved dataset record').isDisabled(),true);
     assert.equal(await loading.evaluate(el => getComputedStyle(el).animationName),'pulse');
     releaseDatasets();
+    assert.match(await page.locator('option[value="dv-saved"]').textContent(), /^Run 70/);
     await page.getByLabel('Saved dataset record').selectOption('dv-saved');
     assert.equal(await loading.count(),0);
     // The picker becomes usable before the slower source-run history returns.

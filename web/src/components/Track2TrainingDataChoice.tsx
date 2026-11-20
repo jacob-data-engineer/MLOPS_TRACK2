@@ -71,7 +71,7 @@ export function Track2TrainingDataChoice({value, onChange, detectorSlug, classKe
         onChange={e => onChange({...value,id:e.target.value,checked:false})}>
         <option value="">{loadingDatasets ? 'Loading datasets…' : datasetError ? 'Could not load datasets' : versions.length ? 'Choose a dataset' : 'No saved datasets available'}</option>
         {value.id && !selected && <option value={value.id}>{value.id}</option>}
-        {versions.map(v => <option key={v.version_id} value={v.version_id}>{formatDatasetDateTime(v.created_at)} · {v.version_id} · {v.train_images ?? 0} train / {v.val_images ?? 0} validation</option>)}
+        {versions.map(v => <option key={v.version_id} value={v.version_id}>{v.run_number != null ? `Run ${v.run_number}` : 'No run recorded'} · {formatDatasetDateTime(v.created_at)} · {v.version_id} · {v.train_images ?? 0} train / {v.val_images ?? 0} validation</option>)}
       </select>
       <ChevronDown aria-hidden="true" size={22} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink" />
       </span></label>
@@ -84,7 +84,7 @@ export function Track2TrainingDataChoice({value, onChange, detectorSlug, classKe
       {selected && <div className="my-2 space-y-1 break-all">
         <p>Dataset record ID: {selected.version_id}</p>
         <p>Created: {formatDatasetDateTime(selected.created_at)}</p>
-        <p>Source run: {sourceRun ? `${sourceRun.run_number ?? sourceRun.id} · ${formatDatasetDateTime(sourceRun.submitted_at)}` : selected.run_id || 'No run recorded'}</p>
+        <p>Source run: {selected.run_number != null ? `Run ${selected.run_number}` : sourceRun ? `Run ${sourceRun.run_number ?? sourceRun.id} · ${formatDatasetDateTime(sourceRun.submitted_at)}` : selected.run_id || 'No run recorded'}</p>
         <p>{selected.train_images} training / {selected.val_images} validation images</p>
         <p>Classes: {selected.classes?.join(', ')}</p>
         <p>Original central store: {checked?.store_uri || selected.central_recipe?.store_uri || 'Not recorded — this older dataset may not support reuse.'}</p>

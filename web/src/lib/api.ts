@@ -3246,6 +3246,7 @@ export interface Track2DatasetVersion {
   central_recipe?: { store_uri: string };
   validation_selection_id?: string;
   version_id: string;
+  run_number?: number | null;
   created_at: string;
   trigger?: string;
   sources?: string[];

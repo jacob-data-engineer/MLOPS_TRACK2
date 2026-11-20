@@ -1294,6 +1294,9 @@ def list_versions(limit: int = 30, summary: bool = False, session=Depends(requir
         if summary:
             keys = ('version_id', 'created_at', 'run_id', 'train_images', 'val_images', 'classes', 'central_recipe')
             versions = [{key: v[key] for key in keys if key in v} for v in versions]
+            from ..data.catalog_view import run_numbers
+            numbers = run_numbers(list({v['run_id'] for v in versions if v.get('run_id')}))
+            versions = [{**v, 'run_number': numbers.get(v.get('run_id'))} for v in versions]
         return {"versions": versions}
     except Exception as exc:                                       # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not list versions: {exc}")
