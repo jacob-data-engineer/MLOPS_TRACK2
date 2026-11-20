@@ -10,7 +10,6 @@ import { formatDayTime } from "../lib/format";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { Track2DatasetVersionsPanel } from "../components/Track2DatasetVersionsPanel";
 import { ProgressBar } from "../components/ProgressBar";
 import { Track2TrainingRunProgress } from "../components/Track2TrainingRunProgress";
 import { StatTile } from "../components/StatTile";
@@ -1726,10 +1725,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             )}
             <Track2TrainingHistory reloadKey={historyKey} />
           </Card>
-
-          {/* Every queued run trains on a frozen dataset version
-              (2026-10-26) -- listed here, readable, and queueable again. */}
-          <Track2DatasetVersionsPanel />
 
           {/* Destructive, and it can now reach outside this app -- so it
               names what goes, says what does not, and carries the
