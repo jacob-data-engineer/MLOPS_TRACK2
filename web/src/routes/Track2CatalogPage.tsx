@@ -289,7 +289,7 @@ export function Track2CatalogPage({ refreshKey = 0, openRun = null }: {
     <div>
       <h2 className="mb-1 flex items-center gap-2 text-xl font-semibold text-ink">
         <Library size={20} className="text-accent" strokeWidth={2} />
-        Track2 Data Catalog
+        Track 2 Run Central
       </h2>
       <p className="mb-2 max-w-3xl text-sm text-ink-secondary">
         Every training run and every dataset version, with the files each used. Pick one to review
