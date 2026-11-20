@@ -8,13 +8,13 @@ change settings or schedules, export files or delete anything -- there is no
 path from its output to any of those.
 
 OFF UNTIL ENABLED. `HELP_CHAT_ENABLED` must be "true" (and the app role
-allowed `bedrock-mantle:CreateInference` on the model) before a request is
+allowed `bedrock:InvokeModel` on the model's inference profile) before a request is
 sent to Bedrock. Until then every chat request is answered 503 with the
 reason, and nothing is billed.
 
 Configuration, all environment variables:
   HELP_CHAT_ENABLED      "true" to call the model (default off)
-  HELP_CHAT_MODEL_ID     Bedrock model ID (default anthropic.claude-opus-5-5)
+  HELP_CHAT_MODEL_ID     Bedrock inference profile (default global.anthropic.claude-opus-5-5)
   HELP_CHAT_REGION       Bedrock region (default AWS_REGION, else ap-southeast-1)
   HELP_CHAT_MAX_TOKENS   answer ceiling (default 1500)
   HELP_CHAT_TIMEOUT      seconds per model call (default 45)
@@ -32,7 +32,12 @@ import time
 
 from . import docs
 
-DEFAULT_MODEL = "anthropic.claude-opus-5-5"
+#: Through Bedrock's `bedrock-runtime` endpoint and the GLOBAL inference
+#: profile -- the only route this account is served on in ap-southeast-1
+#: (checked 2026-11-20: every `anthropic.*` ID on the bedrock-mantle
+#: endpoint answered 404 here, while this profile answered in 1.7 s). The
+#: global profile may run a request in another AWS region.
+DEFAULT_MODEL = "global.anthropic.claude-opus-5-5"
 
 #: Hard limits on what one request may carry.
 MAX_MESSAGE_CHARS = 2000
@@ -217,10 +222,10 @@ def build_request(messages: list, context: dict, cfg: dict) -> tuple[dict, list[
 
 
 def _client(cfg: dict):
-    from anthropic import AnthropicBedrockMantle
+    from anthropic import AnthropicBedrock
     # The app's runtime IAM role, through the default AWS credential chain.
     # No key is configured here and none ever reaches the browser.
-    return AnthropicBedrockMantle(aws_region=cfg["region"], timeout=cfg["timeout"], max_retries=1)
+    return AnthropicBedrock(aws_region=cfg["region"], timeout=cfg["timeout"], max_retries=1)
 
 
 def answer(messages: list, context: dict, *, session_key: str) -> dict:
@@ -239,7 +244,7 @@ def answer(messages: list, context: dict, *, session_key: str) -> dict:
     except anthropic.PermissionDeniedError:
         _log("denied", started)
         raise HelpUnavailable("The app is not permitted to use the help model yet: its AWS role needs "
-                              "bedrock-mantle:CreateInference on the model, or model access is not granted.")
+                              "bedrock:InvokeModel on the model's inference profile, or model access is not granted.")
     except anthropic.NotFoundError:
         _log("not_found", started)
         raise HelpUnavailable(f"The help model {cfg['model']} is not available in {cfg['region']}.")

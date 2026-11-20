@@ -10,15 +10,19 @@ documentation" (HelpDocsTab) to upload .md/.txt (200 KB, 50 docs) to
 `app_guide.json` FROM web/src (rerun `python -m ppe_pipeline_api.help_guide.build`
 after UI changes; a test fails if stale), `docs.py` (uploads + keyword
 retrieval, 24k-char budget), `chat.py` (Bedrock via anthropic[bedrock]
-AnthropicBedrockMantle, NO tools, redaction, 8/min 150/day per session,
+AnthropicBedrock on bedrock-runtime, NO tools, redaction, 8/min 150/day per session,
 45 s timeout, errors mapped, metadata-only logging). Routes
 /track2/assistant/{status,chat,docs}. Env: HELP_CHAT_ENABLED (default false),
-HELP_CHAT_MODEL_ID (default anthropic.claude-opus-5-5), HELP_CHAT_REGION
+HELP_CHAT_MODEL_ID (default global.anthropic.claude-opus-5-5), HELP_CHAT_REGION
 (default ap-southeast-1) -- passed by deploy.sh.
-TO ENABLE (needs approval): 1) Bedrock model access for the chosen model;
-2) add `bedrock-mantle:CreateInference` to role `track2-yolo-review-host`
-(simulation on 20 Nov: implicitDeny for it and bedrock:InvokeModel);
-3) redeploy dev with HELP_CHAT_ENABLED=true.
+ENABLED ON DEV 20 Nov at the user's request ("activate this"). The
+bedrock-mantle endpoint 404s for every anthropic.* ID in this account, so it
+uses bedrock-runtime + inference profile global.anthropic.claude-opus-5-5.
+Inline policy `track2-help-assistant-bedrock` on role track2-yolo-review-host
+(made by CLI, not Terraform -- platform stack has drift): bedrock:InvokeModel
+(+WithResponseStream) on that profile and the anthropic.claude-opus-5-5
+foundation model. Dev is redeployed with HELP_CHAT_ENABLED=true; any later
+plain dev deploy turns it OFF again unless HELP_CHAT_ENABLED=true is passed.
 
 Compare -> best -> export, linked to the run (18 Nov, dev `20261118-120431`).
 Run numbers (from `/catalog/runs-by-model`, keyed on package ARN) on the
