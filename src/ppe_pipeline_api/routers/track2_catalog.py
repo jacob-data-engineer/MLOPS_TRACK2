@@ -141,6 +141,17 @@ def export_run_weights(run_id: str, payload: WeightsExportRequest, session=Depen
         metadata_groups=payload.metadata_groups))
 
 
+@router.post("/exports/estimate")
+def estimate_export(payload: ExportRequest, session=Depends(require_session)) -> dict:
+    from ..data import export_estimate
+    return _guard(lambda: export_estimate.estimate(
+        payload.kind, payload.id, destination=payload.destination,
+        bucket=payload.bucket, prefix=payload.prefix, format=payload.format,
+        include_metadata=payload.include_metadata, include_images=payload.include_images,
+        include_model=payload.include_model, metadata_groups=payload.metadata_groups,
+        model_package_arn=payload.model_package_arn))
+
+
 @router.post("/exports")
 def start_export(payload: ExportRequest, session=Depends(require_session)) -> dict:
     """Build a zip of a run or a dataset version, in the background."""

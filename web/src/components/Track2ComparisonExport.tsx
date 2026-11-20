@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, checkCatalogDataset, getTrack2CatalogMetadata, getTrack2CatalogExports,
-  type Track2ExportSettings, type ModelPackageOptions, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector, getTrack2Buckets, listTrack2Folders,
+  estimateTrack2CatalogExport, type PackageSizeEstimate, type Track2ExportSettings, type ModelPackageOptions, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector, getTrack2Buckets, listTrack2Folders,
   getTrack2CatalogExportUrl, startTrack2CatalogExport, type Track2MetricsRow,
   type Track2RunForModel, type Track2CatalogExport, type CatalogExportDestination } from "../lib/api";
 import { modelLabel } from "./Track2ModelPicker";
@@ -13,7 +13,7 @@ import { formatSgt } from "../lib/format";
 
 const METRICS = ["mAP50-95", "mAP50", "precision", "recall", "f1", "accuracy"] as const;
 type Metric = typeof METRICS[number];
-type Target = { row: Track2MetricsRow; run?: Track2RunForModel };
+type Target = { row: Track2MetricsRow; run?: Track2RunForModel; estimate?: PackageSizeEstimate };
 const message = (e: unknown) => e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "Export failed.";
 
 export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRun, settings, onChange }: {
@@ -121,7 +121,12 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
           warnings.push(`Run ${run.run_number}: ${availability.detail}`);
         }
         if (metadata && info.unavailable.length) warnings.push(`Run ${run.run_number}: metadata not recorded for ${info.unavailable.join(", ")}.`);
-        targets.push({ row, run });
+        let estimate: PackageSizeEstimate | undefined;
+        try {
+          estimate = await estimateTrack2CatalogExport("run", run.run_id, {...destination, format: destination.destination === "local" ? "zip" : destination.format,
+            include_images: images, include_model: model, include_metadata: metadata, metadata_groups: groups, model_package_arn: row.model_package_arn});
+        } catch { warnings.push(`Run ${run.run_number}: storage estimate unavailable. Required space is unknown.`); }
+        targets.push({ row, run, estimate });
       }
       if (!targets.length) throw new Error("Choose at least one model to export.");
       setNotes(warnings); setPreview(targets);
@@ -160,6 +165,9 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
     } catch (e) { setError(message(e)); }
     finally { setRunning(false); }
   }
+  const bytes = (value: number) => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(2)} GiB` : value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(2)} MiB` : `${(value / 1024).toFixed(1)} KiB`;
+  const sizeComplete = preview.every(t => t.estimate?.recommended_bytes != null);
+  const totalSpace = preview.reduce((sum, t) => sum + (t.estimate?.recommended_bytes ?? 0), 0);
   const invalid = (!images && !model && !metadata) || (metadata && !groups.length)
     || (destination.destination === "s3" && !destination.bucket.trim());
   const button = "rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40";
@@ -250,6 +258,11 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
     {notes.map((note, i) => <p className="text-xs" key={i}>{note}</p>)}
     {preview.length > 0 && <div className="space-y-2 rounded border border-hairline p-3 text-xs">
       <p className="font-medium">Ready to export these exact versions:</p>
+      <table className="w-full text-left" aria-label="Package storage estimate"><thead><tr><th>Model / run</th><th>Files</th><th>Estimated package size</th><th>Suggested space</th></tr></thead>
+        <tbody>{preview.map(t => <tr key={t.row.model_package_arn} className="border-t border-hairline"><td>{modelLabel(t.row)} / {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint"}</td><td>{t.estimate?.files ?? "Unknown"}</td><td>{t.estimate?.estimated_bytes != null ? bytes(t.estimate.estimated_bytes) : `Unknown${t.estimate ? ` (${t.estimate.unknown_files} file sizes unavailable; ${bytes(t.estimate.source_bytes)} known)` : ""}`}</td><td>{t.estimate?.recommended_bytes != null ? bytes(t.estimate.recommended_bytes) : "Unknown"}</td></tr>)}</tbody>
+      </table>
+      <p className="font-medium">Total suggested space: {sizeComplete ? bytes(totalSpace) : "Unknown — one or more packages could not be fully measured"}</p>
+      <p>Includes estimated generated files and 10% headroom. ZIP exports are not compressed. Each model has its own package, so shared data is counted for each package. This estimates required storage; it does not check free space.</p>
       {preview.map(t => <p className="break-all" key={t.row.model_package_arn}>{modelLabel(t.row)} · {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint only"} · {t.row.model_package_arn}</p>)}
       <p>{model ? ".pt; " : ""}{images ? "images and labels; " : "dataset references only; "}{metadata ? `${groups.length} metadata categories; ` : ""}{destination.destination === "local" ? "downloadable ZIP" : `s3://${destination.bucket}/${destination.prefix}`}</p>
       <button className={button} disabled={running} onClick={() => void exportPackages()}>Export {preview.length} package(s)</button>

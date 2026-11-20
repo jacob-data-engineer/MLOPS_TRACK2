@@ -18,7 +18,7 @@ test('comparison ranks models and exports exact selections with independent opti
       return <Track2MetricsExportCard rows={rows} selectedRows={rows.slice(0,1)} settings={settings} onChange={setSettings} runsByArn={{'arn:1':{run_id:'r1',run_number:1,detector:'helmet'},'arn:2':{run_id:'r2',run_number:2,detector:'test-model'}}}/>;}
     createRoot(document.getElementById('root')!).render(<App/>);`);
   let server, browser;
-  const requests = []; let unavailable = false;
+  const requests = []; let unavailable = false; let unknownSize = false;
   const scheduleRequests=[]; const savedSchedules={}; const autoRequests=[];
   try {
     server = await createServer({root, server:{host:'127.0.0.1',port:0}}); await server.listen();
@@ -26,6 +26,7 @@ test('comparison ranks models and exports exact selections with independent opti
     const page = await browser.newPage({viewport:{width:1200,height:1000}});
     await page.route('**/track2/**', route => {
       const req = route.request(); const url = new URL(req.url());
+      if(url.pathname.endsWith('/exports/estimate')) return route.fulfill({json:{source_bytes:1000000,model_bytes:1000000,generated_bytes_estimate:10000,estimated_bytes:unknownSize ? null : 1010000,recommended_bytes:unknownSize ? null : 1111000,files:1,unknown_files:unknownSize ? 1 : 0,format:'zip',note:''}});
       if(url.pathname.endsWith('/selection/run')) {autoRequests.push(req.postDataJSON());return route.fulfill({json:{export_id:'auto-package',run_id:'auto-run',url:'',filename:'',written_to:''}});}
       if(url.pathname.endsWith('/exports') && url.searchParams.get('run_id')==='auto-run') return route.fulfill({json:{exports:[{id:'auto-package',label:'Run 1',state:'ready',format:'zip',files:3,bytes:100,missing:0}]}});
       if (url.pathname.endsWith('/models/detectors')) return route.fulfill({json:{detectors:[{slug:'helmet',label:'Helmet',classes:{0:'helmet'}},{slug:'test-model',label:'test_model',classes:{0:'a',1:'b',2:'c',3:'d',4:'e',5:'f'}}]}});
@@ -98,10 +99,18 @@ test('comparison ranks models and exports exact selections with independent opti
     await page.getByLabel('Actual images and labels').uncheck();
     await page.getByLabel('Metadata', {exact:true}).uncheck();
     await page.getByRole('button',{name:'Review selected packages'}).click();
+    await page.getByRole('table',{name:'Package storage estimate'}).waitFor();
+    assert.equal(await page.getByRole('table',{name:'Package storage estimate'}).locator('tbody tr').count(),2);
+    await page.getByText('Total suggested space: 2.12 MiB',{exact:true}).waitFor();
     await page.getByRole('button',{name:'Export 2 package(s)',exact:true}).click();
     await page.getByRole('button',{name:'Download ZIP',exact:true}).nth(1).waitFor();
     assert.deepEqual(requests.map(r=>r.model_package_arn), ['arn:1','arn:2']);
     assert.ok(requests.every(r=>r.include_model && !r.include_images && !r.include_metadata));
+    unknownSize=true;
+    await page.getByRole('button',{name:'Review selected packages'}).click();
+    await page.getByText('Total suggested space:',{exact:false}).filter({hasText:'Unknown'}).waitFor();
+    assert.match(await page.getByRole('table',{name:'Package storage estimate'}).innerText(),/file sizes unavailable/);
+    unknownSize=false;
     await page.getByLabel('Package destination').selectOption('s3');
     await page.getByLabel('Export bucket').fill('test-exports');
     await page.getByText('exports',{exact:true}).click();
@@ -111,6 +120,9 @@ test('comparison ranks models and exports exact selections with independent opti
     assert.equal(await page.getByLabel('Export prefix').inputValue(),'exports/helmet');
     await page.getByLabel('Package format').selectOption('folder');
     await page.getByRole('button',{name:'Review selected packages'}).click();
+    await page.getByRole('table',{name:'Package storage estimate'}).waitFor();
+    assert.equal(await page.getByRole('table',{name:'Package storage estimate'}).locator('tbody tr').count(),2);
+    await page.getByText('Total suggested space: 2.12 MiB',{exact:true}).waitFor();
     await page.getByRole('button',{name:'Export 2 package(s)',exact:true}).click();
     await page.getByRole('button',{name:'Review selected packages'}).waitFor({state:'visible'});
     await page.waitForFunction(() => !document.querySelector('fieldset[disabled]'));
@@ -118,6 +130,9 @@ test('comparison ranks models and exports exact selections with independent opti
     assert.equal(requests.length,4);
     await page.getByLabel('Package format').selectOption('zip');
     await page.getByRole('button',{name:'Review selected packages'}).click();
+    await page.getByRole('table',{name:'Package storage estimate'}).waitFor();
+    assert.equal(await page.getByRole('table',{name:'Package storage estimate'}).locator('tbody tr').count(),2);
+    await page.getByText('Total suggested space: 2.12 MiB',{exact:true}).waitFor();
     await page.getByRole('button',{name:'Export 2 package(s)',exact:true}).click();
     await page.waitForFunction(() => !document.querySelector('fieldset[disabled]'));
     assert.equal(requests.length,6);

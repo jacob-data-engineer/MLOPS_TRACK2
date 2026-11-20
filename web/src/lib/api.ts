@@ -4131,6 +4131,15 @@ export function inspectTrack2CatalogMetadata(file: File): Promise<CatalogMetadat
   return apiPostForm("/track2/catalog/metadata/inspect", form);
 }
 
+export interface PackageSizeEstimate {
+  source_bytes: number; model_bytes: number; generated_bytes_estimate: number;
+  estimated_bytes: number | null; recommended_bytes: number | null;
+  files: number; unknown_files: number; format: string; note: string;
+}
+export function estimateTrack2CatalogExport(kind: "run" | "version", id: string, options: CatalogExportDestination): Promise<PackageSizeEstimate> {
+  return apiPost("/track2/catalog/exports/estimate", {kind, id, ...options});
+}
+
 export function startTrack2CatalogExport(kind: "run" | "version", id: string,
   options?: CatalogExportDestination): Promise<{
   id: string; label: string; state: string;
