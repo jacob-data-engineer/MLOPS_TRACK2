@@ -91,6 +91,16 @@ def run_numbers(run_ids: list[str]) -> dict[str, int]:
         f"SELECT run_id, run_number FROM training_runs WHERE run_id IN ({placeholders})",
         tuple(run_ids))}
 
+def dataset_run_numbers(version_ids: list[str]) -> dict[str, int]:
+    """Original training run for a dataset, independent of preparation IDs."""
+    if not version_ids or not catalog.configured():
+        return {}
+    placeholders = ', '.join(['%s'] * len(version_ids))
+    return {row['version_id']: row['run_number'] for row in _rows(
+        f'SELECT version_id, min(run_number) AS run_number FROM training_runs '
+        f'WHERE version_id IN ({placeholders}) GROUP BY version_id', tuple(version_ids))}
+
+
 def runs_by_model() -> dict[str, dict]:
     """Which run produced each registered version, keyed on package ARN.
 
