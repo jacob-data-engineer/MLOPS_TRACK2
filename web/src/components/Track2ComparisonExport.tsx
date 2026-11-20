@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, checkCatalogDataset, getTrack2CatalogMetadata, getTrack2CatalogExports,
-  type Track2ExportSettings, type ModelPackageOptions, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector,
+  type Track2ExportSettings, type ModelPackageOptions, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector, getTrack2Buckets, listTrack2Folders,
   getTrack2CatalogExportUrl, startTrack2CatalogExport, type Track2MetricsRow,
   type Track2RunForModel, type Track2CatalogExport, type CatalogExportDestination } from "../lib/api";
 import { modelLabel } from "./Track2ModelPicker";
 import { METADATA_CATEGORIES } from "./Track2CatalogMetadata";
 import { Track2ExportProgress } from "./Track2ExportProgress";
+import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
 import { isSeedVersion, statusLabel } from "../lib/slug";
 
 import { formatSgt } from "../lib/format";
@@ -35,6 +36,23 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const [preview, setPreview] = useState<Target[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [buckets, setBuckets] = useState<string[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
+  const [folderError, setFolderError] = useState("");
+  useEffect(() => {
+    if (destination.destination !== "s3") return;
+    let disposed = false;
+    getTrack2Buckets().then(result => { if (!disposed) setBuckets((result.buckets ?? []).map(b => b.name)); }).catch(() => {});
+    return () => { disposed = true; };
+  }, [destination.destination]);
+  useEffect(() => {
+    let disposed = false;
+    setFolders([]); setFolderError("");
+    if (destination.destination === "s3" && destination.bucket) listTrack2Folders(destination.bucket, destination.prefix)
+      .then(result => { if (!disposed) setFolders(result.folders ?? []); })
+      .catch(() => { if (!disposed) setFolderError("Could not list folders. You can still enter the destination folder above."); });
+    return () => { disposed = true; };
+  }, [destination.destination, destination.bucket, destination.prefix]);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [jobs, setJobs] = useState<Track2CatalogExport[]>([]);
@@ -212,8 +230,19 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
       </div>
       <p className="text-xs text-ink-muted">Each model gets its own package with data.yaml and a file manifest. Unselected dataset files are referenced only. Metadata is also embedded in the .pt when both are selected.</p>
       {metadata && <details><summary className="cursor-pointer text-xs">Metadata categories ({groups.length})</summary><div className="grid gap-1 text-xs md:grid-cols-2">{Object.keys(METADATA_CATEGORIES).map(g => <label key={g}><input type="checkbox" checked={groups.includes(g)} onChange={e => setGroups(old => e.target.checked ? [...old, g] : old.filter(x => x !== g))} /> {g}</label>)}</div></details>}
-      <div className="flex flex-wrap gap-2 text-xs"><select aria-label="Package destination" value={destination.destination} onChange={e => setDestination({ ...destination, destination: e.target.value as "local" | "s3" })}><option value="local">Download ZIP</option><option value="s3">S3</option></select>
-        {destination.destination === "s3" && <><input aria-label="Export bucket" placeholder="Bucket" value={destination.bucket} onChange={e => setDestination({ ...destination, bucket: e.target.value })} /><input aria-label="Export prefix" placeholder="Folder prefix" value={destination.prefix} onChange={e => setDestination({ ...destination, prefix: e.target.value })} /><select aria-label="Package format" value={destination.format} onChange={e => setDestination({ ...destination, format: e.target.value as "zip" | "folder" })}><option value="zip">ZIP</option><option value="folder">Folder</option></select></>}
+      <div className="space-y-3 rounded border border-hairline p-3 text-xs">
+        <label>Export destination <select className="rounded border p-1" aria-label="Package destination" value={destination.destination} onChange={e => setDestination({ ...destination, destination: e.target.value as "local" | "s3" })}><option value="local">Download ZIP to this computer</option><option value="s3">S3 bucket and folder</option></select></label>
+        {destination.destination === "s3" ? <>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label>Bucket <input className="mt-1 block w-full rounded border p-2" list="manual-export-buckets" aria-label="Export bucket" placeholder="Choose or enter a bucket" value={destination.bucket} onChange={e => setDestination({ ...destination, bucket: e.target.value, prefix: "" })} /><datalist id="manual-export-buckets">{buckets.map(bucket => <option key={bucket} value={bucket}/>)}</datalist></label>
+            <label>Folder (new or existing) <input className="mt-1 block w-full rounded border p-2" aria-label="Export prefix" placeholder="Folder path, or leave blank for bucket root" value={destination.prefix} onChange={e => setDestination({ ...destination, prefix: e.target.value.replace(/^\/+/, "") })} /></label>
+          </div>
+          {destination.bucket && <Track2S3FolderBrowser key={destination.bucket} folders={folders} prefix={destination.prefix} selected={destination.prefix} onNavigate={prefix => setDestination({...destination, prefix})} onSelect={prefix => setDestination({...destination, prefix})} allowCreate />}
+          {folderError && <p role="status">{folderError}</p>}
+          <label>Export as <select className="rounded border p-1" aria-label="Package format" value={destination.format} onChange={e => setDestination({ ...destination, format: e.target.value as "zip" | "folder" })}><option value="zip">ZIP file</option><option value="folder">Files directly into a folder</option></select></label>
+          <p className="break-all">Destination: s3://{destination.bucket || "[choose bucket]"}/{destination.prefix.replace(/\/+$/, "")}{destination.prefix ? "/" : ""}</p>
+          <p>Each model gets its own uniquely named {destination.format === "zip" ? "ZIP file" : "subfolder"} inside this folder.</p>
+        </> : <p>Your browser controls the download location. Choose S3 bucket and folder to export ZIP files or unpacked files into a specific folder.</p>}
       </div>
       <button className={button} disabled={invalid || !ranked.some(r => chosen.includes(r.model_package_arn))} onClick={() => void review(chosen)}>{busy ? "Checking availability..." : "Review selected packages"}</button>
       <p className="text-xs text-muted">Package options are saved with the named file using Save at the top of this page.</p>

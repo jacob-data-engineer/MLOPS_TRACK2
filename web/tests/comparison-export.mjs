@@ -29,6 +29,7 @@ test('comparison ranks models and exports exact selections with independent opti
       if(url.pathname.endsWith('/selection/run')) {autoRequests.push(req.postDataJSON());return route.fulfill({json:{export_id:'auto-package',run_id:'auto-run',url:'',filename:'',written_to:''}});}
       if(url.pathname.endsWith('/exports') && url.searchParams.get('run_id')==='auto-run') return route.fulfill({json:{exports:[{id:'auto-package',label:'Run 1',state:'ready',format:'zip',files:3,bytes:100,missing:0}]}});
       if (url.pathname.endsWith('/models/detectors')) return route.fulfill({json:{detectors:[{slug:'helmet',label:'Helmet',classes:{0:'helmet'}},{slug:'test-model',label:'test_model',classes:{0:'a',1:'b',2:'c',3:'d',4:'e',5:'f'}}]}});
+      if (url.pathname.endsWith('/folders')) return route.fulfill({json:{folders:req.postDataJSON().prefix ? [] : ['exports']}});
       if (url.pathname.endsWith('/pull-control')) return route.fulfill({json:{config:{}}});
       if (url.pathname.endsWith('/export/schedules')) return route.fulfill({json:{schedules:Object.values(savedSchedules)}});
       if (url.pathname.includes('/export/schedules/')) {
@@ -101,6 +102,26 @@ test('comparison ranks models and exports exact selections with independent opti
     await page.getByRole('button',{name:'Download ZIP',exact:true}).nth(1).waitFor();
     assert.deepEqual(requests.map(r=>r.model_package_arn), ['arn:1','arn:2']);
     assert.ok(requests.every(r=>r.include_model && !r.include_images && !r.include_metadata));
+    await page.getByLabel('Package destination').selectOption('s3');
+    await page.getByLabel('Export bucket').fill('test-exports');
+    await page.getByText('exports',{exact:true}).click();
+    await page.getByLabel('Export prefix').evaluate(el => { if(el.value !== 'exports') throw new Error('Folder selection was not applied'); });
+    await page.getByPlaceholder('New folder name...').fill('helmet');
+    await page.getByRole('button',{name:'Create & use',exact:true}).click();
+    assert.equal(await page.getByLabel('Export prefix').inputValue(),'exports/helmet');
+    await page.getByLabel('Package format').selectOption('folder');
+    await page.getByRole('button',{name:'Review selected packages'}).click();
+    await page.getByRole('button',{name:'Export 2 package(s)',exact:true}).click();
+    await page.getByRole('button',{name:'Review selected packages'}).waitFor({state:'visible'});
+    await page.waitForFunction(() => !document.querySelector('fieldset[disabled]'));
+    assert.ok(requests.slice(2).every(r=>r.destination==='s3' && r.bucket==='test-exports' && r.prefix==='exports/helmet' && r.format==='folder'));
+    assert.equal(requests.length,4);
+    await page.getByLabel('Package format').selectOption('zip');
+    await page.getByRole('button',{name:'Review selected packages'}).click();
+    await page.getByRole('button',{name:'Export 2 package(s)',exact:true}).click();
+    await page.waitForFunction(() => !document.querySelector('fieldset[disabled]'));
+    assert.equal(requests.length,6);
+    assert.ok(requests.slice(4).every(r=>r.prefix==='exports/helmet' && r.format==='zip'));
     unavailable=true;
     await page.getByRole('button',{name:'Review selected packages'}).click();
     await page.getByRole('alert').filter({hasText:'no published checkpoint'}).waitFor();
