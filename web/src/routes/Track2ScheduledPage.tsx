@@ -2,7 +2,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "../components/Card";
-import { Track2OtherSchedules } from "../components/Track2OtherSchedules";
+import { useOtherSchedules } from "../components/Track2OtherSchedules";
 import { formatDayTime } from "../lib/format";
 import {
   ApiError,
@@ -27,6 +27,7 @@ import {
  * Everything is in Singapore time, bucketed by SGT date.
  */
 
+type CalendarEvent = Omit<Track2ScheduledEvent, "kind"> & {kind: "pull" | "train" | "sql" | "export"; details?: string};
 const WINDOW_DAYS = 92;
 const SGT_MS = 8 * 3600 * 1000;
 const DAY_MS = 24 * 3600 * 1000;
@@ -90,20 +91,20 @@ function writePicks(picks: string[] | "*") {
 }
 
 /** The pop-up on hover: which file, what kind of run, and from what. */
-function EventPopup({ ev, color }: { ev: Track2ScheduledEvent; color: string }) {
+function EventPopup({ ev, color }: { ev: CalendarEvent; color: string }) {
   const train = ev.kind === "train";
   return (
-    <div className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-sm border border-hairline bg-surface p-2 text-xs text-ink shadow-lg group-hover:block">
+    <div role="tooltip" className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-sm border border-hairline bg-surface p-2 text-xs text-ink shadow-lg group-hover:block group-focus-within:block">
       <p className="flex items-center gap-1.5 font-medium">
         <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} />
         <span className="tabular break-all">{ev.file}</span>
       </p>
       <p className={ev.live ? "text-accent" : "text-ink-muted"}>
-        {ev.live ? "Loaded -- this runs" : "Not loaded -- would run if this file were loaded"}
+        {ev.kind === "sql" || ev.kind === "export" ? "Enabled schedule" : ev.live ? "Loaded -- this runs" : "Not loaded -- would run if this file were loaded"}
       </p>
       <p className="mt-1 tabular">{formatDayTime(ev.at)}</p>
       <p>{ev.label}</p>
-      {train ? (
+      {ev.details ? <p className="mt-1">{ev.details}</p> : train ? (
         <div className="mt-1">
           <p className="text-ink-muted">Trains on:</p>
           {ev.sources.length ? (
@@ -125,10 +126,10 @@ function EventPopup({ ev, color }: { ev: Track2ScheduledEvent; color: string }) 
   );
 }
 
-function EventLine({ ev, color, compact }: { ev: Track2ScheduledEvent; color: string; compact?: boolean }) {
+function EventLine({ ev, color, compact }: { ev: CalendarEvent; color: string; compact?: boolean }) {
   const train = ev.kind === "train";
   return (
-    <div className="group relative">
+    <div className="group relative" tabIndex={0} aria-label={`${ev.label}: ${ev.file}, ${formatDayTime(ev.at)}`}>
       <div
         className={`flex items-center gap-1 rounded-sm border-l-[3px] px-1 py-0.5 text-[11px] leading-4 ${
           train ? "bg-accent-subtle text-ink" : "bg-black/[0.04] text-ink-secondary"} ${
@@ -136,7 +137,7 @@ function EventLine({ ev, color, compact }: { ev: Track2ScheduledEvent; color: st
         style={{ borderLeftColor: color }}
       >
         <span className="tabular">{sgtClock(ev.at)}</span>
-        <span className="shrink-0">{train ? "Train" : "Pull"}</span>
+        <span className="shrink-0">{ev.kind === "sql" ? "SQL pull" : ev.kind === "export" ? "Export" : train ? "Train" : "Pull"}</span>
         <span className="truncate text-ink-muted">{compact ? "" : "· "}{ev.file}</span>
       </div>
       <EventPopup ev={ev} color={color} />
@@ -147,7 +148,7 @@ function EventLine({ ev, color, compact }: { ev: Track2ScheduledEvent; color: st
 export function Track2ScheduledPage() {
   const [data, setData] = useState<Track2Scheduled | null>(null);
   const [error, setError] = useState("");
-  const [view, setView] = useState<"week" | "month">("week");
+  const {jobs, errors: otherErrors} = useOtherSchedules();
   const [offset, setOffset] = useState(0);
   const [picks, setPicks] = useState<string[] | "*">(readPicks);
   const [loading, setLoading] = useState(false);
@@ -181,10 +182,23 @@ export function Track2ScheduledPage() {
   }, [data]);
 
   const byDay = useMemo(() => {
-    const out: Record<string, Track2ScheduledEvent[]> = {};
-    for (const ev of data?.events ?? []) (out[sgtKey(Date.parse(ev.at))] ??= []).push(ev);
+    const out: Record<string, CalendarEvent[]> = {};
+    const add = (ev: CalendarEvent) => (out[sgtKey(Date.parse(ev.at))] ??= []).push(ev);
+    if (showTraining) for (const ev of data?.events ?? []) add(ev);
+    const start = data ? Date.parse(data.now) : Date.now();
+    const end = data ? Date.parse(data.until) : start + WINDOW_DAYS * DAY_MS;
+    for (const job of jobs) {
+      if (!job.enabled || !job.next || !(job.kind === "sql" ? showSql : showExports)) continue;
+      const interval = Math.max(1, job.everyDays || 1) * DAY_MS;
+      let at = Date.parse(job.next);
+      if (!Number.isFinite(at)) continue;
+      if (at < start) at += Math.ceil((start - at) / interval) * interval;
+      for (; at <= end; at += interval) add({at: new Date(at).toISOString(), kind: job.kind, file: job.file, label: job.label, sources: [], live: true, details: job.details});
+    }
+    for (const events of Object.values(out)) events.sort((a,b) => a.at.localeCompare(b.at));
     return out;
-  }, [data]);
+  }, [data, jobs, showTraining, showSql, showExports]);
+  const undated = jobs.filter(job => (!job.enabled || !job.next) && (job.kind === "sql" ? showSql : showExports));
 
   const nowMs = data ? Date.parse(data.now) : Date.now();
   const todayKey = sgtKey(nowMs);
@@ -192,24 +206,12 @@ export function Track2ScheduledPage() {
   const liveName = data?.files.find((f) => f.live)?.name ?? "";
   const savedOthers = (data?.available ?? []).filter((n) => n !== liveName);
 
-  let days: number[] = [];
-  let heading = "";
-  let inMonth = (_ms: number) => true;
-  if (view === "week") {
-    const start = mondayOf(nowMs) + offset * 7 * DAY_MS;
-    days = Array.from({ length: 7 }, (_, i) => start + i * DAY_MS);
-    const a = dayLabel(days[0]);
-    const b = dayLabel(days[6]);
-    heading = `${a.day} ${a.month} – ${b.day} ${b.month}`;
-  } else {
-    const first = monthStart(nowMs, offset);
-    const firstLocal = new Date(first + SGT_MS);
-    heading = `${MONTHS[firstLocal.getUTCMonth()]} ${firstLocal.getUTCFullYear()}`;
-    const gridStart = mondayOf(first);
-    days = Array.from({ length: 42 }, (_, i) => gridStart + i * DAY_MS);
-    const month = firstLocal.getUTCMonth();
-    inMonth = (ms) => new Date(ms + SGT_MS).getUTCMonth() === month;
-  }
+  const first = monthStart(nowMs, offset);
+  const firstLocal = new Date(first + SGT_MS);
+  const heading = `${MONTHS[firstLocal.getUTCMonth()]} ${firstLocal.getUTCFullYear()}`;
+  const gridStart = mondayOf(first);
+  const days = Array.from({ length: 42 }, (_, i) => gridStart + i * DAY_MS);
+  const inMonth = (ms: number) => new Date(ms + SGT_MS).getUTCMonth() === firstLocal.getUTCMonth();
   const lastKey = sgtKey(days[days.length - 1]);
   const pastWindow = untilKey !== "" && lastKey > untilKey;
 
@@ -226,7 +228,7 @@ export function Track2ScheduledPage() {
         Scheduled jobs and their settings files, in Singapore time. Display toggles do not enable or disable jobs.
         For Multi-Auto Training, only the <strong>loaded</strong> settings file actually runs; any other
         saved Multi-Auto Training (_AT) file picked below is shown as what it would run if it were
-        loaded. Hover over a slot to see what that run trains on. Edit training settings on{" "}
+        loaded. Hover over a calendar entry to see its purpose, settings file or record, and schedule details. Edit training settings on{" "}
         <Link to="/track2/multi-auto-training" className="underline decoration-dotted underline-offset-2 hover:text-ink">
           Multi-Auto Training
         </Link>. SQL and export schedules run independently and are managed on their respective pages.
@@ -237,8 +239,7 @@ export function Track2ScheduledPage() {
         <label><input type="checkbox" checked={showSql} onChange={e => setShowSql(e.target.checked)} /> SQL pulls</label>
         <label><input type="checkbox" checked={showExports} onChange={e => setShowExports(e.target.checked)} /> Model exports</label>
       </fieldset>
-      {showSql && <Track2OtherSchedules kind="sql" />}
-      {showExports && <Track2OtherSchedules kind="exports" />}
+      {otherErrors.map(message => <p key={message} role="alert" className="text-xs text-critical">{message}</p>)}
 
       {error && (
         <p className="mb-4 rounded-sm border border-critical/30 bg-critical-subtle px-4 py-3 text-sm text-critical">{error}</p>
@@ -249,9 +250,9 @@ export function Track2ScheduledPage() {
         </p>
       )}
 
-      {data && showTraining && (
+      {data && (
         <>
-          <Card title="Multi-Auto Training schedules" collapsible={false}>
+          <div hidden={!showTraining}><Card title="Training files shown in calendar">
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
               <span className="text-ink-muted">Show beside the loaded file:</span>
               <label className="flex items-center gap-1 font-medium text-ink">
@@ -274,62 +275,20 @@ export function Track2ScheduledPage() {
               {loading && <Loader2 size={13} className="animate-spin text-ink-muted" />}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="text-ink-muted">
-                  <tr>
-                    <th className="py-1 pr-3 font-normal">File</th>
-                    <th className="py-1 pr-3 font-normal">Next pull (SGT)</th>
-                    <th className="py-1 pr-3 font-normal">Next training run (SGT)</th>
-                    <th className="py-1 pr-3 font-normal">Kind of run (data it trains on)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.files.map((f) => (
-                    <tr key={f.name} className="border-t border-hairline align-top">
-                      <td className="py-1.5 pr-3">
-                        <span className="flex items-center gap-1.5">
-                          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                                style={{ background: colorOf(f.name) }} />
-                          <span className="tabular text-ink">{f.name}</span>
-                          <span className={`rounded-sm px-1 text-[10px] font-medium ${
-                            f.live ? "bg-accent text-white" : "border border-black/15 text-ink-muted"}`}>
-                            {f.live ? "loaded" : "not loaded"}
-                          </span>
-                        </span>
-                        {f.error && <p className="text-critical">{f.error}</p>}
-                        {f.notes.map((n) => <p key={n} className="text-ink-muted">{n}</p>)}
-                      </td>
-                      <td className="tabular py-1.5 pr-3 text-ink">
-                        {f.next_pull ? formatDayTime(f.next_pull.at) : <span className="text-ink-muted">none scheduled</span>}
-                      </td>
-                      <td className="tabular py-1.5 pr-3 text-ink">
-                        {f.next ? formatDayTime(f.next.at) : <span className="text-ink-muted">none scheduled</span>}
-                      </td>
-                      <td className="py-1.5 pr-3 text-ink">
-                        {f.error ? "" : f.sources.length ? f.sources.join(" + ") : (
-                          <span className="text-critical">nothing ticked</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+          </Card></div>
 
           <div className="mt-5">
             <Card title="Calendar" collapsible={false}>
+              {undated.length > 0 && <div className="mb-3 rounded border border-hairline p-2 text-xs">
+                <p className="mb-2 font-medium">Without a scheduled date</p>
+                <div className="flex flex-wrap gap-2">{undated.map(job => <div key={job.id} tabIndex={0} className="group relative rounded border border-hairline p-2">
+                  {job.label} � {job.enabled ? "Event-driven / no next date" : "Off"}
+                  <div role="tooltip" className="pointer-events-none absolute left-0 top-full z-50 hidden w-72 rounded border border-hairline bg-surface p-2 shadow-lg group-hover:block group-focus-within:block"><p>{job.file}</p><p>{job.details}</p></div>
+                </div>)}</div>
+              </div>}
+
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex rounded-md border border-black/15 text-xs">
-                  {(["week", "month"] as const).map((v) => (
-                    <button key={v} type="button"
-                      onClick={() => { setView(v); setOffset(0); }}
-                      className={`px-3 py-1.5 ${view === v ? "bg-accent text-white" : "text-ink-secondary hover:bg-black/[0.04]"}`}>
-                      {v === "week" ? "Weekly" : "Monthly"}
-                    </button>
-                  ))}
-                </div>
+                <span className="text-sm font-medium">Monthly schedules (SGT)</span>
                 <div className="flex items-center gap-1 text-sm">
                   <button type="button" aria-label="Previous" onClick={() => setOffset((o) => o - 1)}
                           disabled={offset <= 0}
@@ -352,7 +311,7 @@ export function Track2ScheduledPage() {
                 <div className="flex items-center gap-2 text-[11px] text-ink-secondary">
                   <span className="rounded-sm bg-accent-subtle px-1.5 py-0.5 text-ink">Training run</span>
                   <span className="rounded-sm bg-black/[0.04] px-1.5 py-0.5">Scheduled pull</span>
-                  <span>colour = settings file</span>
+                  <span>SQL pulls</span><span>Model exports</span>
                 </div>
               </div>
 
@@ -367,17 +326,17 @@ export function Track2ScheduledPage() {
                   const past = key < todayKey;
                   const beyond = untilKey !== "" && key > untilKey;
                   return (
-                    <div key={key}
+                    <div key={key} data-date={key}
                          className={`flex min-w-0 flex-col gap-0.5 rounded-sm border p-1 ${
-                           view === "week" ? "min-h-[9rem]" : "min-h-[5.5rem]"} ${
+                           "min-h-[5.5rem]"} ${
                            key === todayKey ? "border-accent" : "border-hairline"} ${
                            past || beyond || !inMonth(ms) ? "bg-black/[0.02] opacity-60" : "bg-page"}`}>
                       <span className={`text-[11px] ${key === todayKey ? "font-semibold text-accent" : "text-ink-muted"}`}>
-                        {day}{view === "week" || day === 1 ? ` ${month}` : ""}
+                        {day}{day === 1 ? ` ${month}` : ""}
                       </span>
                       {evs.map((ev, i) => (
                         <EventLine key={`${ev.file}-${ev.at}-${ev.kind}-${i}`} ev={ev}
-                                   color={colorOf(ev.file)} compact={view === "month"} />
+                                   color={colorOf(ev.file)} compact />
                       ))}
                     </div>
                   );
