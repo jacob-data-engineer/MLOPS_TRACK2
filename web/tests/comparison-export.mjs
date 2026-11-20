@@ -26,6 +26,7 @@ test('comparison ranks models and exports exact selections with independent opti
     const page = await browser.newPage({viewport:{width:1200,height:1000}});
     await page.route('**/track2/**', route => {
       const req = route.request(); const url = new URL(req.url());
+      if (url.pathname.endsWith('/models/detectors')) return route.fulfill({json:{detectors:[{slug:'helmet',label:'Helmet',classes:{0:'helmet'}},{slug:'test-model',label:'test_model',classes:{0:'a',1:'b',2:'c',3:'d',4:'e',5:'f'}}]}});
       if (url.pathname.endsWith('/pull-control')) return route.fulfill({json:{config:{}}});
       if (url.pathname.endsWith('/export/schedules')) return route.fulfill({json:{schedules:Object.values(savedSchedules)}});
       if (url.pathname.includes('/export/schedules/')) {
@@ -50,6 +51,7 @@ test('comparison ranks models and exports exact selections with independent opti
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`);
     await page.getByLabel('Ranking metric').selectOption('mAP50');
     await page.getByLabel('Filter manual models by name').selectOption('test-model');
+    assert.equal(await page.getByLabel('Filter manual models by name').locator('option:checked').innerText(), 'test_model (6 classes)');
     await page.getByLabel('Filter manual models by YOLO type').selectOption('11');
     await page.getByLabel('Filter manual models by size').selectOption('s');
     assert.equal(await page.locator('tbody tr').count(), 1);

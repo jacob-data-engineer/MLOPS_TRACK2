@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, checkCatalogDataset, getTrack2CatalogMetadata, getTrack2CatalogExports,
-  getTrack2PullControl, saveTrack2PullConfig, exportTrack2BestWeights,
+  getTrack2PullControl, saveTrack2PullConfig, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector,
   getTrack2CatalogExportUrl, startTrack2CatalogExport, type Track2MetricsRow,
   type Track2RunForModel, type Track2CatalogExport, type CatalogExportDestination } from "../lib/api";
 import { modelLabel } from "./Track2ModelPicker";
@@ -36,6 +36,8 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const [jobs, setJobs] = useState<Track2CatalogExport[]>([]);
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState("");
+  const [detectors, setDetectors] = useState<Track2Detector[]>([]);
+  const [modelNamesError, setModelNamesError] = useState("");
   const [generationFilter, setGenerationFilter] = useState("");
   const [sizeFilter, setSizeFilter] = useState("");
   const [showBy, setShowBy] = useState<"model" | "run">("model");
@@ -43,6 +45,13 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const [direct, setDirect] = useState<{label: string; url: string; uri: string}[]>([]);
   const cancel = useRef(false);
   useEffect(() => () => { cancel.current = true; }, []);
+  useEffect(() => {
+    if (!browseAll) return;
+    let disposed = false;
+    getTrack2Detectors().then(result => { if (!disposed) setDetectors(result.detectors); })
+      .catch(() => { if (!disposed) setModelNamesError("Model display names could not be loaded. Showing recorded model names."); });
+    return () => { disposed = true; };
+  }, [browseAll]);
   useEffect(() => {
     let disposed = false;
     getTrack2PullControl().then(result => {
@@ -69,7 +78,13 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const ranked = [...rows].sort((a, b) => (b.metrics?.[metric] ?? -1) - (a.metrics?.[metric] ?? -1)
     || a.model_package_arn.localeCompare(b.model_package_arn));
   const nameOf = (row: Track2MetricsRow) => runs[row.model_package_arn]?.detector || row.registry;
-  const modelNames = [...new Set(rows.map(nameOf))].sort();
+  const displayName = (name: string) => {
+    const definition = detectors.find(d => d.slug === name);
+    if (!definition) return name;
+    const count = Object.keys(definition.classes).length;
+    return `${definition.label} (${count} ${count === 1 ? "class" : "classes"})`;
+  };
+  const modelNames = [...new Set([...detectors.map(d => d.slug), ...rows.map(nameOf)])].sort((a, b) => displayName(a).localeCompare(displayName(b)));
   const namedModels = ranked.filter(row => !modelFilter || nameOf(row) === modelFilter);
   const generations = [...new Set(namedModels.map(row => row.generation).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
   const typedModels = namedModels.filter(row => !generationFilter || row.generation === generationFilter);
@@ -80,7 +95,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
     return run ? [[run.run_id, run] as const] : [];
   })).values()].sort((a, b) => b.run_number - a.run_number);
   const visibleRows = matchingModels.filter(row => (showBy !== "run" || !runFilter || runs[row.model_package_arn]?.run_id === runFilter)
-    && `${nameOf(row)} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+    && `${nameOf(row)} ${displayName(nameOf(row))} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const selectionKey = rows.map(r => r.model_package_arn).join("|");
   useEffect(() => { setPreview([]); }, [selectionKey, chosen, images, model, metadata, groups, destination, metric]);
 
@@ -151,15 +166,15 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
         <label><input type="radio" name="manual-show-by" checked={showBy === "run"} onChange={() => { setShowBy("run"); setSearch(""); }} /> Show by runs</label>
       </fieldset>}
       {browseAll && <div className="flex flex-wrap items-center gap-3 text-xs">
-        {showBy === "model" && <><label>Model name <select aria-label="Filter manual models by name" className="ml-2 rounded border p-2" value={modelFilter} onChange={e => { setModelFilter(e.target.value); setGenerationFilter(""); setSizeFilter(""); }}>
-          <option value="">All model names</option>{modelNames.map(name => <option key={name} value={name}>{name}</option>)}
+        {showBy === "model" && <div className="flex w-full flex-wrap items-end gap-3 rounded border border-hairline p-2"><label className="min-w-48 flex-1">Model Name <select aria-label="Filter manual models by name" className="mt-1 block w-full rounded border p-2" value={modelFilter} onChange={e => { setModelFilter(e.target.value); setGenerationFilter(""); setSizeFilter(""); }}>
+          <option value="">All model names</option>{modelNames.map(name => <option key={name} value={name}>{displayName(name)}</option>)}
         </select></label>
-        <label>YOLO model type <select aria-label="Filter manual models by YOLO type" className="ml-2 rounded border p-2" value={generationFilter} onChange={e => { setGenerationFilter(e.target.value); setSizeFilter(""); }}>
+        <label>Model type <select aria-label="Filter manual models by YOLO type" className="mt-1 block rounded border p-2" value={generationFilter} onChange={e => { setGenerationFilter(e.target.value); setSizeFilter(""); }}>
           <option value="">All YOLO types</option>{generations.map(generation => <option key={generation} value={generation}>YOLO{generation}</option>)}
         </select></label>
-        <label>Size <select aria-label="Filter manual models by size" className="ml-2 rounded border p-2" value={sizeFilter} onChange={e => setSizeFilter(e.target.value)}>
+        <label>Size <select aria-label="Filter manual models by size" className="mt-1 block rounded border p-2" value={sizeFilter} onChange={e => setSizeFilter(e.target.value)}>
           <option value="">All sizes</option>{sizes.map(size => <option key={size} value={size}>{size.toUpperCase()}</option>)}
-        </select></label></>}
+        </select></label></div>}
         {showBy === "run" && <label>Run <select aria-label="Filter manual models by run" className="ml-2 rounded border p-2" value={runFilter} onChange={e => setRunFilter(e.target.value)}>
           <option value="">All runs</option>{runOptions.map(run => <option key={run.run_id} value={run.run_id}>Run {run.run_number}</option>)}
         </select></label>}
@@ -167,6 +182,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
         <button type="button" className={button} onClick={() => { setModelFilter(""); setGenerationFilter(""); setSizeFilter(""); setRunFilter(""); setSearch(""); }}>Clear filters</button>
         <span>{visibleRows.length} shown</span>
       </div>}
+      {browseAll && modelNamesError && <p role="status" className="text-xs text-critical">{modelNamesError}</p>}
       <label className="text-sm font-medium">{browseAll?"Sort models by":"Rank selected models by"} <select aria-label="Ranking metric" value={metric} onChange={e => setMetric(e.target.value as Metric)} className="ml-2 rounded border p-1">
         {METRICS.map(key => <option key={key}>{key}</option>)}
       </select></label>
