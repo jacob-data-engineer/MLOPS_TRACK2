@@ -282,7 +282,7 @@ export function Track2ScheduledPage() {
               {undated.length > 0 && <div className="mb-3 rounded border border-hairline p-2 text-xs">
                 <p className="mb-2 font-medium">Without a scheduled date</p>
                 <div className="flex flex-wrap gap-2">{undated.map(job => <div key={job.id} tabIndex={0} className="group relative rounded border border-hairline p-2">
-                  {job.label} — {job.enabled ? "Event-driven / no next date" : "Off"}
+                  {job.label} â€” {job.enabled ? "Event-driven / no next date" : "Off"}
                   <div role="tooltip" className="pointer-events-none absolute left-0 top-full z-50 hidden w-72 rounded border border-hairline bg-surface p-2 shadow-lg group-hover:block group-focus-within:block"><p>{job.file}</p><p>{job.details}</p></div>
                 </div>)}</div>
               </div>}
