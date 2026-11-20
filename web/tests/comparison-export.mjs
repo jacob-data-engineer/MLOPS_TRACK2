@@ -19,13 +19,15 @@ test('comparison ranks models and exports exact selections with independent opti
     createRoot(document.getElementById('root')!).render(<App/>);`);
   let server, browser;
   const requests = []; let unavailable = false;
-  const scheduleRequests=[]; const savedSchedules={};
+  const scheduleRequests=[]; const savedSchedules={}; const autoRequests=[];
   try {
     server = await createServer({root, server:{host:'127.0.0.1',port:0}}); await server.listen();
     browser = await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});
     const page = await browser.newPage({viewport:{width:1200,height:1000}});
     await page.route('**/track2/**', route => {
       const req = route.request(); const url = new URL(req.url());
+      if(url.pathname.endsWith('/selection/run')) {autoRequests.push(req.postDataJSON());return route.fulfill({json:{export_id:'auto-package',run_id:'auto-run',url:'',filename:'',written_to:''}});}
+      if(url.pathname.endsWith('/exports') && url.searchParams.get('run_id')==='auto-run') return route.fulfill({json:{exports:[{id:'auto-package',label:'Run 1',state:'ready',format:'zip',files:3,bytes:100,missing:0}]}});
       if (url.pathname.endsWith('/models/detectors')) return route.fulfill({json:{detectors:[{slug:'helmet',label:'Helmet',classes:{0:'helmet'}},{slug:'test-model',label:'test_model',classes:{0:'a',1:'b',2:'c',3:'d',4:'e',5:'f'}}]}});
       if (url.pathname.endsWith('/pull-control')) return route.fulfill({json:{config:{}}});
       if (url.pathname.endsWith('/export/schedules')) return route.fulfill({json:{schedules:Object.values(savedSchedules)}});
@@ -101,16 +103,27 @@ test('comparison ranks models and exports exact selections with independent opti
     assert.equal(await page.getByLabel('Ranking metric').count(),0);
     await page.getByRole('button',{name:'Preview best model',exact:true}).click();
     await page.getByRole('button',{name:'Export this winner now',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Export this winner now',exact:true}).click();
+    await page.getByRole('button',{name:'Download package ZIP',exact:true}).waitFor();
+    assert.equal(autoRequests[0].package_options.include_images,true);
+    assert.equal(autoRequests[0].package_options.metadata_groups.length,14);
+    await page.getByLabel('Actual images and labels').uncheck();
     await page.getByLabel('Auto S3 bucket').fill('test-exports');
     await page.getByRole('button',{name:'Save and enable schedule',exact:true}).click();
     await page.getByRole('button',{name:'Stop comparison schedule',exact:true}).waitFor();
     assert.deepEqual(scheduleRequests[0].model_package_arns,['arn:1']);
+    assert.equal(scheduleRequests[0].package_options.include_images,false);
+    assert.equal(scheduleRequests[0].package_options.include_model,true);
+    assert.equal(scheduleRequests[0].package_options.include_metadata,true);
     await page.getByRole('radio',{name:'Best for a Model Name',exact:true}).check();
     await page.getByLabel('Auto Model Name').selectOption('helmet');
+    await page.getByLabel('Auto export destination').selectOption('s3');
+    await page.getByLabel('Auto package format').selectOption('folder');
     await page.getByRole('button',{name:'Save and enable schedule',exact:true}).click();
     await page.getByRole('button',{name:'Stop Model Name schedule',exact:true}).waitFor();
     assert.equal(scheduleRequests[1].model_name,'helmet');
     assert.deepEqual(scheduleRequests[1].model_package_arns,[]);
+    assert.equal(scheduleRequests[1].package_options.format,'folder');
     assert.equal(savedSchedules.comparison.enabled,true);
     assert.equal(savedSchedules.model_name.enabled,true);
     await page.getByRole('button',{name:'Stop comparison schedule',exact:true}).click();

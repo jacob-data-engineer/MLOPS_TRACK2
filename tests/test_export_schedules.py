@@ -122,3 +122,51 @@ def test_real_store_writes_use_conditional_body(monkeypatch):
     before={'scope':'comparison','enabled':True}
     es._put({**before,'enabled':False},before)
     assert calls[0]['ConditionExpression']=='#body = :previous'
+
+@pytest.mark.parametrize('scope', ['comparison', 'model_name'])
+@pytest.mark.parametrize('bits', [(True,True,True),(True,False,False),(False,True,False),(False,False,True)])
+def test_package_winner_uses_exact_catalog_run_and_options(estate, monkeypatch, scope, bits):
+    from ppe_pipeline_api.data import catalog_view as cv
+    payload=plan(scope); payload['package_options']=dict(zip(('include_model','include_images','include_metadata'),bits),metadata_groups=['Identity'],format='zip')
+    calls=[]
+    monkeypatch.setattr(cv,'_rows',lambda sql,args:[{'run_id':'run-winner'}])
+    monkeypatch.setattr(cv,'start_export',lambda *args,**kwargs: calls.append((args,kwargs)) or {'id':'package1','state':'building'})
+    monkeypatch.setattr(es.mx,'export_checkpoint',lambda *a,**kw:pytest.fail('must use package exporter'))
+    result=es.export_now(payload)
+    assert result['state']=='building' and result['export_id']=='package1'
+    args,options=calls[0]
+    assert args==('run','run-winner')
+    assert options['model_package_arn']==es.winner(payload)[0]['model_package_arn']
+    assert all(options[k]==v for k,v in payload['package_options'].items())
+
+
+def test_package_rejects_missing_run_and_empty_options(estate,monkeypatch):
+    from ppe_pipeline_api.data import catalog_view as cv
+    payload=plan();payload['package_options']={'include_model':False,'include_images':False,'include_metadata':False}
+    with pytest.raises(ValueError,match='at least one'):es.export_now(payload)
+    payload['package_options']={'include_metadata':True,'metadata_groups':[]}
+    with pytest.raises(ValueError,match='category'):es.export_now(payload)
+    payload['package_options']={}
+    monkeypatch.setattr(cv,'_rows',lambda *args:[])
+    with pytest.raises(ValueError,match='no recorded training run'):es.export_now(payload)
+
+
+def test_schedule_preserves_package_choices_and_reports_building(estate,store,monkeypatch):
+    payload=plan();payload['package_options']={'include_model':True,'include_images':False,'include_metadata':True,'metadata_groups':['Identity'],'format':'folder'}
+    es.save('comparison',payload);store['comparison']['next_run_at']='2026-11-19T01:00:00+00:00'
+    calls=[]
+    monkeypatch.setattr(es,'export_now',lambda p: calls.append(p) or {'state':'building','export_id':'pkg','run_id':'run1'})
+    assert es.check()[0]['state']=='building'
+    assert calls[0]['package_options']==payload['package_options']
+    from ppe_pipeline_api.data import catalog_view as cv
+    monkeypatch.setattr(cv,'exports',lambda **kw:[{'id':'pkg','state':'failed','error':'Missing source image'}])
+    assert es.list_schedules()[0]['last_result']['state']=='failed'
+
+
+def test_lambda_does_not_claim_async_package_job(estate,store,monkeypatch):
+    payload=plan();payload['package_options']={}
+    es.save('comparison',payload);store['comparison']['next_run_at']='2026-11-19T01:00:00+00:00'
+    monkeypatch.setenv('AWS_LAMBDA_FUNCTION_NAME','queue-runner')
+    monkeypatch.setattr(es,'export_now',lambda *a:pytest.fail('package must run in persistent worker'))
+    assert es.check()==[]
+    assert store['comparison']['next_run_at']=='2026-11-19T01:00:00+00:00'

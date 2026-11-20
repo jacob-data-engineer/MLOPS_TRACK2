@@ -175,7 +175,16 @@ def export_metrics(payload: MetricsExportRequest,
 # a timer. Same reasoning as the pull schedule, which is armed in its card
 # rather than by whichever settings file happened to be loaded.
 
+class PackageOptions(BaseModel):
+    include_model: bool = True
+    include_images: bool = True
+    include_metadata: bool = True
+    metadata_groups: list[str] | None = None
+    format: Literal['zip', 'folder'] = 'zip'
+
+
 class ExportSettings(BaseModel):
+    package_options: PackageOptions | None = None
     export_mode: str = "selected"
     auto_scope: str = "comparison"
     auto_model_name: str = ""
@@ -356,6 +365,7 @@ def delete_export_settings(payload: ExportSettingsRequest,
 
 # --- exporting the best checkpoint of one Class ------------------------
 class SelectionExportRequest(BaseModel):
+    package_options: PackageOptions | None = None
     scope: Literal["comparison", "model_name"] = "comparison"
     model_package_arns: list[str] = []
     model_name: str = ""

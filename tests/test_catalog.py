@@ -185,12 +185,11 @@ def test_a_file_that_cannot_be_read_is_reported_missing_not_fatal(monkeypatch):
     assert cv._fetch("not-s3") is None
 
 
-def test_the_page_is_routed_and_offered():
+def test_catalog_apis_remain_after_embedded_section_removal():
     web = ROOT / "web" / "src"
     assert 'path="/track2/catalog" element={<Navigate to="/track2/metrics" replace />}' in (web / "App.tsx").read_text(encoding="utf-8")
-    assert '<Track2CatalogPage' in (web / "routes" / "Track2MetricsPage.tsx").read_text(encoding="utf-8")
-    # The catalog section left the Central data store card (2026-11-13);
-    # the page is reached from the nav.
+    assert '<Track2CatalogPage' not in (web / "routes" / "Track2MetricsPage.tsx").read_text(encoding="utf-8")
+    # The section was removed, but model package export still uses these APIs.
     card = (web / "components" / "Track2CentralStorePanel.tsx").read_text(encoding="utf-8")
     assert "getTrack2CatalogStatus" not in card
     from ppe_pipeline_api.main import app

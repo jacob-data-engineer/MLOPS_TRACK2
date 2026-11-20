@@ -1281,6 +1281,7 @@ export function getTrack2Metrics(): Promise<{ rows: Track2MetricsRow[] }> {
  * is its own call, so loading a preset named after something else cannot
  * quietly start writing to a shared bucket on a watch. */
 export interface Track2ExportSettings {
+  package_options?: ModelPackageOptions | null;
   auto_scope?: "comparison" | "model_name";
   auto_model_name?: string;
   auto_time_sgt?: string;
@@ -1571,7 +1572,15 @@ export function forgetTrack2ExportSettings(): Promise<{ last_loaded: string }> {
   return apiPost("/track2/metrics/export/settings/forget", {});
 }
 
+export interface ModelPackageOptions {
+  include_model: boolean;
+  include_images: boolean;
+  include_metadata: boolean;
+  metadata_groups: string[] | null;
+  format: "zip" | "folder";
+}
 export interface ModelExportPlan {
+  package_options?: ModelPackageOptions | null;
   scope: "comparison" | "model_name";
   model_package_arns: string[];
   model_name: string;
@@ -1589,12 +1598,12 @@ export interface ModelExportSchedule extends Partial<ModelExportPlan> {
   scope: ModelExportPlan["scope"];
   enabled: boolean;
   next_run_at?: string;
-  last_result?: {state: string; at: string; detail?: string; written_to?: string; picked?: Track2ExportPick};
+  last_result?: {state: string; at: string; detail?: string; written_to?: string; picked?: Track2ExportPick; export_id?: string; run_id?: string};
 }
 export function previewModelExport(plan: ModelExportPlan): Promise<{best: Track2ExportPick | null; reason: string; considered: number}> {
   return apiPost("/track2/metrics/export/selection/preview", plan);
 }
-export function runModelExport(plan: ModelExportPlan): Promise<{picked: Track2ExportPick; url: string; written_to: string; filename: string}> {
+export function runModelExport(plan: ModelExportPlan): Promise<{picked: Track2ExportPick; url: string; written_to: string; filename: string; export_id?: string; run_id?: string}> {
   return apiPost("/track2/metrics/export/selection/run", plan);
 }
 export function getModelExportSchedules(): Promise<{schedules: ModelExportSchedule[]}> {

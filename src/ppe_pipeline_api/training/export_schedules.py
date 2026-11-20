@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import re
 import uuid
+import os
 from botocore.exceptions import ClientError
 from . import metrics_export as mx
 from . import track2_shared as t2
@@ -43,7 +44,30 @@ def _put(plan, previous=None):
 
 
 def list_schedules():
-    return [_get(scope) for scope in SCOPES]
+    plans = [_get(scope) for scope in SCOPES]
+    for plan in plans:
+        result = plan.get('last_result') or {}
+        if result.get('export_id'):
+            from ..data import catalog_view as cv
+            jobs = cv.exports(run_id=result['run_id'])
+            job = next((j for j in jobs if j['id'] == result['export_id']), None)
+            if job:
+                plan['last_result'] = {**result, 'state': job['state'], 'detail': job.get('error') or job.get('stage'),
+                                       'written_to': job.get('destination_uri'), 'export': job}
+    return plans
+
+
+def package_options(plan):
+    options = plan.get('package_options')
+    if options is None:
+        return None  # Existing saved schedules keep their checkpoint-only behavior.
+    if not any(options.get(k, True) for k in ('include_model', 'include_images', 'include_metadata')):
+        raise ValueError('Select at least one package item to export.')
+    if options.get('include_metadata', True) and options.get('metadata_groups') == []:
+        raise ValueError('Select at least one metadata category.')
+    if options.get('format', 'zip') not in ('zip', 'folder'):
+        raise ValueError('Choose ZIP or folder format.')
+    return options
 
 
 def candidates(scope, model_package_arns=None, model_name=""):
@@ -86,11 +110,28 @@ def preview(plan):
 
 
 def export_now(plan, expected_arn=""):
+    options = package_options(plan)
     best, reason, count = winner(plan)
     if not best:
         raise ValueError(reason)
     if expected_arn and best.get("model_package_arn") != expected_arn:
         raise ValueError("The best model changed. Preview again before exporting.")
+    if options is not None:
+        from ..data import catalog_view as cv
+        arn = best['model_package_arn']
+        found = cv._rows('SELECT run_id FROM training_runs WHERE model_package_arn = %s', (arn,))
+        if not found:
+            raise ValueError('The winning model has no recorded training run for a package export. Choose a trained version.')
+        run_id = found[0]['run_id']
+        job = cv.start_export('run', run_id, destination=plan.get('destination', 's3'),
+            bucket=plan.get('bucket', ''), prefix=plan.get('prefix', ''),
+            format='zip' if plan.get('destination') == 'local' else options.get('format', 'zip'),
+            include_model=options.get('include_model', True), include_images=options.get('include_images', True),
+            include_metadata=options.get('include_metadata', True), metadata_groups=options.get('metadata_groups'),
+            model_package_arn=arn)
+        return {'picked': mx.describe_pick(best, plan['criterion']), 'considered': count,
+                'state': job['state'], 'export_id': job['id'], 'run_id': run_id, 'export': job,
+                'url': '', 'filename': '', 'written_to': ''}
     placed = mx.export_checkpoint(best, destination=plan.get("destination", "s3"),
         bucket=plan.get("bucket", ""), prefix=plan.get("prefix", ""), retention="keep_all")
     return {"picked": mx.describe_pick(best, plan["criterion"]), "considered": count, **placed}
@@ -117,6 +158,7 @@ def save(scope, payload):
         # Preserve the saved scope and destination when stopping a schedule.
         plan = {**_get(scope), "enabled": False, "revision": uuid.uuid4().hex}
     else:
+        package_options(payload)
         bucket = str(payload.get("bucket", "")).strip()
         if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
             raise ValueError("A scheduled export needs a valid S3 bucket name.")
@@ -139,6 +181,9 @@ def check():
     for scope in SCOPES:
         try:
             plan = _get(scope)
+            # Package builds run in the persistent EC2 worker, not a short-lived Lambda invocation.
+            if plan.get('package_options') is not None and os.getenv('AWS_LAMBDA_FUNCTION_NAME'):
+                continue
             if not plan.get("enabled") or dt.datetime.fromisoformat(plan["next_run_at"]) > now():
                 continue
             started = now()
