@@ -15,7 +15,7 @@ test('comparison ranks models and exports exact selections with independent opti
     import '../src/index.css';
     const rows=[1,2].map(n=>({model_package_arn:'arn:'+n,group_name:'helmet',registry:'helmet',generation:'11',size:'s',version:String(n),status:'Approved',metrics:{mAP50:n/10,recall:(3-n)/10,dataset:{dataset_version:'dataset-'+n,validation_count:100}}}));
     function App(){const [settings,setSettings]=React.useState({export_mode:'selected',registry:'helmet',generation:'11',size:'s',group_name:'helmet',criterion:'mAP50',destination:'local',bucket:'',prefix:'',retention:'keep_all'});
-      return <Track2MetricsExportCard rows={rows} selectedRows={rows.slice(0,1)} settings={settings} onChange={setSettings} runsByArn={{'arn:1':{run_id:'r1',run_number:1},'arn:2':{run_id:'r2',run_number:2}}}/>;}
+      return <Track2MetricsExportCard rows={rows} selectedRows={rows.slice(0,1)} settings={settings} onChange={setSettings} runsByArn={{'arn:1':{run_id:'r1',run_number:1,detector:'helmet'},'arn:2':{run_id:'r2',run_number:2,detector:'test-model'}}}/>;}
     createRoot(document.getElementById('root')!).render(<App/>);`);
   let server, browser;
   const requests = []; let unavailable = false;
@@ -49,6 +49,17 @@ test('comparison ranks models and exports exact selections with independent opti
     });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`);
     await page.getByLabel('Ranking metric').selectOption('mAP50');
+    await page.getByLabel('Filter manual models by name').selectOption('test-model');
+    assert.equal(await page.locator('tbody tr').count(), 1);
+    assert.match(await page.locator('tbody tr').innerText(), /Run 2/);
+    await page.locator('tbody input').check();
+    await page.getByLabel('Filter manual models by name').selectOption('helmet');
+    assert.match(await page.locator('tbody tr').innerText(), /Run 1/);
+    await page.getByRole('button', {name: 'Clear filters', exact: true}).click();
+    await page.getByLabel('Filter manual models by run').selectOption('r2');
+    assert.equal(await page.locator('tbody tr').count(), 1);
+    assert.equal(await page.locator('tbody input').isChecked(), true);
+    await page.getByRole('button', {name: 'Clear filters', exact: true}).click();
     for (const name of ['Run', 'Submitted', 'Status', 'Model name', 'Model type', 'Size', 'Model version', 'Dataset version', 'Images', 'Registered as']) {
       assert.equal(await page.getByRole('columnheader', {name, exact: true}).count(), 1);
     }

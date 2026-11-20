@@ -35,6 +35,8 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const [saved, setSaved] = useState("");
   const [jobs, setJobs] = useState<Track2CatalogExport[]>([]);
   const [search, setSearch] = useState("");
+  const [modelFilter, setModelFilter] = useState("");
+  const [runFilter, setRunFilter] = useState("");
   const [direct, setDirect] = useState<{label: string; url: string; uri: string}[]>([]);
   const cancel = useRef(false);
   useEffect(() => () => { cancel.current = true; }, []);
@@ -63,6 +65,15 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   }
   const ranked = [...rows].sort((a, b) => (b.metrics?.[metric] ?? -1) - (a.metrics?.[metric] ?? -1)
     || a.model_package_arn.localeCompare(b.model_package_arn));
+  const nameOf = (row: Track2MetricsRow) => runs[row.model_package_arn]?.detector || row.registry;
+  const modelNames = [...new Set(rows.map(nameOf))].sort();
+  const matchingModels = ranked.filter(row => !modelFilter || nameOf(row) === modelFilter);
+  const runOptions = [...new Map(matchingModels.flatMap(row => {
+    const run = runs[row.model_package_arn];
+    return run ? [[run.run_id, run] as const] : [];
+  })).values()].sort((a, b) => b.run_number - a.run_number);
+  const visibleRows = matchingModels.filter(row => (!runFilter || runs[row.model_package_arn]?.run_id === runFilter)
+    && `${nameOf(row)} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const selectionKey = rows.map(r => r.model_package_arn).join("|");
   useEffect(() => { setPreview([]); }, [selectionKey, chosen, images, model, metadata, groups, destination, metric]);
 
@@ -128,7 +139,17 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const button = "rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40";
   return <section className="mb-5 space-y-3 border-b border-hairline pb-4" aria-label="Rank and export compared models">
     <fieldset disabled={busy || running || !settingsReady} className="space-y-3 disabled:opacity-60">
-      {browseAll&&<label className="block text-xs">Find a model <input aria-label="Find manual model" className="ml-2 rounded border p-2" placeholder="Model name, version, run or status" value={search} onChange={e=>setSearch(e.target.value)}/></label>}
+      {browseAll && <div className="flex flex-wrap items-center gap-3 text-xs">
+        <label>Model name <select aria-label="Filter manual models by name" className="ml-2 rounded border p-2" value={modelFilter} onChange={e => { setModelFilter(e.target.value); setRunFilter(""); }}>
+          <option value="">All model names</option>{modelNames.map(name => <option key={name} value={name}>{name}</option>)}
+        </select></label>
+        <label>Run <select aria-label="Filter manual models by run" className="ml-2 rounded border p-2" value={runFilter} onChange={e => setRunFilter(e.target.value)}>
+          <option value="">All runs</option>{runOptions.map(run => <option key={run.run_id} value={run.run_id}>Run {run.run_number}</option>)}
+        </select></label>
+        <label>Find a model <input aria-label="Find manual model" className="ml-2 rounded border p-2" placeholder="Model name, version, run or status" value={search} onChange={e => setSearch(e.target.value)}/></label>
+        <button type="button" className={button} onClick={() => { setModelFilter(""); setRunFilter(""); setSearch(""); }}>Clear filters</button>
+        <span>{visibleRows.length} shown</span>
+      </div>}
       <label className="text-sm font-medium">{browseAll?"Sort models by":"Rank selected models by"} <select aria-label="Ranking metric" value={metric} onChange={e => setMetric(e.target.value as Metric)} className="ml-2 rounded border p-1">
         {METRICS.map(key => <option key={key}>{key}</option>)}
       </select></label>
@@ -140,7 +161,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
             {["Export", "Run", "Submitted", "Status", "Model name", "Model type", "Size", "Model version", "Dataset version", "Images", "Registered as", metric, "Validation images"].map(h =>
               <th key={h} className="border-b border-hairline px-2 py-1.5 font-medium">{h}</th>)}
           </tr></thead>
-          <tbody>{ranked.filter(row => `${row.registry} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase())).map(row => {
+          <tbody>{visibleRows.map(row => {
             const run = runs[row.model_package_arn];
             const selected = chosen.includes(row.model_package_arn);
             return <tr key={row.model_package_arn} className={`border-b border-hairline/50 hover:bg-black/[0.03] [&_td]:px-2 [&_td]:py-1 ${selected ? "bg-accent-subtle" : ""}`}>
@@ -160,6 +181,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
             </tr>;
           })}</tbody>
         </table>
+        {!visibleRows.length && <p className="p-3 text-xs">No models match these filters.</p>}
       </div>
       <p className="text-xs">Recorded dataset versions and counts do not prove identical evaluation images or settings. <a className="underline text-accent" href="/track2/eval">Open evaluation</a> to explicitly evaluate models on a common dataset.</p>
       <div className="flex flex-wrap gap-4 text-xs">
