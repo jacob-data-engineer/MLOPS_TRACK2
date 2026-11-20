@@ -25,12 +25,13 @@ test('scheduled overview shows all files and independently toggles scheduler cat
  });
  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`);
  await page.getByText('s3://exports/helmet.pt',{exact:true}).waitFor();
- await page.getByText('Preview only — not loaded',{exact:true}).waitFor();
+ await page.getByText('Calendar',{exact:true}).waitFor();
+ assert.equal(await page.getByText('Upcoming training and pull jobs',{exact:true}).count(),0);
  assert.equal(requests.find(r=>r.url.pathname.endsWith('/scheduled')).url.searchParams.get('files'),'*');
  assert.ok(await page.getByText('test_AT',{exact:true}).count()>0);
  await page.getByLabel('SQL pulls',{exact:true}).uncheck();assert.equal(await page.getByText('SQL image and label pull',{exact:true}).count(),0);
  await page.getByLabel('Model exports',{exact:true}).uncheck();assert.equal(await page.getByText('s3://exports/helmet.pt',{exact:true}).count(),0);
- await page.getByLabel('Training and pulls',{exact:true}).uncheck();assert.equal(await page.getByText('Preview only — not loaded',{exact:true}).count(),0);
+ await page.getByLabel('Training and pulls',{exact:true}).uncheck();assert.equal(await page.getByText('Calendar',{exact:true}).count(),0);
  await page.getByLabel('Model exports',{exact:true}).check();await page.getByText('s3://exports/helmet.pt',{exact:true}).waitFor();
  assert.ok(requests.every(r=>r.method==='GET'));
  }finally{await browser?.close();await server?.close();await rm(harness,{recursive:true,force:true});}

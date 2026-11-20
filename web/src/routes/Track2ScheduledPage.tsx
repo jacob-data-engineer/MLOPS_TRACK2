@@ -319,18 +319,6 @@ export function Track2ScheduledPage() {
           </Card>
 
           <div className="mt-5">
-            <Card title="Upcoming training and pull jobs" collapsible={false}>
-              <p className="mb-2 text-xs">All occurrences in the next {WINDOW_DAYS} days for the files shown above. Preview jobs do not run until their file is loaded.</p>
-              <div className="max-h-80 overflow-auto"><table className="w-full text-left text-xs">
-                <thead className="sticky top-0 bg-surface"><tr>{["When (SGT)", "Job", "File name", "Status"].map(h => <th className="p-2" key={h}>{h}</th>)}</tr></thead>
-                <tbody>{data.events.map((ev, i) => <tr key={`${ev.file}-${ev.at}-${ev.kind}-${i}`} className="border-t border-hairline">
-                  <td className="p-2">{formatDayTime(ev.at)}</td><td className="p-2">{ev.label}</td><td className="p-2 break-all">{ev.file}</td><td className="p-2">{ev.live ? "Active file" : "Preview only — not loaded"}</td>
-                </tr>)}</tbody>
-              </table></div>
-              {!data.events.length && <p className="text-xs">No jobs scheduled in this period for the displayed files.</p>}
-            </Card>
-          </div>
-          <div className="mt-5">
             <Card title="Calendar" collapsible={false}>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex rounded-md border border-black/15 text-xs">
