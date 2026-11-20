@@ -42,7 +42,6 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const [sizeFilter, setSizeFilter] = useState("");
   const [showBy, setShowBy] = useState<"model" | "run">("model");
   const [runOrder, setRunOrder] = useState<"desc" | "asc">("desc");
-  const [runFilter, setRunFilter] = useState("");
   const [direct, setDirect] = useState<{label: string; url: string; uri: string}[]>([]);
   const cancel = useRef(false);
   useEffect(() => () => { cancel.current = true; }, []);
@@ -101,12 +100,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const typedModels = namedModels.filter(row => !generationFilter || row.generation === generationFilter);
   const sizes = [...new Set(typedModels.map(row => row.size).filter(Boolean))].sort((a, b) => "nslmx".indexOf(a) - "nslmx".indexOf(b));
   const matchingModels = showBy === "model" ? typedModels.filter(row => !sizeFilter || row.size === sizeFilter) : ranked;
-  const runOptions = [...new Map(matchingModels.flatMap(row => {
-    const run = runs[row.model_package_arn];
-    return run ? [[run.run_id, run] as const] : [];
-  })).values()].sort((a, b) => (a.run_number - b.run_number) * (runOrder === "asc" ? 1 : -1));
-  const visibleRows = matchingModels.filter(row => (showBy !== "run" || !runFilter || runs[row.model_package_arn]?.run_id === runFilter)
-    && `${nameOf(row)} ${displayName(nameOf(row))} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+  const visibleRows = matchingModels.filter(row => `${nameOf(row)} ${displayName(nameOf(row))} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const selectionKey = rows.map(r => r.model_package_arn).join("|");
   useEffect(() => { setPreview([]); }, [selectionKey, chosen, images, model, metadata, groups, destination, metric]);
 
@@ -186,11 +180,8 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
         <label>Size <select aria-label="Filter manual models by size" className="mt-1 block rounded border p-2" value={sizeFilter} onChange={e => setSizeFilter(e.target.value)}>
           <option value="">All sizes</option>{sizes.map(size => <option key={size} value={size}>{size.toUpperCase()}</option>)}
         </select></label></div>}
-        {showBy === "run" && <label>Run <select aria-label="Filter manual models by run" className="ml-2 rounded border p-2" value={runFilter} onChange={e => setRunFilter(e.target.value)}>
-          <option value="">All runs</option>{runOptions.map(run => <option key={run.run_id} value={run.run_id}>Run {run.run_number}</option>)}
-        </select></label>}
-        <label>Find a model <input aria-label="Find manual model" className="ml-2 rounded border p-2" placeholder="Model name, version, run or status" value={search} onChange={e => setSearch(e.target.value)}/></label>
-        <button type="button" className={button} onClick={() => { setModelFilter(""); setGenerationFilter(""); setSizeFilter(""); setRunFilter(""); setSearch(""); }}>Clear filters</button>
+        <label>Keyword search <input aria-label="Keyword search" className="ml-2 rounded border p-2" placeholder="Model name, run number, version or status" value={search} onChange={e => setSearch(e.target.value)}/></label>
+        <button type="button" className={button} onClick={() => { setModelFilter(""); setGenerationFilter(""); setSizeFilter(""); setSearch(""); }}>Clear filters</button>
         <span>{visibleRows.length} shown</span>
       </div>}
       {browseAll && modelNamesError && <p role="status" className="text-xs text-critical">{modelNamesError}</p>}

@@ -72,10 +72,10 @@ test('comparison ranks models and exports exact selections with independent opti
     assert.match(await page.locator('tbody tr').first().innerText(), /Run 2/);
     await page.getByLabel('Run number sort order').selectOption('asc');
     assert.match(await page.locator('tbody tr').first().innerText(), /Run 1/);
-    assert.deepEqual(await page.getByLabel('Filter manual models by run').locator('option').allTextContents(), ['All runs', 'Run 1', 'Run 2']);
+    assert.equal(await page.getByLabel('Filter manual models by run').count(), 0);
     await page.getByLabel('Run number sort order').selectOption('desc');
     assert.match(await page.locator('tbody tr').first().innerText(), /Run 2/);
-    await page.getByLabel('Filter manual models by run').selectOption('r2');
+    await page.getByLabel('Keyword search').fill('Run 2');
     assert.equal(await page.locator('tbody tr').count(), 1);
     assert.equal(await page.locator('tbody input').isChecked(), true);
     await page.getByRole('radio', {name: 'Show by model name', exact: true}).check();
@@ -85,11 +85,11 @@ test('comparison ranks models and exports exact selections with independent opti
     for (const name of ['Run', 'Submitted', 'Status', 'Model name', 'Model type', 'Size', 'Model version', 'Dataset version', 'Images', 'Registered as']) {
       assert.equal(await page.getByRole('columnheader', {name, exact: true}).count(), 1);
     }
-    await page.getByLabel('Find manual model').fill('Run 2');
+    await page.getByLabel('Keyword search').fill('Run 2');
     // Search includes the run number even when the word "Run" is omitted.
-    await page.getByLabel('Find manual model').fill('2');
+    await page.getByLabel('Keyword search').fill('2');
     assert.equal(await page.locator('tbody tr').count(),1);
-    await page.getByLabel('Find manual model').fill('');
+    await page.getByLabel('Keyword search').fill('');
     assert.match(await page.locator('tbody tr').first().innerText(), /Run 2/);
     await page.getByLabel('Ranking metric').selectOption('recall');
     assert.match(await page.locator('tbody tr').first().innerText(), /Run 1/);
