@@ -43,26 +43,25 @@ FETCHERS = 16
 
 
 def chronological_runs_sql(sql: str) -> str:
-    """Number the complete run history before any search, model or page filter.
+    """Read permanent display numbers, seeded chronologically once.
 
-    The stored bigserial is an allocation counter: ON CONFLICT updates consume
-    it too. It is not a count of runs. Keep run_id as the permanent identity.
-    Ranking happens before the caller's filtering and pagination.
+    The registry survives deletion; later runs always allocate a higher number.
+    The original training_runs bigserial remains an internal legacy counter.
     """
     if not re.search(r"\btraining_runs\b", sql):
         return sql
     return """WITH chronological_training_runs AS (
-        SELECT run_id,version_id,started_at,detector,execution_arn,
+        SELECT r.run_id,version_id,started_at,detector,execution_arn,
                model_package_arn,detail,status,submitted_at,ended_at,
                architecture,files_synced,record,
-               row_number() OVER (
-                   ORDER BY coalesce(submitted_at,started_at) ASC NULLS LAST,run_id
-               ) AS run_number
-        FROM training_runs
+               n.run_number
+        FROM training_runs r JOIN run_number_registry n ON n.run_id=r.run_id
     ) """ + re.sub(r"\btraining_runs\b", "chronological_training_runs", sql)
 
 
 def _rows(sql: str, params: tuple = ()) -> list[dict]:
+    if re.search(r"\btraining_runs\b", sql):
+        catalog.ensure_schema_once()
     conn = catalog.connect()
     try:
         cur = conn.cursor()

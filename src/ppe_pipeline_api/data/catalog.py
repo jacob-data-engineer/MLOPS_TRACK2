@@ -238,6 +238,32 @@ MIGRATIONS = {
         "ALTER TABLE exports ADD COLUMN IF NOT EXISTS updated_at timestamptz",
         "ALTER TABLE exports ADD COLUMN IF NOT EXISTS options jsonb",
     ],
+    # Permanent display identities. No FK: deleting a run must retain its number.
+    10: [
+        "LOCK TABLE training_runs IN SHARE ROW EXCLUSIVE MODE",
+        """CREATE TABLE run_number_registry (
+             run_id text PRIMARY KEY,
+             run_number bigserial UNIQUE NOT NULL,
+             assigned_at timestamptz NOT NULL DEFAULT now())""",
+        """INSERT INTO run_number_registry (run_id,run_number)
+             SELECT run_id,row_number() OVER (
+                 ORDER BY coalesce(submitted_at,started_at) ASC NULLS LAST,run_id)
+             FROM training_runs""",
+        """SELECT setval(pg_get_serial_sequence('run_number_registry','run_number'),
+             greatest(coalesce(max(run_number),0),1),count(*)>0)
+             FROM run_number_registry""",
+        """CREATE FUNCTION assign_permanent_run_number() RETURNS trigger AS $$
+             BEGIN
+                 IF NOT EXISTS (SELECT 1 FROM run_number_registry WHERE run_id=NEW.run_id) THEN
+                     INSERT INTO run_number_registry (run_id) VALUES (NEW.run_id)
+                     ON CONFLICT (run_id) DO NOTHING;
+                 END IF;
+                 RETURN NEW;
+             END;
+             $$ LANGUAGE plpgsql""",
+        """CREATE TRIGGER training_run_number_assignment AFTER INSERT ON training_runs
+             FOR EACH ROW EXECUTE FUNCTION assign_permanent_run_number()""",
+    ],
 }
 
 TABLES = ("files", "file_sources", "labels", "dataset_versions",
