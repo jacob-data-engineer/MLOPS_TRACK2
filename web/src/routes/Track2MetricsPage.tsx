@@ -1,7 +1,6 @@
 import { AlertCircle, BarChart3, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "../components/Card";
-import { Track2CatalogPage } from "./Track2CatalogPage";
 import { Track2ExportSettingsBar } from "../components/Track2ExportSettingsBar";
 import { Track2MetricsExportCard } from "../components/Track2MetricsExportCard";
 import { Track2ComparisonSummary } from "../components/Track2ComparisonSummary";
@@ -25,9 +24,6 @@ import { formatSgt } from "../lib/format";
 const JUMPS: { id: string; label: string }[] = [
   { id: "comparison", label: "Comparison" },
   { id: "model-export", label: "Model export" },
-  { id: "data-catalog", label: "Data Catalog" },
-  { id: "catalog-export", label: "Catalog export" },
-  { id: "catalog-metadata", label: "Metadata" },
 ];
 
 function jump(id: string) {
@@ -126,9 +122,9 @@ export function runLabel(run: Track2RunForModel | undefined): string {
   return run ? `Run ${run.run_number}` : "no run recorded";
 }
 
-function Track2MetricsBarChart({ rows, metrics, runs, onOpenRun }: {
+function Track2MetricsBarChart({ rows, metrics, runs }: {
   rows: Track2MetricsRow[]; metrics: MetricKey[];
-  runs: Record<string, Track2RunForModel>; onOpenRun: (runId: string) => void;
+  runs: Record<string, Track2RunForModel>;
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -144,12 +140,7 @@ function Track2MetricsBarChart({ rows, metrics, runs, onOpenRun }: {
                 style={{ background: TRACK2_COMPARE_COLORS[i] }}
               />
               {modelLabel(row)} ({row.status}) &middot; <span className="tabular font-medium text-ink">{runLabel(run)}</span>
-              {run && (
-                <button type="button" onClick={() => onOpenRun(run.run_id)}
-                        className="rounded border border-hairline px-1.5 py-0.5 text-[11px] font-medium text-accent">
-                  Open run in catalog
-                </button>
-              )}
+
             </span>
           );
         })}
@@ -255,17 +246,8 @@ export function Track2MetricsPage() {
   // The audits are a second read: their own loading and failure, never
   // folded into "no audits".
   const [auditsState, setAuditsState] = useState<{ status: "loading" | "ready" | "failed"; error: string }>({ status: "loading", error: "" });
-  // Bumped by Refresh all: the catalog, its selected record and that
-  // record's export status read again, keeping selections and filters.
-  const [catalogRefresh, setCatalogRefresh] = useState(0);
   // Which training run registered each version, keyed on package ARN.
   const [runsByArn, setRunsByArn] = useState<Record<string, Track2RunForModel>>({});
-  // "Open run in catalog": a request the catalog acts on once. The nonce
-  // makes a second press on the same run a new request.
-  const [openRun, setOpenRun] = useState<{ runId: string; nonce: number } | null>(null);
-  function openRunInCatalog(runId: string) {
-    setOpenRun({ runId, nonce: Date.now() });
-  }
   // Only the newest load may write: a slow answer to an earlier Refresh
   // must not land over a newer one.
   const loads = useRef(0);
@@ -324,7 +306,6 @@ export function Track2MetricsPage() {
    * choices are kept. */
   function refreshAll() {
     load();
-    setCatalogRefresh((n) => n + 1);
   }
 
   useEffect(load, []);
@@ -443,7 +424,7 @@ export function Track2MetricsPage() {
     <div>
       <h1 className="mb-1 flex items-center gap-2 text-xl font-semibold text-ink">
         <BarChart3 size={20} className="text-accent" strokeWidth={2} />
-        Track2 Review &amp; Metrics / Data Catalog
+        Track2 Review &amp; Metrics
       </h1>
       <p className="mb-6 max-w-3xl text-sm text-ink-secondary">
         Model generations in use:{" "}
@@ -467,7 +448,7 @@ export function Track2MetricsPage() {
           onClick={refreshAll}
           disabled={reloading}
           className="rounded-md border border-black/15 px-2.5 py-1 font-medium text-ink-secondary disabled:opacity-40"
-          title="Metrics, training audits, catalog runs and versions, the selected record's metadata and its export status. Selections and filters are kept."
+          title="Refresh metrics, training audits and model run details. Selections and filters are kept."
         >
           {reloading ? "Refreshing..." : "Refresh all"}
         </button>
@@ -593,7 +574,7 @@ export function Track2MetricsPage() {
             ) : compareMetrics.length === 0 ? (
               <p className="text-sm text-ink-muted">Choose at least one metric.</p>
             ) : (
-              <Track2MetricsBarChart rows={compareRows} metrics={compareMetrics} runs={runsByArn} onOpenRun={openRunInCatalog} />
+              <Track2MetricsBarChart rows={compareRows} metrics={compareMetrics} runs={runsByArn} />
             )}
           </Card>
         </div>
@@ -608,24 +589,11 @@ export function Track2MetricsPage() {
             settings={exportSettings}
             onChange={setExportSettings}
             runsByArn={runsByArn}
-            onOpenRun={openRunInCatalog}
+
           />
         </div>
       )}
 
-      {/* The "All versions" card was here: the per-registry table,
-          with approve / reject / delete, the CSV and .pt exports, the
-          audit expansion, and the tick boxes that fed the Comparison
-          card above. Removed on request while this page is rebuilt.
-
-          NOTE: nothing else selects versions, so the Comparison card
-          can no longer be populated. It is left standing rather than
-          quietly removed too -- that is a second decision, not a
-          consequence to take silently. */}
-
-      <section id="data-catalog" className="mt-8 scroll-mt-48 border-t border-black/20 pt-6" aria-label="Data Catalog">
-        <Track2CatalogPage refreshKey={catalogRefresh} openRun={openRun} />
-      </section>
       </fieldset>
     </div>
   );
