@@ -36,6 +36,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const [jobs, setJobs] = useState<Track2CatalogExport[]>([]);
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState("");
+  const [showBy, setShowBy] = useState<"model" | "run">("model");
   const [runFilter, setRunFilter] = useState("");
   const [direct, setDirect] = useState<{label: string; url: string; uri: string}[]>([]);
   const cancel = useRef(false);
@@ -67,12 +68,12 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
     || a.model_package_arn.localeCompare(b.model_package_arn));
   const nameOf = (row: Track2MetricsRow) => runs[row.model_package_arn]?.detector || row.registry;
   const modelNames = [...new Set(rows.map(nameOf))].sort();
-  const matchingModels = ranked.filter(row => !modelFilter || nameOf(row) === modelFilter);
+  const matchingModels = ranked.filter(row => showBy !== "model" || !modelFilter || nameOf(row) === modelFilter);
   const runOptions = [...new Map(matchingModels.flatMap(row => {
     const run = runs[row.model_package_arn];
     return run ? [[run.run_id, run] as const] : [];
   })).values()].sort((a, b) => b.run_number - a.run_number);
-  const visibleRows = matchingModels.filter(row => (!runFilter || runs[row.model_package_arn]?.run_id === runFilter)
+  const visibleRows = matchingModels.filter(row => (showBy !== "run" || !runFilter || runs[row.model_package_arn]?.run_id === runFilter)
     && `${nameOf(row)} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const selectionKey = rows.map(r => r.model_package_arn).join("|");
   useEffect(() => { setPreview([]); }, [selectionKey, chosen, images, model, metadata, groups, destination, metric]);
@@ -139,13 +140,17 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const button = "rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40";
   return <section className="mb-5 space-y-3 border-b border-hairline pb-4" aria-label="Rank and export compared models">
     <fieldset disabled={busy || running || !settingsReady} className="space-y-3 disabled:opacity-60">
+      {browseAll && <fieldset className="flex gap-4 text-xs" aria-label="Manual browsing mode">
+        <label><input type="radio" name="manual-show-by" checked={showBy === "model"} onChange={() => { setShowBy("model"); setSearch(""); }} /> Show by model name</label>
+        <label><input type="radio" name="manual-show-by" checked={showBy === "run"} onChange={() => { setShowBy("run"); setSearch(""); }} /> Show by runs</label>
+      </fieldset>}
       {browseAll && <div className="flex flex-wrap items-center gap-3 text-xs">
-        <label>Model name <select aria-label="Filter manual models by name" className="ml-2 rounded border p-2" value={modelFilter} onChange={e => { setModelFilter(e.target.value); setRunFilter(""); }}>
+        {showBy === "model" && <label>Model name <select aria-label="Filter manual models by name" className="ml-2 rounded border p-2" value={modelFilter} onChange={e => setModelFilter(e.target.value)}>
           <option value="">All model names</option>{modelNames.map(name => <option key={name} value={name}>{name}</option>)}
-        </select></label>
-        <label>Run <select aria-label="Filter manual models by run" className="ml-2 rounded border p-2" value={runFilter} onChange={e => setRunFilter(e.target.value)}>
+        </select></label>}
+        {showBy === "run" && <label>Run <select aria-label="Filter manual models by run" className="ml-2 rounded border p-2" value={runFilter} onChange={e => setRunFilter(e.target.value)}>
           <option value="">All runs</option>{runOptions.map(run => <option key={run.run_id} value={run.run_id}>Run {run.run_number}</option>)}
-        </select></label>
+        </select></label>}
         <label>Find a model <input aria-label="Find manual model" className="ml-2 rounded border p-2" placeholder="Model name, version, run or status" value={search} onChange={e => setSearch(e.target.value)}/></label>
         <button type="button" className={button} onClick={() => { setModelFilter(""); setRunFilter(""); setSearch(""); }}>Clear filters</button>
         <span>{visibleRows.length} shown</span>

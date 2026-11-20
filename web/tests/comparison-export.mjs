@@ -55,10 +55,15 @@ test('comparison ranks models and exports exact selections with independent opti
     await page.locator('tbody input').check();
     await page.getByLabel('Filter manual models by name').selectOption('helmet');
     assert.match(await page.locator('tbody tr').innerText(), /Run 1/);
-    await page.getByRole('button', {name: 'Clear filters', exact: true}).click();
+    await page.getByRole('radio', {name: 'Show by runs', exact: true}).check();
+    assert.equal(await page.getByLabel('Filter manual models by name').count(), 0);
+    assert.equal(await page.locator('tbody tr').count(), 2);
     await page.getByLabel('Filter manual models by run').selectOption('r2');
     assert.equal(await page.locator('tbody tr').count(), 1);
     assert.equal(await page.locator('tbody input').isChecked(), true);
+    await page.getByRole('radio', {name: 'Show by model name', exact: true}).check();
+    assert.equal(await page.getByLabel('Filter manual models by run').count(), 0);
+    assert.match(await page.locator('tbody tr').innerText(), /Run 1/);
     await page.getByRole('button', {name: 'Clear filters', exact: true}).click();
     for (const name of ['Run', 'Submitted', 'Status', 'Model name', 'Model type', 'Size', 'Model version', 'Dataset version', 'Images', 'Registered as']) {
       assert.equal(await page.getByRole('columnheader', {name, exact: true}).count(), 1);
