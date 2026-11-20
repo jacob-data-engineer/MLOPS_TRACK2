@@ -23,7 +23,7 @@ export function Track2MetricsExportCard(props: {
     {legacyError&&<p className="text-xs text-critical">{legacyError}</p>}
     {auto ? <Track2AutoExportPanel rows={rows} selectedRows={selectedRows} settings={settings} onChange={onChange} runs={runsByArn} onOpenRun={props.onOpenRun}/> : <>
       <p className="mb-3 text-xs">Manual: browse all registered models, scroll through the list, and tick any versions to export. Comparison does not restrict this list.</p>
-      <Track2ComparisonExport rows={rows} runs={runsByArn} browseAll onOpenRun={props.onOpenRun} />
+      <Track2ComparisonExport rows={rows} runs={runsByArn} settings={settings} onChange={onChange} browseAll onOpenRun={props.onOpenRun} />
     </>}
   </Card>;
 }

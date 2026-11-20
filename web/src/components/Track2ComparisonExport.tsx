@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, checkCatalogDataset, getTrack2CatalogMetadata, getTrack2CatalogExports,
-  getTrack2PullControl, saveTrack2PullConfig, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector,
+  type Track2ExportSettings, type ModelPackageOptions, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector,
   getTrack2CatalogExportUrl, startTrack2CatalogExport, type Track2MetricsRow,
   type Track2RunForModel, type Track2CatalogExport, type CatalogExportDestination } from "../lib/api";
 import { modelLabel } from "./Track2ModelPicker";
@@ -15,24 +15,28 @@ type Metric = typeof METRICS[number];
 type Target = { row: Track2MetricsRow; run?: Track2RunForModel };
 const message = (e: unknown) => e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "Export failed.";
 
-export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRun }: {
+export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRun, settings, onChange }: {
   rows: Track2MetricsRow[]; runs: Record<string, Track2RunForModel>; browseAll?: boolean;
   onOpenRun?: (id:string)=>void;
+  settings: Track2ExportSettings; onChange: (value: Track2ExportSettings) => void;
 }) {
   const [metric, setMetric] = useState<Metric>("mAP50-95");
   const [chosen, setChosen] = useState<string[]>([]);
-  const [images, setImages] = useState(true);
-  const [model, setModel] = useState(true);
-  const [metadata, setMetadata] = useState(true);
-  const [groups, setGroups] = useState(Object.keys(METADATA_CATEGORIES));
-  const [destination, setDestination] = useState<CatalogExportDestination>({ destination: "local", bucket: "", prefix: "", format: "zip" });
+  const options = useMemo(() => settings.package_options ?? {include_model: true, include_images: true, include_metadata: true, metadata_groups: Object.keys(METADATA_CATEGORIES), format: "zip" as const}, [settings.package_options]);
+  const images = options.include_images, model = options.include_model, metadata = options.include_metadata;
+  const groups = useMemo(() => options.metadata_groups ?? Object.keys(METADATA_CATEGORIES), [options.metadata_groups]);
+  const setOptions = (patch: Partial<ModelPackageOptions>) => onChange({...settings, package_options: {...options, ...patch}});
+  const setImages = (value: boolean) => setOptions({include_images: value});
+  const setModel = (value: boolean) => setOptions({include_model: value});
+  const setMetadata = (value: boolean) => setOptions({include_metadata: value});
+  const setGroups = (update: (old: string[]) => string[]) => setOptions({metadata_groups: update(groups)});
+  const destination = useMemo<CatalogExportDestination>(() => ({destination: settings.destination, bucket: settings.bucket, prefix: settings.prefix, format: options.format}), [settings.destination, settings.bucket, settings.prefix, options.format]);
+  const setDestination = (value: CatalogExportDestination) => onChange({...settings, destination: value.destination, bucket: value.bucket, prefix: value.prefix, package_options: {...options, format: value.format}});
   const [preview, setPreview] = useState<Target[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
-  const [settingsReady, setSettingsReady] = useState(false);
-  const [saved, setSaved] = useState("");
   const [jobs, setJobs] = useState<Track2CatalogExport[]>([]);
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState("");
@@ -52,29 +56,6 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
       .catch(() => { if (!disposed) setModelNamesError("Model display names could not be loaded. Showing recorded model names."); });
     return () => { disposed = true; };
   }, [browseAll]);
-  useEffect(() => {
-    let disposed = false;
-    getTrack2PullControl().then(result => {
-      if (disposed) return;
-      const config = result.config.comparison_export;
-      if (config) {
-        if (METRICS.includes(config.metric as Metric)) setMetric(config.metric as Metric);
-        setImages(config.images ?? true); setModel(config.model ?? true); setMetadata(config.metadata ?? true);
-        if (config.groups) setGroups(config.groups.filter(g => g in METADATA_CATEGORIES));
-        if (config.destination) setDestination(config.destination);
-      }
-    }).catch(e => { if (!disposed) setError(`Could not load saved package options: ${message(e)}`); })
-      .finally(() => { if (!disposed) setSettingsReady(true); });
-    return () => { disposed = true; };
-  }, []);
-  async function saveOptions() {
-    setBusy(true); setError(""); setSaved("");
-    try {
-      await saveTrack2PullConfig({ comparison_export: { metric, images, model, metadata, groups, destination } });
-      setSaved("Package options saved. Model selections and pending exports are not resumed on reload.");
-    } catch (e) { setError(message(e)); }
-    finally { setBusy(false); }
-  }
   const ranked = [...rows].sort((a, b) => {
     if (browseAll && showBy === "run") {
       const left = runs[a.model_package_arn]?.run_number;
@@ -165,7 +146,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
     || (destination.destination === "s3" && !destination.bucket.trim());
   const button = "rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40";
   return <section className="mb-5 space-y-3 border-b border-hairline pb-4" aria-label="Rank and export compared models">
-    <fieldset disabled={busy || running || !settingsReady} className="space-y-3 disabled:opacity-60">
+    <fieldset disabled={busy || running} className="space-y-3 disabled:opacity-60">
       {browseAll && <fieldset className="flex gap-4 text-xs" aria-label="Manual browsing mode">
         <label><input type="radio" name="manual-show-by" checked={showBy === "model"} onChange={() => { setShowBy("model"); setSearch(""); }} /> Show by model name</label>
         <label><input type="radio" name="manual-show-by" checked={showBy === "run"} onChange={() => { setShowBy("run"); setSearch(""); }} /> Show by runs</label>
@@ -235,9 +216,8 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
         {destination.destination === "s3" && <><input aria-label="Export bucket" placeholder="Bucket" value={destination.bucket} onChange={e => setDestination({ ...destination, bucket: e.target.value })} /><input aria-label="Export prefix" placeholder="Folder prefix" value={destination.prefix} onChange={e => setDestination({ ...destination, prefix: e.target.value })} /><select aria-label="Package format" value={destination.format} onChange={e => setDestination({ ...destination, format: e.target.value as "zip" | "folder" })}><option value="zip">ZIP</option><option value="folder">Folder</option></select></>}
       </div>
       <button className={button} disabled={invalid || !ranked.some(r => chosen.includes(r.model_package_arn))} onClick={() => void review(chosen)}>{busy ? "Checking availability..." : "Review selected packages"}</button>
-      <button className={`${button} ml-2`} onClick={() => void saveOptions()}>Save package options</button>
+      <p className="text-xs text-muted">Package options are saved with the named file using Save at the top of this page.</p>
     </fieldset>
-    {saved && <p className="text-xs" role="status">{saved}</p>}
     {notes.map((note, i) => <p className="text-xs" key={i}>{note}</p>)}
     {preview.length > 0 && <div className="space-y-2 rounded border border-hairline p-3 text-xs">
       <p className="font-medium">Ready to export these exact versions:</p>

@@ -26,6 +26,7 @@ test('page Save and Load restore comparison models and metric checkboxes', async
         lastLoaded='comparison';json={name:'comparison',settings:saved};
       }
       else if(p.endsWith('/settings'))json={last_loaded:lastLoaded,writable:true,files:saved?[{name:'comparison'}]:[]};
+      else if(p.endsWith('/detectors'))json={detectors:[]};
       else if(p.endsWith('/pull-control'))json={config:{}};
       else if(p.endsWith('/runs-by-model'))json={runs:{}};
       else if(p.endsWith('/audit'))json={audits:[]};
@@ -39,11 +40,24 @@ test('page Save and Load restore comparison models and metric checkboxes', async
     await page.getByRole('combobox',{name:'Version',exact:true}).selectOption('1');
     await page.getByRole('button',{name:'Select this',exact:true}).click();
     await page.locator('#comparison').getByLabel('Precision',{exact:true}).uncheck();
+    await page.getByRole('radio',{name:'Manual',exact:true}).check();
+    await page.getByLabel('Actual images and labels').uncheck();
+    await page.getByText('Metadata categories (14)',{exact:true}).click();
+    await page.getByLabel('Identity',{exact:true}).uncheck();
+    await page.getByLabel('Package destination').selectOption('s3');
+    await page.getByLabel('Export bucket').fill('preset-bucket');
+    await page.getByLabel('Export prefix').fill('helmet/packages');
+    await page.getByLabel('Package format').selectOption('folder');
+    assert.equal(await page.getByRole('button',{name:'Save package options',exact:true}).count(),0);
     await page.getByPlaceholder('new file name').fill('comparison');
     await page.getByRole('button',{name:'Save',exact:true}).click();
     await page.getByText('Saved comparison with 2 compared model(s)',{exact:true}).waitFor();
     assert.deepEqual(saved.comparison_versions,['helmet/2','helmet/1']);
     assert.ok(!saved.comparison_metrics.includes('precision'));
+    assert.equal(saved.package_options.include_images,false);
+    assert.equal(saved.package_options.format,'folder');
+    assert.ok(!saved.package_options.metadata_groups.includes('Identity'));
+    assert.equal(saved.bucket,'preset-bucket');
     await page.getByRole('button',{name:'New',exact:true}).click();
     await page.getByText('Blank settings. Nothing saved until you press Save.',{exact:true}).waitFor();
     assert.equal(await page.locator('#comparison').getByLabel('Precision',{exact:true}).isChecked(),true);
@@ -54,6 +68,12 @@ test('page Save and Load restore comparison models and metric checkboxes', async
     assert.equal(await page.locator('[aria-label="Rank and export compared models"] tbody tr').count(),2);
     await page.reload();
     await page.getByText('Automatically loaded comparison with 2 compared model(s)',{exact:true}).waitFor();
+    assert.equal(await page.getByLabel('Actual images and labels').isChecked(),false);
+    await page.getByText('Metadata categories (13)',{exact:true}).click();
+    assert.equal(await page.getByLabel('Identity',{exact:true}).isChecked(),false);
+    assert.equal(await page.getByLabel('Export bucket').inputValue(),'preset-bucket');
+    assert.equal(await page.getByLabel('Export prefix').inputValue(),'helmet/packages');
+    assert.equal(await page.getByLabel('Package format').inputValue(),'folder');
     assert.equal(await page.locator('#comparison').getByLabel('Precision',{exact:true}).isChecked(),false);
     assert.equal(await page.locator('[aria-label="Rank and export compared models"] tbody tr').count(),2);
     saved.comparison_versions.push('deleted-model/99');

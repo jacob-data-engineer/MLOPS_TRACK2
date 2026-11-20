@@ -112,7 +112,8 @@ test('comparison ranks models and exports exact selections with independent opti
     await page.getByRole('button',{name:'Export this winner now',exact:true}).waitFor();
     await page.getByRole('button',{name:'Export this winner now',exact:true}).click();
     await page.getByRole('button',{name:'Download package ZIP',exact:true}).waitFor();
-    assert.equal(autoRequests[0].package_options.include_images,true);
+    assert.equal(autoRequests[0].package_options.include_images,false);
+    await page.getByLabel('Metadata',{exact:true}).check();
     assert.equal(autoRequests[0].package_options.metadata_groups.length,14);
     await page.getByLabel('Actual images and labels').uncheck();
     await page.getByLabel('Auto S3 bucket').fill('test-exports');
