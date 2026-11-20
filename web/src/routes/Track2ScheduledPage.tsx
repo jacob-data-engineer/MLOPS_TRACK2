@@ -2,6 +2,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "../components/Card";
+import { Track2OtherSchedules } from "../components/Track2OtherSchedules";
 import { formatDayTime } from "../lib/format";
 import {
   ApiError,
@@ -34,7 +35,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 /** One colour per file, in the order the files are listed. */
 const PALETTE = ["#b45309", "#2563eb", "#059669", "#9333ea", "#dc2626", "#0891b2", "#ca8a04", "#db2777"];
 /** Per-viewer convenience only: which saved files were last picked. */
-const PICK_KEY = "track2-scheduled-files";
+const PICK_KEY = "track2-scheduled-files-v2";
 
 /** What each source means, in the words the cards use. */
 const SOURCE_NAMES: Record<string, string> = {
@@ -71,7 +72,7 @@ function dayLabel(ms: number): { day: number; month: string } {
 function readPicks(): string[] | "*" {
   try {
     const raw = window.localStorage.getItem(PICK_KEY);
-    if (!raw) return [];
+    if (!raw) return "*";
     const got = JSON.parse(raw);
     return got === "*" ? "*" : Array.isArray(got) ? got.map(String) : [];
   } catch {
@@ -150,6 +151,9 @@ export function Track2ScheduledPage() {
   const [offset, setOffset] = useState(0);
   const [picks, setPicks] = useState<string[] | "*">(readPicks);
   const [loading, setLoading] = useState(false);
+  const [showTraining, setShowTraining] = useState(true);
+  const [showSql, setShowSql] = useState(true);
+  const [showExports, setShowExports] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -219,15 +223,22 @@ export function Track2ScheduledPage() {
         <span className="text-sm font-normal text-ink-muted">- prototype</span>
       </h1>
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-        Pull and training timing from Multi-Auto Training only, in Singapore time.
-        Only the <strong>loaded</strong> settings file actually runs; any other
+        Scheduled jobs and their settings files, in Singapore time. Display toggles do not enable or disable jobs.
+        For Multi-Auto Training, only the <strong>loaded</strong> settings file actually runs; any other
         saved Multi-Auto Training (_AT) file picked below is shown as what it would run if it were
-        loaded. Hover over a slot to see what that run trains on. Nothing
-        here changes a setting; they are all on{" "}
+        loaded. Hover over a slot to see what that run trains on. Edit training settings on{" "}
         <Link to="/track2/multi-auto-training" className="underline decoration-dotted underline-offset-2 hover:text-ink">
           Multi-Auto Training
-        </Link>.
+        </Link>. SQL and export schedules run independently and are managed on their respective pages.
       </p>
+      <fieldset className="mb-5 flex flex-wrap gap-4 text-sm">
+        <legend className="mb-2 font-medium">Display schedules</legend>
+        <label><input type="checkbox" checked={showTraining} onChange={e => setShowTraining(e.target.checked)} /> Training and pulls</label>
+        <label><input type="checkbox" checked={showSql} onChange={e => setShowSql(e.target.checked)} /> SQL pulls</label>
+        <label><input type="checkbox" checked={showExports} onChange={e => setShowExports(e.target.checked)} /> Model exports</label>
+      </fieldset>
+      {showSql && <Track2OtherSchedules kind="sql" />}
+      {showExports && <Track2OtherSchedules kind="exports" />}
 
       {error && (
         <p className="mb-4 rounded-sm border border-critical/30 bg-critical-subtle px-4 py-3 text-sm text-critical">{error}</p>
@@ -238,7 +249,7 @@ export function Track2ScheduledPage() {
         </p>
       )}
 
-      {data && (
+      {data && showTraining && (
         <>
           <Card title="Multi-Auto Training schedules" collapsible={false}>
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
@@ -307,6 +318,18 @@ export function Track2ScheduledPage() {
             </div>
           </Card>
 
+          <div className="mt-5">
+            <Card title="Upcoming training and pull jobs" collapsible={false}>
+              <p className="mb-2 text-xs">All occurrences in the next {WINDOW_DAYS} days for the files shown above. Preview jobs do not run until their file is loaded.</p>
+              <div className="max-h-80 overflow-auto"><table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-surface"><tr>{["When (SGT)", "Job", "File name", "Status"].map(h => <th className="p-2" key={h}>{h}</th>)}</tr></thead>
+                <tbody>{data.events.map((ev, i) => <tr key={`${ev.file}-${ev.at}-${ev.kind}-${i}`} className="border-t border-hairline">
+                  <td className="p-2">{formatDayTime(ev.at)}</td><td className="p-2">{ev.label}</td><td className="p-2 break-all">{ev.file}</td><td className="p-2">{ev.live ? "Active file" : "Preview only — not loaded"}</td>
+                </tr>)}</tbody>
+              </table></div>
+              {!data.events.length && <p className="text-xs">No jobs scheduled in this period for the displayed files.</p>}
+            </Card>
+          </div>
           <div className="mt-5">
             <Card title="Calendar" collapsible={false}>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
