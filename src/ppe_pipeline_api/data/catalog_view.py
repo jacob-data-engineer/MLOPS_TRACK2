@@ -98,12 +98,15 @@ def runs_by_model() -> dict[str, dict]:
     would answer the same question, but every row of it carries the run's
     full file lists -- ~10 MB for sixty runs -- and a table that only needs
     "Run 58" sat on blanks until all of it arrived. This is one indexed
-    read of five small columns."""
+    read of compact run and dataset summaries."""
     if not catalog.configured():
         return {}
     rows = _iso(_rows(
-        "SELECT model_package_arn, run_number, run_id, submitted_at, status"
-        " FROM training_runs WHERE model_package_arn IS NOT NULL"))
+        "SELECT r.model_package_arn, r.run_number, r.run_id, r.submitted_at, r.status,"
+        " r.detector, r.version_id, v.version_number, v.kind AS version_kind,"
+        " (SELECT count(*) FROM run_files f WHERE f.run_id = r.run_id AND f.kind = 'image') AS images"
+        " FROM training_runs r LEFT JOIN dataset_versions v ON v.id = r.version_id"
+        " WHERE r.model_package_arn IS NOT NULL"))
     return {row.pop("model_package_arn"): row for row in rows}
 
 

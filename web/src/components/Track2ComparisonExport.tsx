@@ -8,6 +8,8 @@ import { METADATA_CATEGORIES } from "./Track2CatalogMetadata";
 import { Track2ExportProgress } from "./Track2ExportProgress";
 import { isSeedVersion, statusLabel } from "../lib/slug";
 
+import { formatSgt } from "../lib/format";
+
 const METRICS = ["mAP50-95", "mAP50", "precision", "recall", "f1", "accuracy"] as const;
 type Metric = typeof METRICS[number];
 type Target = { row: Track2MetricsRow; run?: Track2RunForModel };
@@ -132,15 +134,33 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
       </select></label>
       <p className="text-xs text-ink-muted">Highest recorded score first; missing scores are unranked. Ties share a score. Choose any model to export.</p>
       <p className="text-xs">{rows.length} available models · {chosen.filter(a=>rows.some(r=>r.model_package_arn===a)).length} selected for export</p>
-      <div className="max-h-80 overflow-auto"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-page"><tr><th>Export</th><th>Model / run</th><th>{metric}</th><th>Recorded dataset / validation images</th></tr></thead><tbody>
-        {ranked.filter(row=>`${row.registry} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase())).map(row => <tr key={row.model_package_arn} className="border-t border-hairline">
-          <td><input aria-label={`Export ${modelLabel(row)}`} type="checkbox" checked={chosen.includes(row.model_package_arn)} onChange={e => setChosen(old => e.target.checked ? [...old, row.model_package_arn] : old.filter(a => a !== row.model_package_arn))} /></td>
-          <td className="py-2">{row.registry} · {modelLabel(row)} · {runs[row.model_package_arn] ? `Run ${runs[row.model_package_arn].run_number}` : "No run recorded"}<br />{isSeedVersion(row.description) ? "Seed" : statusLabel(row.status)}
-            {onOpenRun&&runs[row.model_package_arn]&&<button className="ml-2 underline" onClick={()=>onOpenRun(runs[row.model_package_arn].run_id)}>Open run in catalog</button>}</td>
-          <td>{row.metrics?.[metric]?.toFixed(4) ?? "Not measured"}</td>
-          <td>{row.metrics?.dataset?.dataset_version || "Unknown"} / {row.metrics?.dataset?.validation_count ?? "Unknown"}</td>
-        </tr>)}
-      </tbody></table></div>
+      <div className="max-h-[calc(22rem+2px)] overflow-auto rounded border border-hairline" tabIndex={0} role="region" aria-label="Models available for manual export">
+        <table className="tabular min-w-full whitespace-nowrap text-xs [&_tr]:h-8">
+          <thead className="sticky top-0 bg-surface text-left text-ink"><tr>
+            {["Export", "Run", "Submitted", "Status", "Model name", "Model type", "Size", "Model version", "Dataset version", "Images", "Registered as", metric, "Validation images"].map(h =>
+              <th key={h} className="border-b border-hairline px-2 py-1.5 font-medium">{h}</th>)}
+          </tr></thead>
+          <tbody>{ranked.filter(row => `${row.registry} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase())).map(row => {
+            const run = runs[row.model_package_arn];
+            const selected = chosen.includes(row.model_package_arn);
+            return <tr key={row.model_package_arn} className={`border-b border-hairline/50 hover:bg-black/[0.03] [&_td]:px-2 [&_td]:py-1 ${selected ? "bg-accent-subtle" : ""}`}>
+              <td><input aria-label={`Export ${modelLabel(row)}`} type="checkbox" checked={selected} onChange={e => setChosen(old => e.target.checked ? [...old, row.model_package_arn] : old.filter(a => a !== row.model_package_arn))} /></td>
+              <td className="font-medium text-ink">{run ? onOpenRun ? <button type="button" className="rounded px-1 underline focus-visible:outline focus-visible:outline-2" aria-label={`Open Run ${run.run_number} in Run Central`} onClick={() => onOpenRun(run.run_id)}>Run {run.run_number}</button> : `Run ${run.run_number}` : "No run recorded"}</td>
+              <td>{formatSgt(run?.submitted_at, "--")}</td>
+              <td>{run?.status || (isSeedVersion(row.description) ? "Seed" : statusLabel(row.status))}</td>
+              <td>{run?.detector || row.registry}</td>
+              <td>{row.generation ? `YOLO${row.generation}` : "--"}</td>
+              <td>{row.size?.toUpperCase() || "--"}</td>
+              <td className="font-medium text-ink">v{row.version}</td>
+              <td title={run?.version_id || ""}>{run?.version_number ? `${run.version_kind === "snapshot" ? "Snapshot" : "Version"} ${run.version_number}` : "--"}</td>
+              <td>{run?.images?.toLocaleString() ?? "--"}</td>
+              <td>{row.group_name}</td>
+              <td>{row.metrics?.[metric]?.toFixed(4) ?? "Not measured"}</td>
+              <td>{row.metrics?.dataset?.validation_count?.toLocaleString() ?? "--"}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
       <p className="text-xs">Recorded dataset versions and counts do not prove identical evaluation images or settings. <a className="underline text-accent" href="/track2/eval">Open evaluation</a> to explicitly evaluate models on a common dataset.</p>
       <div className="flex flex-wrap gap-4 text-xs">
         <label><input type="checkbox" checked={model} onChange={e => setModel(e.target.checked)} /> Model (.pt)</label>

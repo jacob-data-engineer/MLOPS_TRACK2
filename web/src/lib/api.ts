@@ -4012,6 +4012,11 @@ export interface Track2RunForModel {
   run_id: string;
   submitted_at: string | null;
   status: string | null;
+  detector?: string | null;
+  version_id?: string | null;
+  version_number?: number | null;
+  version_kind?: string | null;
+  images?: number;
 }
 
 /** Keyed on model package ARN. A few kilobytes, where the training

@@ -49,6 +49,9 @@ test('comparison ranks models and exports exact selections with independent opti
     });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`);
     await page.getByLabel('Ranking metric').selectOption('mAP50');
+    for (const name of ['Run', 'Submitted', 'Status', 'Model name', 'Model type', 'Size', 'Model version', 'Dataset version', 'Images', 'Registered as']) {
+      assert.equal(await page.getByRole('columnheader', {name, exact: true}).count(), 1);
+    }
     await page.getByLabel('Find manual model').fill('Run 2');
     // Search includes the run number even when the word "Run" is omitted.
     await page.getByLabel('Find manual model').fill('2');
