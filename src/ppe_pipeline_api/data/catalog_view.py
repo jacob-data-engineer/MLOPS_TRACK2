@@ -42,11 +42,31 @@ PART = 64 * 1024 * 1024
 FETCHERS = 16
 
 
+def chronological_runs_sql(sql: str) -> str:
+    """Number the complete run history before any search, model or page filter.
+
+    The stored bigserial is an allocation counter: ON CONFLICT updates consume
+    it too. It is not a count of runs. Keep run_id as the permanent identity.
+    Ranking happens before the caller's filtering and pagination.
+    """
+    if not re.search(r"\btraining_runs\b", sql):
+        return sql
+    return """WITH chronological_training_runs AS (
+        SELECT run_id,version_id,started_at,detector,execution_arn,
+               model_package_arn,detail,status,submitted_at,ended_at,
+               architecture,files_synced,record,
+               row_number() OVER (
+                   ORDER BY coalesce(submitted_at,started_at) ASC NULLS LAST,run_id
+               ) AS run_number
+        FROM training_runs
+    ) """ + re.sub(r"\btraining_runs\b", "chronological_training_runs", sql)
+
+
 def _rows(sql: str, params: tuple = ()) -> list[dict]:
     conn = catalog.connect()
     try:
         cur = conn.cursor()
-        cur.execute(sql, params)
+        cur.execute(chronological_runs_sql(sql), params)
         names = [d[0] for d in cur.description]
         return [dict(zip(names, row)) for row in cur.fetchall()]
     finally:
@@ -64,7 +84,7 @@ def _iso(rows: list[dict]) -> list[dict]:
 # --- browsing ---------------------------------------------------------------
 
 def run_numbers(run_ids: list[str]) -> dict[str, int]:
-    """Stable catalog numbers for history entries, independent of display order."""
+    """Global chronological numbers, independent of filtering and model version."""
     if not run_ids or not catalog.configured():
         return {}
     placeholders = ", ".join(["%s"] * len(run_ids))

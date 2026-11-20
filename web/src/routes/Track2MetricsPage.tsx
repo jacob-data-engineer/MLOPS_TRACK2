@@ -212,7 +212,7 @@ function Track2MetricsBarChart({ rows, metrics, runs, onOpenRun }: {
             <div className="mt-2 ml-10 flex gap-4 px-1">
               {rows.map((row) => (
                 <span key={rowKey(row)} className="tabular flex-1 truncate text-center text-[11px] text-ink-muted">
-                  {modelLabel(row)} &middot; {runLabel(runs[row.model_package_arn])}
+                  {runLabel(runs[row.model_package_arn])} &middot; {modelLabel(row)}
                 </span>
               ))}
             </div>
