@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { ASK_CARD_EVENT, type AskCardDetail } from "../lib/helpContext";
 import { useCardOpen } from "../lib/cardState";
 import { CardBoundary } from "./CardBoundary";
 
@@ -86,9 +87,13 @@ export function Card({
   const [open, setOpen] = useCardOpen(rememberAs, defaultOpen);
   const [helpOpen, setHelpOpen] = useState(false);
   const shut = collapsible && !open;
+  // For "Ask about this card": the help guide reads this card's fields
+  // from here at the moment a question is sent.
+  const sectionRef = useRef<HTMLElement | null>(null);
 
   return (
-    <section className="rounded-sm border border-hairline bg-surface p-5 shadow-[0_1px_0_rgba(36,29,22,0.06)]">
+    <section ref={sectionRef} data-card-title={title || undefined}
+             className="rounded-sm border border-hairline bg-surface p-5 shadow-[0_1px_0_rgba(36,29,22,0.06)]">
       {(title || action || collapsible) && (
         <div className="mb-3 flex items-start justify-between gap-4 border-b border-hairline pb-2.5">
           {title && (
@@ -103,6 +108,18 @@ export function Card({
             </h3>
           )}
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            {title && (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent<AskCardDetail>(ASK_CARD_EVENT,
+                  { detail: { title, element: sectionRef.current } }))}
+                title="Ask about this card"
+                aria-label={`Ask about this card: ${title}`}
+                className="rounded-md border border-black/15 px-2 py-1.5 text-xs font-medium text-ink-secondary"
+              >
+                Ask
+              </button>
+            )}
             {help && (
               <button
                 type="button"

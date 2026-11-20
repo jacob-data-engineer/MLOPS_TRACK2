@@ -1,5 +1,6 @@
 import { ExternalLink, HelpCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { HelpDocsTab } from "../components/HelpDocsTab";
 import { useSearchParams } from "react-router-dom";
 import { Card } from "../components/Card";
 
@@ -41,6 +42,8 @@ const TABS = [
   { key: "metrics", label: "Review & Metrics" },
   { key: "notifications", label: "Notifications" },
   { key: "housekeeping", label: "Housekeeping" },
+  // Last: documentation uploaded for the help assistant (2026-11-20).
+  { key: "llm-docs", label: "LLM documentation" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -578,7 +581,7 @@ const HOUSEKEEPING_STEPS: StepList = [
   },
 ];
 
-const CONTENT: Record<TabKey, { blurb: ReactNode; steps: StepList; closing?: ReactNode }> = {
+const CONTENT: Record<Exclude<TabKey, "llm-docs">, { blurb: ReactNode; steps: StepList; closing?: ReactNode }> = {
   training: {
     blurb: (
       <>
@@ -655,7 +658,7 @@ export function Track2HelpPage({ popout = false }: { popout?: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  const { blurb, steps, closing } = CONTENT[tab];
+  const walkthrough = tab === "llm-docs" ? null : CONTENT[tab];
 
   return (
     <div className={popout ? "mx-auto max-w-2xl px-4 py-5" : ""}>
@@ -703,15 +706,19 @@ export function Track2HelpPage({ popout = false }: { popout?: boolean }) {
         )}
       </div>
 
-      <Card title={TABS.find((t) => t.key === tab)!.label}>
-        <p className="mb-4 text-sm text-ink-secondary">{blurb}</p>
-        <Steps id={tab} steps={steps} />
-        {closing && (
-          <p className="mt-4 rounded-sm border border-critical/30 bg-critical-subtle px-3 py-2 text-sm text-critical">
-            {closing}
-          </p>
-        )}
-      </Card>
+      {walkthrough ? (
+        <Card title={TABS.find((t) => t.key === tab)!.label}>
+          <p className="mb-4 text-sm text-ink-secondary">{walkthrough.blurb}</p>
+          <Steps id={tab} steps={walkthrough.steps} />
+          {walkthrough.closing && (
+            <p className="mt-4 rounded-sm border border-critical/30 bg-critical-subtle px-3 py-2 text-sm text-critical">
+              {walkthrough.closing}
+            </p>
+          )}
+        </Card>
+      ) : (
+        <HelpDocsTab />
+      )}
 
       {!popout && (
         <div className="mt-5">

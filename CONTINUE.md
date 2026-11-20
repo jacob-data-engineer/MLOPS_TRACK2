@@ -1,5 +1,25 @@
 # Continue here
 
+HELP ASSISTANT (20 Nov) -- built, deployed to dev, SWITCHED OFF pending
+approval. Floating "Help" on every page (Layout -> HelpChat), "Ask" on every
+titled Card (data-card-title + ASK_CARD_EVENT; fields read from the DOM at
+send time, password/file inputs and secret-labelled fields skipped; the
+asked card is cleared on navigation). Help page has a last tab "LLM
+documentation" (HelpDocsTab) to upload .md/.txt (200 KB, 50 docs) to
+`s3://track2-s3/_help/docs/`. Backend `help_guide/`: `build.py` generates
+`app_guide.json` FROM web/src (rerun `python -m ppe_pipeline_api.help_guide.build`
+after UI changes; a test fails if stale), `docs.py` (uploads + keyword
+retrieval, 24k-char budget), `chat.py` (Bedrock via anthropic[bedrock]
+AnthropicBedrockMantle, NO tools, redaction, 8/min 150/day per session,
+45 s timeout, errors mapped, metadata-only logging). Routes
+/track2/assistant/{status,chat,docs}. Env: HELP_CHAT_ENABLED (default false),
+HELP_CHAT_MODEL_ID (default anthropic.claude-opus-5-5), HELP_CHAT_REGION
+(default ap-southeast-1) -- passed by deploy.sh.
+TO ENABLE (needs approval): 1) Bedrock model access for the chosen model;
+2) add `bedrock-mantle:CreateInference` to role `track2-yolo-review-host`
+(simulation on 20 Nov: implicitDeny for it and bedrock:InvokeModel);
+3) redeploy dev with HELP_CHAT_ENABLED=true.
+
 Compare -> best -> export, linked to the run (18 Nov, dev `20261118-120431`).
 Run numbers (from `/catalog/runs-by-model`, keyed on package ARN) on the
 comparison legend and bar labels, picker version list, and Model export's

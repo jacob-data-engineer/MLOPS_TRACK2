@@ -27,6 +27,12 @@ APP_ROLE="${APP_ROLE:-stable}"
 # no queue poll loop (see main.background_enabled). The refactor slot.
 APP_BACKGROUND="${APP_BACKGROUND:-on}"
 APP_EXTERNAL_WORKER=false
+# The in-app help assistant (2026-11-20). OFF unless HELP_CHAT_ENABLED=true
+# is passed to this script: it calls Amazon Bedrock, which is billed per
+# token, and needs bedrock-mantle:CreateInference on the app role.
+HELP_CHAT_ENABLED="${HELP_CHAT_ENABLED:-false}"
+HELP_CHAT_MODEL_ID="${HELP_CHAT_MODEL_ID:-anthropic.claude-opus-5-5}"
+HELP_CHAT_REGION="${HELP_CHAT_REGION:-ap-southeast-1}"
 if [ "$APP_ROLE" = "dev" ] && [ "$PORT" = "8090" ]; then
   APP_EXTERNAL_WORKER=true
   TRACK2_RECORD_BACKEND="${TRACK2_RECORD_BACKEND:-postgres}"
@@ -279,6 +285,9 @@ docker run -d --name $CONTAINER --restart unless-stopped -p $PORT:8501 \\
   -e TRACK2_RECORD_BACKEND='$TRACK2_RECORD_BACKEND' \\
   -e CATALOG_SCHEMA='$CATALOG_SCHEMA' \\
   -e APP_PORT='$PORT' \\
+  -e HELP_CHAT_ENABLED='$HELP_CHAT_ENABLED' \\
+  -e HELP_CHAT_MODEL_ID='$HELP_CHAT_MODEL_ID' \\
+  -e HELP_CHAT_REGION='$HELP_CHAT_REGION' \\
   -e AWS_REGION='$REGION' \\
   -e REVIEW_QUEUE_TABLE='track2-yolo-review-queue' \\
   -e PIPELINE_BUCKET='$BUCKET' \\

@@ -18,6 +18,7 @@ import { getTrack2Build, type Track2Build } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useNavGuard } from "../context/NavGuardContext";
 import { RouteBoundary } from "./RouteBoundary";
+import { HelpChat } from "./HelpChat";
 
 interface NavItem {
   to: string;
@@ -370,6 +371,8 @@ export function Layout() {
           </RouteBoundary>
         </div>
       </main>
+      {/* The help guide: on every page, read-only. */}
+      <HelpChat />
     </div>
   );
 }

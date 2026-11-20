@@ -4339,3 +4339,36 @@ export function loadTrack2TrainingData(name: string, apply = false): Promise<{
 }> {
   return apiPost("/track2/pull-control/settings/training-data", { name, apply });
 }
+
+
+/* ---- The help assistant (2026-11-20): read-only, off until enabled ---- */
+
+export interface Track2AssistantStatus {
+  enabled: boolean; model: string; region: string; guide_sections: number;
+  uploaded_documents: number | null; read_only: boolean;
+}
+export interface Track2AssistantDoc { name: string; bytes: number; updated_at: string }
+
+export function getTrack2AssistantStatus(): Promise<Track2AssistantStatus> {
+  return apiGet("/track2/assistant/status");
+}
+
+export function askTrack2Assistant(
+  messages: { role: "user" | "assistant"; content: string }[],
+  context: unknown,
+): Promise<{ answer: string; sources: { file: string; title: string; uploaded: boolean }[]; truncated?: boolean }> {
+  return apiPost("/track2/assistant/chat", { messages, context });
+}
+
+export function listTrack2AssistantDocs(): Promise<{ documents: Track2AssistantDoc[]; max_bytes: number; allowed: string[] }> {
+  return apiGet("/track2/assistant/docs");
+}
+
+export function uploadTrack2AssistantDoc(file: File): Promise<{ name: string; bytes: number; replaced: boolean }> {
+  const form = new FormData(); form.append("file", file);
+  return apiPostForm("/track2/assistant/docs", form);
+}
+
+export function deleteTrack2AssistantDoc(name: string): Promise<{ name: string; deleted: boolean }> {
+  return apiDelete(`/track2/assistant/docs/${encodeURIComponent(name)}`);
+}
