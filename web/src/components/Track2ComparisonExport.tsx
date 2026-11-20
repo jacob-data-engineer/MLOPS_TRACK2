@@ -36,6 +36,8 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const [jobs, setJobs] = useState<Track2CatalogExport[]>([]);
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState("");
+  const [generationFilter, setGenerationFilter] = useState("");
+  const [sizeFilter, setSizeFilter] = useState("");
   const [showBy, setShowBy] = useState<"model" | "run">("model");
   const [runFilter, setRunFilter] = useState("");
   const [direct, setDirect] = useState<{label: string; url: string; uri: string}[]>([]);
@@ -68,7 +70,11 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
     || a.model_package_arn.localeCompare(b.model_package_arn));
   const nameOf = (row: Track2MetricsRow) => runs[row.model_package_arn]?.detector || row.registry;
   const modelNames = [...new Set(rows.map(nameOf))].sort();
-  const matchingModels = ranked.filter(row => showBy !== "model" || !modelFilter || nameOf(row) === modelFilter);
+  const namedModels = ranked.filter(row => !modelFilter || nameOf(row) === modelFilter);
+  const generations = [...new Set(namedModels.map(row => row.generation).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
+  const typedModels = namedModels.filter(row => !generationFilter || row.generation === generationFilter);
+  const sizes = [...new Set(typedModels.map(row => row.size).filter(Boolean))].sort((a, b) => "nslmx".indexOf(a) - "nslmx".indexOf(b));
+  const matchingModels = showBy === "model" ? typedModels.filter(row => !sizeFilter || row.size === sizeFilter) : ranked;
   const runOptions = [...new Map(matchingModels.flatMap(row => {
     const run = runs[row.model_package_arn];
     return run ? [[run.run_id, run] as const] : [];
@@ -145,14 +151,20 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
         <label><input type="radio" name="manual-show-by" checked={showBy === "run"} onChange={() => { setShowBy("run"); setSearch(""); }} /> Show by runs</label>
       </fieldset>}
       {browseAll && <div className="flex flex-wrap items-center gap-3 text-xs">
-        {showBy === "model" && <label>Model name <select aria-label="Filter manual models by name" className="ml-2 rounded border p-2" value={modelFilter} onChange={e => setModelFilter(e.target.value)}>
+        {showBy === "model" && <><label>Model name <select aria-label="Filter manual models by name" className="ml-2 rounded border p-2" value={modelFilter} onChange={e => { setModelFilter(e.target.value); setGenerationFilter(""); setSizeFilter(""); }}>
           <option value="">All model names</option>{modelNames.map(name => <option key={name} value={name}>{name}</option>)}
-        </select></label>}
+        </select></label>
+        <label>YOLO model type <select aria-label="Filter manual models by YOLO type" className="ml-2 rounded border p-2" value={generationFilter} onChange={e => { setGenerationFilter(e.target.value); setSizeFilter(""); }}>
+          <option value="">All YOLO types</option>{generations.map(generation => <option key={generation} value={generation}>YOLO{generation}</option>)}
+        </select></label>
+        <label>Size <select aria-label="Filter manual models by size" className="ml-2 rounded border p-2" value={sizeFilter} onChange={e => setSizeFilter(e.target.value)}>
+          <option value="">All sizes</option>{sizes.map(size => <option key={size} value={size}>{size.toUpperCase()}</option>)}
+        </select></label></>}
         {showBy === "run" && <label>Run <select aria-label="Filter manual models by run" className="ml-2 rounded border p-2" value={runFilter} onChange={e => setRunFilter(e.target.value)}>
           <option value="">All runs</option>{runOptions.map(run => <option key={run.run_id} value={run.run_id}>Run {run.run_number}</option>)}
         </select></label>}
         <label>Find a model <input aria-label="Find manual model" className="ml-2 rounded border p-2" placeholder="Model name, version, run or status" value={search} onChange={e => setSearch(e.target.value)}/></label>
-        <button type="button" className={button} onClick={() => { setModelFilter(""); setRunFilter(""); setSearch(""); }}>Clear filters</button>
+        <button type="button" className={button} onClick={() => { setModelFilter(""); setGenerationFilter(""); setSizeFilter(""); setRunFilter(""); setSearch(""); }}>Clear filters</button>
         <span>{visibleRows.length} shown</span>
       </div>}
       <label className="text-sm font-medium">{browseAll?"Sort models by":"Rank selected models by"} <select aria-label="Ranking metric" value={metric} onChange={e => setMetric(e.target.value as Metric)} className="ml-2 rounded border p-1">
