@@ -297,6 +297,14 @@ def list_export_settings(session=Depends(require_session)) -> dict:
             "writable": os.access(EXPORT_SETTINGS_DIR, os.W_OK)}
 
 
+@router.get("/export/defaults")
+def export_defaults(session=Depends(require_session)) -> dict:
+    """New exports go to the configured central store; existing presets retain their choices."""
+    from ..data.catalog_view import _export_bucket
+    bucket, prefix = _export_bucket()
+    return {"destination": "s3", "bucket": bucket, "prefix": prefix, "format": "zip"}
+
+
 @router.post("/export/settings/save")
 def save_export_settings(payload: ExportSettingsRequest,
                          session=Depends(require_session)) -> dict:

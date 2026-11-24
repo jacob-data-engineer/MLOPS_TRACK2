@@ -47,6 +47,13 @@ def test_a_preset_round_trips(settings_dir):
     assert got["prefix"] == "exports"
 
 
+def test_new_export_defaults_use_configured_s3_folder(monkeypatch):
+    from src.ppe_pipeline_api.data import catalog_view
+    monkeypatch.setattr(catalog_view, "_export_bucket", lambda: ("configured-bucket", "dev/_exports"))
+    assert mod.export_defaults(session=None) == {
+        "destination": "s3", "bucket": "configured-bucket", "prefix": "dev/_exports", "format": "zip"}
+
+
 def test_comparison_models_and_metrics_round_trip_in_order(settings_dir):
     versions = ["helmet/7", "vest/3", "helmet/2"]
     save("comparison", comparison_versions=versions, comparison_metrics=["recall", "f1"])

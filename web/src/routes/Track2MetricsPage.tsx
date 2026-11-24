@@ -43,9 +43,8 @@ const MAX_COMPARE = 4;
  *
  * Empty for the three dropdowns rather than a guess: the card fills them
  * from whatever is actually registered on its first render, and a default
- * of "helmet" would be a Class that may not exist. `local` because a
- * download writes nothing anybody else can see -- the safe reading of
- * silence. */
+ * of "helmet" would be a Class that may not exist. New exports use the
+ * configured S3 export folder, resolved by the settings toolbar. */
 const EXPORT_DEFAULTS: Track2ExportSettings = {
   comparison_versions: [],
   comparison_metrics: ["mAP50", "mAP50-95", "precision", "recall", "f1"],
@@ -55,7 +54,7 @@ const EXPORT_DEFAULTS: Track2ExportSettings = {
   size: "",
   group_name: "",
   criterion: "mAP50",
-  destination: "local",
+  destination: "s3",
   bucket: "",
   prefix: "",
   // The policy you get by not choosing one, and the only one that

@@ -19,6 +19,7 @@ import { useAuth } from "../context/AuthContext";
 import { useNavGuard } from "../context/NavGuardContext";
 import { RouteBoundary } from "./RouteBoundary";
 import { HelpChat } from "./HelpChat";
+import { Track2CompletionNotices } from "./Track2CompletionNotices";
 
 interface NavItem {
   to: string;
@@ -361,6 +362,7 @@ export function Layout() {
 
       <main className="flex-1 overflow-y-auto bg-page">
         <StaleBuildBanner />
+        <Track2CompletionNotices />
 
         <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
           {/* Keyed by path so navigating away clears a failure: a latched

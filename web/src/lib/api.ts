@@ -1587,6 +1587,10 @@ export function listTrack2ExportSettings(): Promise<{
   return apiGet("/track2/metrics/export/settings");
 }
 
+export function getTrack2ExportDefaults(): Promise<CatalogExportDestination> {
+  return apiGet("/track2/metrics/export/defaults");
+}
+
 export function saveTrack2ExportSettings(
   name: string,
   settings: Track2ExportSettings,

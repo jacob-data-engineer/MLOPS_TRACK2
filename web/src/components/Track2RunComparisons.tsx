@@ -5,9 +5,9 @@ import {Track2BaselineComparison} from './Track2BaselineComparison';
 import {formatDayTime} from '../lib/format';
 
 const metrics = ['mAP50-95', 'mAP50', 'precision', 'recall', 'f1'] as const;
-export function Track2RunComparisons() {
+export function Track2RunComparisons({initialRun = ''}: {initialRun?: string} = {}) {
   const [runs, setRuns] = useState<RunComparisonSummary[]>([]);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState(initialRun);
   const [selection, setSelection] = useState<BaselineSelection>({enabled: false});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);

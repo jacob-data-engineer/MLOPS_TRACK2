@@ -4,6 +4,7 @@ import {
   deleteTrack2ExportSettings,
   forgetTrack2ExportSettings,
   listTrack2ExportSettings,
+  getTrack2ExportDefaults,
   loadTrack2ExportSettings,
   saveTrack2ExportSettings,
   type Track2ExportSettings,
@@ -67,7 +68,12 @@ export function Track2ExportSettingsBar({
         if (disposed) return;
         setFiles(listed.files); setWritable(listed.writable);
         setPick(listed.last_loaded || listed.files[0]?.name || "");
-        if (listed.last_loaded) {
+        if (!listed.last_loaded) {
+          const destination = await getTrack2ExportDefaults();
+          if (disposed) return;
+          onChange({...defaults, ...destination});
+          setNote('New exports are saved to the configured S3 export folder.');
+        } else {
           try {
             const got = await loadTrack2ExportSettings(listed.last_loaded);
             if (disposed) return;
@@ -114,7 +120,8 @@ export function Track2ExportSettingsBar({
         disabled={!!busy}
         onClick={() => withBusy("Clearing...", async () => {
           await forgetTrack2ExportSettings();
-          onChange(defaults);
+          const destination = await getTrack2ExportDefaults();
+          onChange({...defaults, ...destination});
           setLoaded("");
           setSavedAt("");
           setNote("Blank settings. Nothing saved until you press Save.");

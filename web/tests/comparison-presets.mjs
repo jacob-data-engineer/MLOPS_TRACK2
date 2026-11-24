@@ -19,6 +19,8 @@ test('page Save and Load restore comparison models and metric checkboxes', async
       const p=new URL(route.request().url()).pathname;
       let json={};
       if(p.endsWith('/metrics'))json={rows};
+      else if(p.endsWith('/comparisons'))json={runs:[]};
+      else if(p.endsWith('/export/defaults'))json={destination:'s3',bucket:'track2-s3',prefix:'_exports',format:'zip'};
       else if(p.endsWith('/settings/save')){saved=route.request().postDataJSON().settings;lastLoaded='comparison';json={name:'comparison'};}
       else if(p.endsWith('/settings/forget')){lastLoaded='';json={last_loaded:''};}
       else if(p.endsWith('/settings/load')){
