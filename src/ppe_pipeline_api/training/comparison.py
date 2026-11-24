@@ -111,7 +111,14 @@ def register_baseline(source_arn, label):
     if not t2.ensure_model_package_group(group_name(), 'Baseline Model: comparison only, never auto-deployed.'):
         raise ValueError('The Baseline Model registry could not be created.')
     spec = dict(description['InferenceSpecification'])
-    spec['Containers'] = [{**containers[0], 'ModelDataUrl': artifact['uri']}]
+    # DescribeModelPackage includes artifact ETags and resolved data sources.
+    # They identify the original object, not our preserved copy. Build a fresh
+    # container request rather than sending that response metadata back to AWS.
+    container = {key: containers[0][key] for key in (
+        'Image', 'Environment', 'ContainerHostname', 'Framework',
+        'FrameworkVersion', 'NearestModelName') if key in containers[0]}
+    container['ModelDataUrl'] = artifact['uri']
+    spec['Containers'] = [container]
     created = t2.sm.create_model_package(ModelPackageGroupName=group_name(),
         ModelPackageDescription=label, InferenceSpecification=spec,
         ModelApprovalStatus='PendingManualApproval',

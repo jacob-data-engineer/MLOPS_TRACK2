@@ -182,12 +182,19 @@ def test_register_baseline_copies_artifact_without_approval_or_deployment(monkey
     monkeypatch.setattr(data,'preserve_training_base',lambda uri:{'uri':'s3://b/preserved/model.tar.gz'})
     monkeypatch.setattr(c.t2,'ensure_model_package_group',lambda *a:True)
     monkeypatch.setattr(c.t2,'sm',SimpleNamespace(
-        describe_model_package=lambda **kw:{'InferenceSpecification':{'Containers':[{'Image':'serve','ModelDataUrl':'s3://b/original.tar.gz'}]}},
+        describe_model_package=lambda **kw:{'InferenceSpecification':{'Containers':[{
+            'Image':'serve','ModelDataUrl':'s3://b/original.tar.gz',
+            'ModelDataETag':'original-etag', 'ImageDigest':'sha256:resolved',
+            'ModelDataSource':{'S3DataSource':{'S3Uri':'s3://b/original.tar.gz','ETag':'original-etag'}},
+            'Environment':{'MODEL_NAME':'detector'}}]}},
         create_model_package=lambda **kw:created.append(kw) or {'ModelPackageArn':arn(c.group_name())}))
     c.register_baseline(arn(),'Reference')
     assert created[0]['ModelPackageGroupName'] == c.group_name()
     assert created[0]['ModelApprovalStatus'] == 'PendingManualApproval'
     assert created[0]['InferenceSpecification']['Containers'][0]['ModelDataUrl'] == 's3://b/preserved/model.tar.gz'
+    assert created[0]['InferenceSpecification']['Containers'][0] == {
+        'Image':'serve', 'Environment':{'MODEL_NAME':'detector'},
+        'ModelDataUrl':'s3://b/preserved/model.tar.gz'}
 
 
 def test_local_yolo_evaluator_smoke_without_training_or_network(tmp_path):
