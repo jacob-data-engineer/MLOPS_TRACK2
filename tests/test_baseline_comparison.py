@@ -206,6 +206,7 @@ def test_local_yolo_evaluator_smoke_without_training_or_network(tmp_path):
     model.model.names = {0:'helmet'}
     checkpoint = tmp_path / 'model.pt'
     model.save(str(checkpoint))
+    assert c._inspect_uploaded_baseline(checkpoint) == {0:'helmet'}
     picture = io.BytesIO()
     Image.new('RGB',(64,64),'white').save(picture,format='JPEG')
     objects = {'image.jpg':picture.getvalue(),'label.txt':b'0 0.5 0.5 0.2 0.2\n','model.pt':checkpoint.read_bytes()}
@@ -237,3 +238,56 @@ def test_comparison_routes_require_auth_and_return_busy_conflict(monkeypatch):
     monkeypatch.setattr(c.t2,'scan_training_audits',lambda **kw:[{'id':'old','status':'Succeeded'}])
     response = client.get('/track2/comparisons')
     assert response.status_code == 200 and response.json()['runs'][0]['status'] == 'No comparisons'
+
+
+def test_direct_upload_only_registers_in_baseline_registry(monkeypatch):
+    import tarfile
+    uploaded, registered = [], []
+    monkeypatch.setattr(c,'_inspect_uploaded_baseline',lambda path:{0:'helmet'})
+    monkeypatch.setattr(c.t2,'ensure_model_package_group',lambda group,description:group==c.group_name())
+    def upload_file(path,bucket,key):
+        with tarfile.open(path) as archive:
+            assert archive.getnames() == ['model.pt']
+            assert archive.extractfile('model.pt').read() == b'checkpoint'
+        uploaded.append(key)
+    monkeypatch.setattr(c.t2,'s3',SimpleNamespace(upload_file=upload_file))
+    monkeypatch.setattr(c.t2,'sm',SimpleNamespace(create_model_package=lambda **kw:
+        registered.append(kw) or {'ModelPackageArn':arn(c.group_name())}))
+    result=c.upload_baseline(io.BytesIO(b'checkpoint'),'../../uploaded.PT','Reference')
+    assert result['classes']==['helmet'] and result['bytes']==10
+    assert len(uploaded)==len(registered)==1
+    assert uploaded[0].startswith('baseline-models/'+c.group_name()+'/') and '..' not in uploaded[0]
+    assert registered[0]['ModelPackageGroupName']==c.group_name()
+    assert registered[0]['ModelApprovalStatus']=='PendingManualApproval'
+    assert registered[0]['CustomerMetadataProperties']['base_model_source']=='direct-upload'
+
+
+@pytest.mark.parametrize('filename,body,label', [('file.zip',b'abc','name'),('file.pt',b'','name'),
+    ('file.pt',b'abc',' '),('file.pt',b'abc','x'*201),('file.pt',b'12345','name')])
+def test_direct_upload_rejects_invalid_inputs_before_storage(monkeypatch,filename,body,label):
+    monkeypatch.setattr(c,'MAX_BASELINE_UPLOAD_BYTES',4)
+    monkeypatch.setattr(c,'_inspect_uploaded_baseline',lambda path:pytest.fail('Invalid upload reached inspection'))
+    with pytest.raises(ValueError): c.upload_baseline(io.BytesIO(body),filename,label)
+
+
+def test_malformed_checkpoint_never_reaches_registry(monkeypatch):
+    monkeypatch.setattr(c,'_inspect_uploaded_baseline',lambda path:(_ for _ in ()).throw(ValueError('Invalid checkpoint')))
+    monkeypatch.setattr(c.t2,'ensure_model_package_group',lambda *args:pytest.fail('Invalid model reached registry'))
+    with pytest.raises(ValueError,match='Invalid checkpoint'):
+        c.upload_baseline(io.BytesIO(b'bad'),'model.pt','Reference')
+
+
+def test_upload_api_requires_auth_and_passes_multipart_file(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from ppe_pipeline_api.routers import track2_comparisons as router
+    app=FastAPI(); app.include_router(router.router,prefix='/track2/comparisons')
+    client=TestClient(app)
+    route='/track2/comparisons/baselines/upload'
+    assert client.post(route,files={'file':('model.pt',b'weights')},data={'label':'Reference'}).status_code==401
+    app.dependency_overrides[router.require_session]=lambda:{'user':'test'}
+    def upload(stream,filename,label):
+        assert stream.read()==b'weights' and filename=='model.pt' and label=='Reference'
+        return {'arn':'baseline-v1','classes':['helmet'],'bytes':7}
+    monkeypatch.setattr(c,'upload_baseline',upload)
+    assert client.post(route,files={'file':('model.pt',b'weights')},data={'label':'Reference'}).json()['arn']=='baseline-v1'

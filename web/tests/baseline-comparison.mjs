@@ -21,7 +21,7 @@ test('baseline registry, optional selection, saved-run results and retry', async
     const page = await browser.newPage({viewport:{width:1280,height:900}});
     const errors = [], requests = [];
     page.on('pageerror', e => errors.push(e.message));
-    let registered = false;
+    let registered = false, uploaded = false;
     const row = (role, score) => ({id:role,role,label:role, 'mAP50-95':score,mAP50:score,
       precision:score,recall:score,f1:score,fp:2,fn:3,
       delta_pp:Object.fromEntries(['mAP50-95','mAP50','precision','recall','f1'].map(k=>[k,role==='baseline'?0:5])),
@@ -31,10 +31,15 @@ test('baseline registry, optional selection, saved-run results and retry', async
       const req = route.request(), url = new URL(req.url());
       let response;
       if (url.pathname.endsWith('/metrics')) response={rows:[{model_package_arn:'source-v1',group_name:'helmet',version:1}]};
-      else if (url.pathname.endsWith('/baselines') && req.method()==='POST') {
+      else if (url.pathname.endsWith('/baselines/upload')) {
+        assert.match(req.headers()['content-type'], /multipart\/form-data/);
+        assert.match(req.postData(), /filename="direct.pt"/);
+        assert.match(req.postData(), /Direct baseline/);
+        uploaded=true; response={arn:'baseline-v2',classes:['helmet'],bytes:7};
+      } else if (url.pathname.endsWith('/baselines') && req.method()==='POST') {
         assert.deepEqual(req.postDataJSON(), {source_arn:'source-v1',label:'Reference'});
         registered=true; response={arn:'baseline-v1'};
-      } else if (url.pathname.endsWith('/baselines')) response={versions:registered?[{arn:'baseline-v1',version:1,label:'Reference'}]:[]};
+      } else if (url.pathname.endsWith('/baselines')) response={versions:[...(registered?[{arn:'baseline-v1',version:1,label:'Reference'}]:[]),...(uploaded?[{arn:'baseline-v2',version:2,label:'Direct baseline'}]:[])]};
       else if (url.pathname.endsWith('/r1/run')) {
         requests.push(req.postDataJSON());
         status='Completed'; comparison={status,result:{status,validation_images:20,dataset_version_id:'saved',snapshot_id:'fixed',
@@ -47,7 +52,9 @@ test('baseline registry, optional selection, saved-run results and retry', async
     await page.getByLabel('Training run').selectOption('r1');
     await page.getByRole('status').filter({hasText:'No comparisons'}).waitFor();
     await page.getByText('Compare this completed run',{exact:true}).click();
-    await page.getByText(/Baseline Model registry/).click();
+    await page.locator('summary').filter({hasText:/^Baseline Model registry/}).click();
+    assert.equal(await page.getByRole('radio',{name:'Upload .pt file',exact:true}).isChecked(),true);
+    await page.getByRole('radio',{name:'Existing registered model',exact:true}).check();
     await page.getByLabel('Source model version').selectOption('source-v1');
     await page.getByLabel('Baseline name',{exact:true}).fill('Reference');
     await page.getByRole('button',{name:'Register baseline version'}).click();
@@ -68,6 +75,18 @@ test('baseline registry, optional selection, saved-run results and retry', async
     await page.getByRole('button',{name:'Retry saved comparison'}).click();
     await page.getByRole('status').filter({hasText:'Completed'}).waitFor();
     assert.deepEqual(requests[1], {});
+    await page.locator('summary').filter({hasText:/^Baseline Model registry/}).click();
+    await page.getByLabel('Baseline checkpoint (.pt)').setInputFiles({name:'bad.zip',mimeType:'application/zip',buffer:Buffer.from('bad')});
+    await page.getByRole('button',{name:'Upload and register baseline',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'Choose a non-empty .pt checkpoint'}).waitFor();
+    assert.equal(uploaded,false);
+    await page.getByLabel('Baseline checkpoint (.pt)').setInputFiles({name:'direct.pt',mimeType:'application/octet-stream',buffer:Buffer.from('weights')});
+    await page.getByLabel('Baseline name',{exact:true}).fill('Direct baseline');
+    await page.getByRole('button',{name:'Upload and register baseline',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'Registered in the separate Baseline Model registry'}).waitFor();
+    assert.equal(await page.getByLabel('Baseline Model version').inputValue(),'baseline-v2');
+    assert.equal(uploaded,true);
+    await page.screenshot({path:path.join(root,'../tmp/baseline-direct-upload.png'),fullPage:true});
     assert.deepEqual(errors,[]);
   } finally {
     await browser?.close(); await server?.close();

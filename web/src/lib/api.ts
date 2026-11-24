@@ -32,6 +32,12 @@ export function listBaselineModels(): Promise<{versions: BaselineVersion[]}> {
 export function registerBaselineModel(source_arn: string, label: string): Promise<{arn: string}> {
   return apiPost('/track2/comparisons/baselines', {source_arn, label});
 }
+export function uploadBaselineModel(file: File, label: string): Promise<{arn: string; classes: string[]; bytes: number}> {
+  const body = new FormData();
+  body.append('file', file);
+  body.append('label', label);
+  return apiPostForm('/track2/comparisons/baselines/upload', body);
+}
 export function savedBaselineSelection(version: string): Promise<{selection: BaselineSelection}> {
   return apiGet(`/track2/comparisons/saved-selection/${encodeURIComponent(version)}`);
 }

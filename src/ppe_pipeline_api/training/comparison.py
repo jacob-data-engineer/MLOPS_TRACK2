@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import tarfile
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +12,62 @@ from botocore.exceptions import ClientError, ConnectionError as BotoConnectionEr
 
 from .. import data, record_store
 from . import track2_shared as t2
+
+MAX_BASELINE_UPLOAD_BYTES = 512 * 1024 * 1024
+
+
+def _inspect_uploaded_baseline(path):
+    # Same authenticated checkpoint trust boundary as the existing import UI.
+    # Loading a .pt can execute pickled code; no training or prediction is run.
+    from ultralytics import YOLO
+    try:
+        model = YOLO(str(path))
+        names = {int(k): str(v) for k, v in model.names.items()}
+        if model.task != 'detect':
+            raise ValueError('Choose an object-detection checkpoint.')
+        if not names or sorted(names) != list(range(len(names))) or len(set(names.values())) != len(names):
+            raise ValueError('The checkpoint must contain unique, consecutive class names.')
+        return names
+    except Exception as exc:
+        raise ValueError(f'Could not read this file as a detection checkpoint: {exc}') from exc
+
+
+def upload_baseline(fileobj, filename, label):
+    """Upload directly into the separate baseline registry, never a training registry."""
+    label = str(label or '').strip()
+    if not label or len(label) > 200:
+        raise ValueError('Give the baseline a name of 1–200 characters.')
+    if not str(filename or '').lower().endswith('.pt'):
+        raise ValueError('Choose a .pt checkpoint file.')
+    with tempfile.TemporaryDirectory() as folder:
+        checkpoint = Path(folder) / 'model.pt'
+        size = 0
+        with checkpoint.open('wb') as output:
+            while chunk := fileobj.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_BASELINE_UPLOAD_BYTES:
+                    raise ValueError('The checkpoint exceeds the 512 MB upload limit.')
+                output.write(chunk)
+        if not size:
+            raise ValueError('The checkpoint file is empty.')
+        names = _inspect_uploaded_baseline(checkpoint)
+        if not t2.ensure_model_package_group(group_name(), 'Baseline Model: comparison only, never auto-deployed.'):
+            raise ValueError('The Baseline Model registry could not be created.')
+        artifact = Path(folder) / 'model.tar.gz'
+        with tarfile.open(artifact, 'w:gz') as archive:
+            archive.add(checkpoint, arcname='model.pt')
+        key = f'baseline-models/{group_name()}/{uuid.uuid4().hex}/model.tar.gz'
+        t2.s3.upload_file(str(artifact), t2.BUCKET, key)
+    created = t2.sm.create_model_package(ModelPackageGroupName=group_name(),
+        ModelPackageDescription=label, ModelApprovalStatus='PendingManualApproval',
+        InferenceSpecification={
+            'Containers': [{'Image': t2.SERVE_IMAGE, 'ModelDataUrl': f's3://{t2.BUCKET}/{key}'}],
+            'SupportedContentTypes': ['image/jpeg'], 'SupportedResponseMIMETypes': ['application/json'],
+            'SupportedRealtimeInferenceInstanceTypes': ['ml.g4dn.xlarge'],
+            'SupportedTransformInstanceTypes': ['ml.g4dn.xlarge']},
+        CustomerMetadataProperties={'model_role': 'comparison-baseline', 'base_model_source': 'direct-upload',
+            'checkpoint_classes': t2.metadata_value(' / '.join(names.values()))})
+    return {'arn': created['ModelPackageArn'], 'classes': list(names.values()), 'bytes': size}
 
 
 def group_name():

@@ -12,7 +12,12 @@ The router groups are listed below; OpenAPI provides the current operation count
 
 `/track2/comparisons` provides a dedicated **Baseline Model** registry and
 saved-run comparisons. Register an existing model (including an imported `.pt`)
-with `POST /baselines`; `GET /baselines` lists its exact versions. Registration
+with `POST /baselines`, or upload a `.pt` directly with multipart
+`POST /baselines/upload` (`file` and `label`, up to 512 MB).
+Direct uploads are inspected as detection checkpoints and stored under a
+dedicated `baseline-models/` prefix, then registered only in the baseline group.
+They do not need an entry in a training-model registry first.
+`GET /baselines` lists its exact versions. Registration
 copies the artifact into preserved storage and never approves or deploys it.
 
 Prepared training accepts optional `comparison` settings: `enabled`,

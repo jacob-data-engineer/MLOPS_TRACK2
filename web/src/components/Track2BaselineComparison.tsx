@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {ApiError, getTrack2Metrics, listBaselineModels, registerBaselineModel,
+import {ApiError, getTrack2Metrics, listBaselineModels, registerBaselineModel, uploadBaselineModel,
   type BaselineSelection, type BaselineVersion, type Track2MetricsRow} from '../lib/api';
 
 export function Track2BaselineComparison({value, onChange, disabled = false, completed = false}: {
@@ -10,6 +10,10 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [source, setSource] = useState('');
+  const [sourceKind, setSourceKind] = useState<'upload' | 'registry'>('upload');
+  const [file, setFile] = useState<File | null>(null);
+  const [fileKey, setFileKey] = useState(0);
+  const [notice, setNotice] = useState('');
   const [label, setLabel] = useState('');
   const [reload, setReload] = useState(0);
   useEffect(() => {
@@ -21,11 +25,16 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
     return () => {active = false;};
   }, [reload]);
   async function register() {
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
-      const registered = await registerBaselineModel(source, label);
+      if (sourceKind === 'upload' && (!file || !file.name.toLowerCase().endsWith('.pt') || file.size === 0 || file.size > 512 * 1024 * 1024)) {
+        setError('Choose a non-empty .pt checkpoint up to 512 MB.'); return;
+      }
+      const registered = sourceKind === 'upload'
+        ? await uploadBaselineModel(file!, label) : await registerBaselineModel(source, label);
       setReload(n => n + 1); onChange({...value, enabled: true, baseline_arn: registered.arn});
-      setLabel('');
+      setLabel(''); setFile(null); setFileKey(n => n + 1);
+      setNotice('Registered in the separate Baseline Model registry and selected for comparison.');
     } catch (e) {setError(e instanceof ApiError ? e.detail : 'Could not register the baseline.');}
     finally {setBusy(false);}
   }
@@ -56,13 +65,23 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
       <p className="text-xs text-ink-muted">{completed ? 'Evaluate' : 'After training, evaluate'} these fixed versions on this run’s preserved validation images and labels. This starts a separate billed evaluation job; it does not train the baseline or change the serving model.</p>
     </>}
     <details><summary className="cursor-pointer font-medium">Baseline Model registry · {versions.length} versions</summary>
-      <p className="my-2 text-xs">Register an existing model here as a separate baseline version. For a .pt file, first use “Import a pretrained COCO or an already-trained model” in Multi-Auto Training, then select its registered version below.</p>
-      <label className="block">Source model version<select className="my-1 block w-full rounded border border-hairline bg-page p-2" value={source} onChange={e => setSource(e.target.value)}>
+      <p className="my-2 text-xs">Upload a .pt checkpoint directly to the separate Baseline Model registry, or copy an existing registered version. Uploaded baselines are stored separately from training models.</p>
+      <div className="my-2 flex flex-wrap gap-4">
+        <label className="flex items-center gap-2"><input type="radio" checked={sourceKind === 'upload'} onChange={() => setSourceKind('upload')}/>Upload .pt file</label>
+        <label className="flex items-center gap-2"><input type="radio" checked={sourceKind === 'registry'} onChange={() => setSourceKind('registry')}/>Existing registered model</label>
+      </div>
+      {sourceKind === 'upload' ? <label className="block">Baseline checkpoint (.pt)
+        <input key={fileKey} type="file" accept=".pt" className="my-2 block w-full rounded border border-hairline p-2"
+          onChange={e => {const chosen = e.target.files?.[0] || null; setFile(chosen); setError(''); setNotice('');
+            if (chosen && !label) setLabel(chosen.name.replace(/\.pt$/i, '').slice(0, 200));}}/>
+        <span className="text-xs text-ink-muted">Object detection checkpoint, up to 512 MB. Its class names are checked before registration.</span>
+      </label> : <label className="block">Source model version<select className="my-1 block w-full rounded border border-hairline bg-page p-2" value={source} onChange={e => setSource(e.target.value)}>
         <option value="">Choose a registered model</option>
         {models.map(m => <option key={m.model_package_arn} value={m.model_package_arn}>{m.group_name} · v{m.version}</option>)}
-      </select></label>
+      </select></label>}
       <label className="block">Baseline name<input className="my-1 block w-full rounded border border-hairline bg-page p-2" value={label} maxLength={200} onChange={e => setLabel(e.target.value)}/></label>
-      <button type="button" disabled={!source || !label.trim() || busy} onClick={register} className="rounded border border-hairline px-3 py-2 disabled:opacity-40">{busy ? 'Registering…' : 'Register baseline version'}</button>
+      <button type="button" disabled={(sourceKind === 'upload' ? !file : !source) || !label.trim() || busy} onClick={register} className="rounded border border-hairline px-3 py-2 disabled:opacity-40">{busy ? (sourceKind === 'upload' ? 'Uploading and registering…' : 'Registering…') : (sourceKind === 'upload' ? 'Upload and register baseline' : 'Register baseline version')}</button>
+      {notice && <p role="status" className="mt-2 text-xs">{notice}</p>}
       <ul className="mt-2 text-xs">{versions.map(v => <li key={v.arn}>v{v.version} · {v.label}</li>)}</ul>
     </details>
     {error && <p role="alert" className="text-xs text-critical">{error}</p>}

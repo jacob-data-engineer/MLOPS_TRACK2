@@ -1,5 +1,5 @@
 """Authenticated baseline registry and same-validation comparisons."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile
 from pydantic import BaseModel, Field
 
 from ..auth import require_session
@@ -16,6 +16,14 @@ class BaselineRequest(BaseModel):
 
 class ComparisonRequest(BaseModel):
     selection: dict | None = None
+
+
+@router.post('/baselines/upload')
+def upload(file: UploadFile = File(...), label: str = Form(...), session=Depends(require_session)):
+    try:
+        return c.upload_baseline(file.file, file.filename or '', label)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 @router.get('/baselines')
