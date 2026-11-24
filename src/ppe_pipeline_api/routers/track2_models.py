@@ -150,7 +150,9 @@ def training_audit(limit: int = 50, session=Depends(require_session)) -> dict:
     except Exception:
         logging.getLogger(__name__).warning("Could not load catalog run numbers", exc_info=True)
         numbers = {}
-    return {"audits": [{**a, "run_number": numbers.get(a["id"])} for a in audits]}
+    from ..training.comparison import status_for
+    return {"audits": [{**a, "run_number": numbers.get(a["id"]),
+                        "comparison_status": status_for(a)} for a in audits]}
 
 
 @router.get("/audit/{audit_id}/export.csv")

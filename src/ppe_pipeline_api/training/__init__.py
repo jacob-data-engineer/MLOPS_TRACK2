@@ -40,3 +40,6 @@ reconcile_training_audits = _through(__name__, "track2_shared", "reconcile_train
 sweep_idle_endpoint = _through(__name__, "track2_shared", "sweep_idle_endpoint")
 check_auto_export = _through(__name__, "metrics_export", "check")
 check_scheduled_exports = _through(__name__, "export_schedules", "check")
+pin_comparison_selection = _through(__name__, "comparison", "pin_selection")
+tick_comparisons = _through(__name__, "comparison", "tick")
+__all__ += ["pin_comparison_selection", "tick_comparisons"]

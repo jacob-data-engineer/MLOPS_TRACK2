@@ -4,6 +4,7 @@ import { Card } from "../components/Card";
 import { Track2ExportSettingsBar } from "../components/Track2ExportSettingsBar";
 import { Track2MetricsExportCard } from "../components/Track2MetricsExportCard";
 import { Track2ComparisonSummary } from "../components/Track2ComparisonSummary";
+import { Track2RunComparisons } from "../components/Track2RunComparisons";
 import { Track2ModelPicker, modelLabel, rowKey } from "../components/Track2ModelPicker";
 import {
   ApiError,
@@ -515,6 +516,7 @@ export function Track2MetricsPage() {
         </div>
       )}
 
+      <Track2RunComparisons />
       <fieldset disabled={restoringSettings} aria-busy={restoringSettings}>
       {rows && (
         <Track2ModelPicker

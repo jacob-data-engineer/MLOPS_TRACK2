@@ -50,6 +50,8 @@ test('training supports prepared data and checked saved SQL data', async () => {
       else if (url.pathname.endsWith('/detectors')) response = {detectors:[{slug:'helmet',label:'Helmet',classes:{0:'helmet'},groups:{s:'helmet'}}]};
       else if (url.pathname.endsWith('/classes')) response = {classes:{0:'helmet'}};
       else if (url.pathname.endsWith('/metrics')) response = {rows:[]};
+      else if (url.pathname.endsWith('/comparisons/baselines')) response = {versions:[{arn:'baseline-v1',version:1,label:'Reference'}]};
+      else if (url.pathname.endsWith('/saved-selection/dv-saved')) response = {selection:{enabled:true,baseline_arn:'baseline-v1',other_arns:[]}};
       else if (url.pathname.endsWith('/queue-after-pull')) response = {settings:{enabled:false,triggers:[]},next:{act:false,reason:'Manual'}};
       else if (url.pathname.endsWith('/retrain')) response = {settings:{enabled:false},next:{}};
       else if (url.pathname.endsWith('/retrain/preparation')) response = {job};
@@ -90,7 +92,7 @@ test('training supports prepared data and checked saved SQL data', async () => {
     assert.equal(queued.length,1);
     assert.deepEqual(queued[0], {submit:'enqueue',prepared_only:true,training:{epochs:25,img_size:640,batch:8,
       seed:42,patience:10,hyperparams:{lr0:0.001},detector_slug:'helmet',architecture:'yolo11s',notes:'repeatable test',
-      base_version:'arn:aws:sagemaker:test:model-package/helmet/2',delete_decay_after_run:true}});
+      base_version:'arn:aws:sagemaker:test:model-package/helmet/2',delete_decay_after_run:true,comparison:{enabled:false}}});
     await page.getByRole('radio',{name:'Use a saved dataset',exact:true}).check();
     const loading = page.getByRole('status').filter({hasText:'Loading datasets…'});
     await loading.waitFor();
@@ -99,6 +101,8 @@ test('training supports prepared data and checked saved SQL data', async () => {
     releaseDatasets();
     assert.match(await page.locator('option[value="dv-saved"]').textContent(), /^Run 70/);
     await page.getByLabel('Saved dataset record').selectOption('dv-saved');
+    await page.getByLabel('Baseline Model version').waitFor();
+    assert.equal(await page.getByLabel('Baseline Model version').inputValue(),'baseline-v1');
     assert.equal(await loading.count(),0);
     // The picker becomes usable before the slower source-run history returns.
     releaseHistory();

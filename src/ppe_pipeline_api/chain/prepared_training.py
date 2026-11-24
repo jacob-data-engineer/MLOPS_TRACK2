@@ -11,7 +11,7 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     config = config if config is not None else pc.read_config()
     plan = rs.settings(config)
     allowed = {'epochs', 'img_size', 'batch', 'seed', 'patience', 'hyperparams',
-               'detector_slug', 'architecture', 'notes', 'base_version', 'delete_decay_after_run', 'dataset_version_id'}
+               'detector_slug', 'architecture', 'notes', 'base_version', 'delete_decay_after_run', 'dataset_version_id', 'comparison'}
     if overrides:
         if set(overrides) - allowed:
             raise ValueError('Unsupported training setting.')
@@ -26,6 +26,7 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     if plan['epochs'] < 1 or plan['img_size'] < 32 or plan['batch'] == 0 or plan['batch'] < -1 or plan['patience'] < 0:
         raise ValueError('Invalid epochs, image size, batch size or patience.')
     data.require_training_sql()
+    comparison = training.pin_comparison_selection(plan.get('comparison'))
     if progress:
         progress('Checking the selected model', 0, 0)
     detector = training.get_detector(str(plan['detector_slug']))
@@ -71,6 +72,7 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
         'notes': str(plan.get('notes') or ''), 'queued_by': trigger,
         'added_at': dt.datetime.now(dt.timezone.utc).isoformat(),
         'reproducible': True, 'detector_definition': detector,
+        'comparison': comparison,
         'delete_decay_after_run': plan.get('delete_decay_after_run', False),
         'base_provenance': {**base, 'package_arn': source_arn, 'source': source},
         'drop_undeclared_classes': False}

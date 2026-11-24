@@ -80,11 +80,16 @@ def test_saved_queue_uses_current_model_settings_and_no_decay_cleanup(monkeypatc
     monkeypatch.setattr(data, 'version_run_fields', lambda version:{'dataset_version_id':version['version_id']})
     monkeypatch.setattr(data, 'mark_version', lambda *a,**kw:None)
     entries = []
+    comparison = {'enabled':True,'baseline_arn':'baseline-v1','other_arns':[]}
+    pinned = {**comparison,'models':[{'uri':'s3://base/pinned.pt','etag':'original'}]}
+    monkeypatch.setattr(t,'pin_comparison_selection',lambda value:pinned if value == comparison else pytest.fail('comparison selection lost'))
     chain.queue_prepared({}, overrides={'dataset_version_id':'old','detector_slug':'helmet',
         'architecture':'yolo11s','base_version':'scratch','epochs':7,'img_size':640,'batch':2,
-        'seed':12,'patience':4,'hyperparams':{'lr0':0.002},'delete_decay_after_run':True}, publish=entries.append)
+        'seed':12,'patience':4,'hyperparams':{'lr0':0.002},'delete_decay_after_run':True,
+        'comparison':comparison}, publish=entries.append)
     assert calls[0][0] == 'old'
     entry = entries[0]
+    assert entry['comparison'] == pinned
     assert entry['epochs'] == 7 and entry['hyperparams']['lr0'] == .002
     assert entry['base_model_key'] == 'current.pt' and entry['dataset_version_id'] == 'new'
     assert entry['delete_decay_after_run'] is False and 'pipeline' not in entry

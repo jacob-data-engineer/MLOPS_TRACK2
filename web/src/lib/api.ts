@@ -10,6 +10,38 @@
 export const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+export interface BaselineSelection { enabled: boolean; baseline_arn?: string; other_arns?: string[] }
+export interface BaselineVersion { arn: string; version: number; label: string }
+export interface ComparisonMetricRow {
+  id: string; role: string; label: string;
+  'mAP50-95': number; mAP50: number; precision: number; recall: number; f1: number;
+  fp: number; fn: number; delta_pp: Record<string, number>;
+  per_class: {class: string; 'mAP50-95': number | null; precision: number; recall: number; fp: number; fn: number}[];
+}
+export interface RunComparisonSummary {
+  id: string; label: string; submitted_at: string; status: string; training_status: string; can_compare: boolean;
+  comparison?: {status: string; error?: string; result?: {
+    status: string; rows?: ComparisonMetricRow[]; validation_images?: number;
+    dataset_version_id?: string; snapshot_id?: string; ultralytics_version?: string;
+    settings?: {confidence: number; ap_conf: number; imgsz: number};
+  }};
+}
+export function listBaselineModels(): Promise<{versions: BaselineVersion[]}> {
+  return apiGet('/track2/comparisons/baselines');
+}
+export function registerBaselineModel(source_arn: string, label: string): Promise<{arn: string}> {
+  return apiPost('/track2/comparisons/baselines', {source_arn, label});
+}
+export function savedBaselineSelection(version: string): Promise<{selection: BaselineSelection}> {
+  return apiGet(`/track2/comparisons/saved-selection/${encodeURIComponent(version)}`);
+}
+export function listRunComparisons(): Promise<{runs: RunComparisonSummary[]}> {
+  return apiGet('/track2/comparisons');
+}
+export function runBaselineComparison(run: string, selection?: BaselineSelection): Promise<unknown> {
+  return apiPost(`/track2/comparisons/${encodeURIComponent(run)}/run`, {selection});
+}
+
 export class ApiError extends Error {
   status: number;
   detail: string;
@@ -315,6 +347,7 @@ export interface Track2GpuJob {
 }
 
 export interface Track2QueueEntry {
+  comparison?: BaselineSelection;
   /** The folders the images actually came from, resolved at queue time.
    * Absent when the dataset was not assembled -- then dataset_folder is
    * already the origin. */
@@ -470,6 +503,7 @@ export interface Track2TrainingAuditDataset {
 }
 
 export interface Track2TrainingAudit {
+  comparison_status?: string;
   id: string;
   dataset_version_id?: string;
   run_number?: number | null;

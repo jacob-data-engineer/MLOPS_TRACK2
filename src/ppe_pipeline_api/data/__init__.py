@@ -104,3 +104,7 @@ prepare_central_training_entry = _through(__name__, "central_recipe", "prepare_e
 prepare_saved_training = _through(__name__, "saved_training", "prepare")
 check_saved_training = _through(__name__, "saved_training", "check")
 __all__ += ["prepare_saved_training", "check_saved_training"]
+validation_manifest = _through(__name__, "comparison", "validation_manifest")
+__all__ += ["validation_manifest"]
+saved_comparison_selection = _through(__name__, "comparison", "saved_selection")
+__all__ += ["saved_comparison_selection"]

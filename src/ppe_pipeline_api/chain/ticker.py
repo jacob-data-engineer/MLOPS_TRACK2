@@ -76,6 +76,10 @@ async def queue_poll_loop() -> None:
             await asyncio.to_thread(training.reconcile_training_audits)
         except Exception as exc:
             print(f"Training audit reconcile failed: {exc}")
+        try:
+            await asyncio.to_thread(training.tick_comparisons)
+        except Exception as exc:
+            print(f"Baseline comparison tick failed: {exc}")
         # Queue a retrain if a pull finished since the last tick. On this
         # loop rather than its own, because it is one DynamoDB query and
         # it only ever does anything on the tick after a sweep ends.

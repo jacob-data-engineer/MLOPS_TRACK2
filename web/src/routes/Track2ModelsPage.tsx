@@ -19,6 +19,8 @@ import { Track2BaseModelPicker } from "../components/Track2BaseModelPicker";
 import { Track2ImportCheckpointPanel } from "../components/Track2ImportCheckpointPanel";
 import { Track2PinnedBar } from "../components/Track2PinnedBar";
 import { Track2TrainingHistory } from "../components/Track2TrainingAuditPanel";
+import { Track2BaselineComparison } from "../components/Track2BaselineComparison";
+import { savedBaselineSelection, type BaselineSelection } from "../lib/api";
 import {
   runTrack2Retrain,
   getTrack2PreparationJob,
@@ -175,6 +177,7 @@ function QueueEntryBlock({
       <div className="min-w-0 flex-1">
         <div className="mb-1.5 flex items-center gap-2">
           <Badge tone={running ? "pending" : "neutral"} label={running ? "Running" : `Queued #${position}`} />
+          <span className="text-xs text-ink-muted">{entry.comparison?.enabled ? 'Comparison after training' : 'No comparisons'}</span>
           {running && runPhase(progress) && (
             <span className="text-xs font-medium text-ink">{runPhase(progress)}</span>
           )}
@@ -294,6 +297,7 @@ function QueueEntryBlock({
  * held at the page rather than inside the form so it survives the page's
  * own refreshes while a run is in flight. */
 interface TrainingSelection {
+  comparison?: BaselineSelection;
   epochs: number;
   imgSize: number;
   batch: number;
@@ -382,6 +386,20 @@ export function TrainingForm({
   const [busy, setBusy] = useState(false);
   const [deleteDecayAfterRun, setDeleteDecayAfterRun] = useState(false);
   const [dataChoice, setDataChoice] = useState<TrainingDataChoice>({mode: 'prepared', id: '', checked: false});
+  const [restoringComparison, setRestoringComparison] = useState(false);
+  const [comparisonRestoreError, setComparisonRestoreError] = useState('');
+  useEffect(() => {
+    let active = true;
+    setComparisonRestoreError('');
+    if (dataChoice.mode !== 'saved' || !dataChoice.id) {setRestoringComparison(false); return;}
+    setRestoringComparison(true);
+    savedBaselineSelection(dataChoice.id).then(result => {
+      if (active) setSelection({comparison: result.selection});
+    }).catch(e => {
+      if (active) setComparisonRestoreError(e instanceof ApiError ? e.detail : 'Could not restore saved comparison selections. Reselect the dataset to retry.');
+    }).finally(() => {if (active) setRestoringComparison(false);});
+    return () => {active = false;};
+  }, [dataChoice.mode, dataChoice.id]);
   const [, openTrainingCard] = useCardOpen('start the training run', true);
   useEffect(() => {
     const select = (event: Event) => {
@@ -702,6 +720,7 @@ export function TrainingForm({
       datasetFolder: "", evalFolder: "",
       detectorSlug: "", architecture: DEFAULT_ARCHITECTURE,
       basePackageArn: "", notes: "",
+      comparison: {enabled: false},
     });
     setError(null);
   }
@@ -721,6 +740,7 @@ export function TrainingForm({
         epochs, img_size: imgSize, batch, seed, patience, hyperparams,
         detector_slug: detectorSlug, architecture, notes,
         base_version: basePackageArn,
+        comparison: selection.comparison || {enabled: false},
         delete_decay_after_run: deleteDecayAfterRun,
         ...(dataChoice.mode === 'saved' ? {dataset_version_id: dataChoice.id, delete_decay_after_run: false} : {}),
       });
@@ -901,11 +921,15 @@ export function TrainingForm({
           {preparationJob.error && <p className="mt-1 text-critical">{preparationJob.error}</p>}
         </div>
       )}
+      <Track2BaselineComparison value={selection.comparison || {enabled: false}}
+        onChange={comparison => setSelection({comparison})} disabled={busy || preparing || restoringComparison}/>
+      {restoringComparison && <p role="status" className="text-xs">Restoring saved comparison selections…</p>}
+      {comparisonRestoreError && <p role="alert" className="text-xs text-critical">{comparisonRestoreError}</p>}
       <div className="mt-3 flex gap-2">
         <button
           type="button"
           onClick={handleAddToQueue}
-          disabled={busy || preparing || baseSelectionIncomplete || analysis.blocking}
+          disabled={busy || preparing || restoringComparison || !!comparisonRestoreError || baseSelectionIncomplete || analysis.blocking || !!(selection.comparison?.enabled && !selection.comparison.baseline_arn)}
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
           {busy || preparing

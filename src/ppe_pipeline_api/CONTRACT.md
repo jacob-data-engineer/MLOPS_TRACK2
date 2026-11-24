@@ -6,7 +6,43 @@ platform. The PPE judge and its Track1 screens were retired and this
 API no longer calls into them -- if you are looking for
 `/track1/...` or an eval/gold-set endpoint, it is gone, not moved.
 
-137 operations across 14 routers, listed below.
+The router groups are listed below; OpenAPI provides the current operation count.
+
+## Baseline comparisons
+
+`/track2/comparisons` provides a dedicated **Baseline Model** registry and
+saved-run comparisons. Register an existing model (including an imported `.pt`)
+with `POST /baselines`; `GET /baselines` lists its exact versions. Registration
+copies the artifact into preserved storage and never approves or deploys it.
+
+Prepared training accepts optional `comparison` settings: `enabled`,
+`baseline_arn`, and up to four `other_arns`. Queueing preserves the selected
+weights in the saved run recipe. Repeated runs retain these pins; selecting a
+saved dataset restores its original public selection via
+`GET /saved-selection/{version_id}`. The form's choice applies to that queued
+run, not to the independent training schedule.
+
+`GET /track2/comparisons` lists the latest 200 runs with explicit comparison
+statuses. `POST /{run_id}/run` queues an on-demand comparison with a `selection`,
+or retries the saved selection when omitted. Runs without a selection show
+**No comparisons**. Comparisons are driven by the SQL background worker under
+a shared advisory lock; deterministic Processing job names recover submissions
+after restarts. Training success and original training metrics are unchanged.
+
+Evaluation reads only permanent validation members from the saved dataset
+version, with conditional image/label reads and class-name alignment. Missing
+historical inputs or incompatible classes report **Unavailable**, without a
+fallback to current data. All models run under the selected run's pinned
+training image. AP uses confidence 0.001; precision/recall/F1 and error counts
+use confidence 0.25, with NMS IoU 0.7 and max detections 300. Results include
+per-class metrics, SHA256 content identities, evaluator version, settings,
+and percentage-point differences from baseline. An absent class has no AP.
+Training overlap with historical comparison models is not verified.
+
+The evaluator runs in a separate CPU SageMaker Processing job (up to six hours),
+not a serving endpoint. Deployment requires the scoped `RunBaselineComparisons`
+IAM grant in `terraform/app/audit.tf`, in addition to the existing SageMaker
+execution-role PassRole grant. No infrastructure is changed by local tests.
 
 ## Where the authoritative detail lives
 
