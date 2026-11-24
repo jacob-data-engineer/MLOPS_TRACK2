@@ -137,7 +137,6 @@
     "Track2 Help",
     "Track2 Models",
     "Track2 Multi-Auto Training",
-    "Track2 Review & Metrics",
     "Track2 SQL Database Query"
    ],
    "cards": [],
@@ -823,14 +822,11 @@
    ],
    "cards": [],
    "fields": [
-    "Copy this model version's .pt into a folder in the bucket",
-    "Download the .pt this run produced",
     "Evaluation images",
-    "Export this run's full details, including every file name, as CSV",
     "Training history",
     "Training images"
    ],
-   "text": "Training history\nExport this run's full details, including every file name, as CSV\nDownload the .pt this run produced\nCopy this model version's .pt into a folder in the bucket\nTraining images\nEvaluation images\nHistory\nLoading...\nUse this dataset\nRemoves this run from the history\nand deletes the registered version\nAnything already deployed from that version keeps running. What goes is the record of how it was trained, so nothing can be rolled back to it or continued from it.\nThis cannot be undone.\nRemoves this run from the history. It never registered a model, so no weights and no registry version are affected.\nFrozen snapshot\nMetrics\nNotes\nThe pipeline did not run what was submitted.\nCould not load the training history.\nSucceeded\nFailed\nStopped\nExecuting\nStopping\nExport failed.\nCould not download the weights.\nDelete failed.\nA run number appears after the catalog syncs.\nSame run number as Data Catalog\nRun number pending\nCancel export\nExport .pt to S3\nDelete this run and the model version it registered\nDelete this run\nDelete this run and its model?\nDelete this run?\nDelete the run and the model\nDelete the run\nKeep it\nNew folder name\nExporting...\nExport here\nStarted\nEnded\nDuration (whole run)\nSubmitted by\nTraining queue\nStarted manually\nEpochs\nImage size\nBatch\nSeed\nDataset record ID\nNot recorded for this run\nTraining record ID\nSame as the training set -- these metrics are not held out.\nModel Name\nModel version\nBase model\nRegistry's latest Approved\nBuild\nPrecision\nRecall\nAccuracy\nNo metrics recorded for this run.\nRecorded once the run finishes and registers a model.\nHide file names\nShow file names"
+   "text": "Training history\nTraining images\nEvaluation images\nHistory\nLoading...\nFrozen snapshot\nMetrics\nNotes\nThe pipeline did not run what was submitted.\nCould not load the training history.\nSucceeded\nFailed\nStopped\nExecuting\nStopping\nA run number appears after the catalog syncs.\nSame run number as Data Catalog\nRun number pending\nStarted\nEnded\nDuration (whole run)\nSubmitted by\nTraining queue\nStarted manually\nEpochs\nImage size\nBatch\nSeed\nDataset record ID\nNot recorded for this run\nTraining record ID\nSame as the training set -- these metrics are not held out.\nModel Name\nModel version\nBase model\nRegistry's latest Approved\nBuild\nPrecision\nRecall\nAccuracy\nNo metrics recorded for this run.\nRecorded once the run finishes and registers a model.\nHide file names\nShow file names"
   },
   {
    "id": "components/Track2TrainingCostToday.tsx",

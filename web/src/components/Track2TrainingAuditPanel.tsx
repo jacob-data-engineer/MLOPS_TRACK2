@@ -1,20 +1,12 @@
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCardOpen } from "../lib/cardState";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, type BadgeTone } from "./Badge";
-import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
 import {
-  ApiError,
-  deleteTrack2TrainingAudit,
-  exportTrack2TrainingAuditCsv,
-  exportTrack2Weights,
-  getTrack2Export,
   getTrack2TrainingAudit,
-  getTrack2TrainingAuditWeightsUrl,
   type Track2TrainingAudit,
   type Track2TrainingAuditDataset,
 } from "../lib/api";
-import { ConfirmDialog } from "./ConfirmDialog";
 
 /** Finished runs, under the queue that produced them -- the same shape as
  * Deploy & Inference: what is queued above, what has already run below.
@@ -138,108 +130,11 @@ function formatMetric(value: number | null | undefined): string {
  * without rebuilding this card. The history panel and the per-model detail
  * must not drift: they describe the same run, and two renderings of the
  * same submitted-vs-actual comparison would be worse than one. */
-export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onDeleted: () => void }) {
+/** `onDeleted` is accepted for existing callers; the row has no Delete any more. */
+export function AuditRow({ audit }: { audit: Track2TrainingAudit; onDeleted?: () => void }) {
   const datasetRecordId = audit.dataset_version_id || audit.train_dataset.dataset_version_id
     || audit.eval_dataset.dataset_version_id || audit.snapshot?.snapshot_id;
   const [open, setOpen] = useCardOpen("training_audit", false);
-  const [deleting, setDeleting] = useState(false);
-  // Deleting a run deletes the registered model with it. The dialog
-  // names the version that goes, because the row it is on shows a date
-  // and a status, not what it produced.
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  // Copying the .pt into a bucket folder, as opposed to downloading it.
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportPrefix, setExportPrefix] = useState("");
-  const [exportFolders, setExportFolders] = useState<string[]>([]);
-  const [exportTarget, setExportTarget] = useState("");
-  const [exportMessage, setExportMessage] = useState("");
-  const [copying, setCopying] = useState(false);
-
-  // Only while the picker is open: listing the bucket for every collapsed
-  // run in the history would be dozens of calls for nothing.
-  useEffect(() => {
-    if (!exportOpen) return;
-    let cancelled = false;
-    getTrack2Export(exportPrefix)
-      .then((res) => !cancelled && setExportFolders(res.folders))
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [exportOpen, exportPrefix]);
-
-  async function handleCopyToFolder() {
-    if (!audit.model?.model_package_arn || !exportTarget) return;
-    setCopying(true);
-    setExportMessage("");
-    try {
-      const res = await exportTrack2Weights(audit.model.model_package_arn, exportTarget);
-      setExportMessage(res.message);
-    } catch (err) {
-      setExportMessage(err instanceof ApiError ? err.detail : "Export failed.");
-    } finally {
-      setCopying(false);
-    }
-  }
-
-  /** Follows a presigned S3 link rather than proxying the file: a
-   * checkpoint is 19MB+ and the API container is on one small box. */
-  async function handleExportWeights() {
-    setDownloading(true);
-    setDeleteError(null);
-    try {
-      const { url } = await getTrack2TrainingAuditWeightsUrl(audit.id);
-      const link = document.createElement("a");
-      link.href = url;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } catch (err) {
-      setDeleteError(
-        err instanceof ApiError ? err.detail
-          : err instanceof Error ? err.message : "Could not download the weights.",
-      );
-    } finally {
-      setDownloading(false);
-    }
-  }
-
-  /** Fetched rather than linked: the endpoint needs the bearer token, so
-   * a plain <a href> would get a 401 and download nothing. */
-  async function handleExport() {
-    setExporting(true);
-    setDeleteError(null);
-    try {
-      const blob = await exportTrack2TrainingAuditCsv(audit.id);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `training-run-${audit.submitted_at.slice(0, 10)}-${audit.id}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Export failed.");
-    } finally {
-      setExporting(false);
-    }
-  }
-
-  async function handleDelete() {
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await deleteTrack2TrainingAudit(audit.id);
-      setConfirmDelete(false);
-      onDeleted();
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Delete failed.");
-      setDeleting(false);
-    }
-  }
-
   return (
     <div className="rounded-sm border border-hairline bg-page">
       <div data-history-summary className="flex items-center gap-2 px-3 py-2">
@@ -290,130 +185,11 @@ export function AuditRow({ audit, onDeleted }: { audit: Track2TrainingAudit; onD
             </span>
           )}
         </button>
-        {/* Every field and EVERY file name, not the capped sample shown
-            below -- the export reads the S3 manifest. */}
-        {datasetRecordId?.startsWith('dv-') && <button type="button"
-          className="shrink-0 rounded-sm border border-black/15 px-2 py-1 text-xs"
-          onClick={() => window.dispatchEvent(new CustomEvent('track2-use-saved-dataset', {detail: datasetRecordId}))}>
-          Use this dataset
-        </button>}
-        <button
-          type="button"
-          onClick={handleExport}
-          disabled={exporting}
-          title="Export this run's full details, including every file name, as CSV"
-          className="flex shrink-0 items-center gap-1.5 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04] disabled:opacity-40"
-        >
-          {exporting && <Loader2 size={12} className="animate-spin" />}
-          Export training record as CSV
-        </button>
-        {/* Only where a model actually came out of the run. */}
-        {audit.model && (
-          <button
-            type="button"
-            onClick={handleExportWeights}
-            disabled={downloading}
-            title="Download the .pt this run produced"
-            className="flex shrink-0 items-center gap-1.5 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04] disabled:opacity-40"
-          >
-            {downloading && <Loader2 size={12} className="animate-spin" />}
-            Download .pt
-          </button>
-        )}
-        {audit.model && (
-          <button
-            type="button"
-            onClick={() => setExportOpen((open) => !open)}
-            title="Copy this model version's .pt into a folder in the bucket"
-            className="shrink-0 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04]"
-          >
-            {exportOpen ? "Cancel export" : "Export .pt to S3"}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => setConfirmDelete(true)}
-          disabled={deleting}
-          title={audit.model ? "Delete this run and the model version it registered" : "Delete this run"}
-          className="flex shrink-0 items-center gap-1.5 rounded-sm border border-black/15 px-2 py-1 text-xs font-medium text-ink-secondary hover:bg-black/[0.04] disabled:opacity-40"
-        >
-          {deleting && <Loader2 size={12} className="animate-spin" />}
-          Delete
-        </button>
       </div>
-      {deleteError && <p className="px-3 pb-2 text-xs text-critical">{deleteError}</p>}
-
-      <ConfirmDialog
-        open={confirmDelete}
-        title={audit.model ? "Delete this run and its model?" : "Delete this run?"}
-        destructive
-        busy={deleting}
-        confirmLabel={audit.model ? "Delete the run and the model" : "Delete the run"}
-        cancelLabel="Keep it"
-        onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => void handleDelete()}
-        body={audit.model ? (
-          <>
-            <p>
-              Removes this run from the history <strong>and deletes the
-              registered version</strong>{" "}
-              <span className="tabular">
-                {audit.model.group} v{audit.model.version}
-              </span>{" "}
-              with it.
-            </p>
-            <p className="mt-2">
-              Anything already deployed from that version keeps running.
-              What goes is the record of how it was trained, so nothing can
-              be rolled back to it or continued from it.
-            </p>
-            <p className="mt-2">This cannot be undone.</p>
-          </>
-        ) : (
-          <p>
-            Removes this run from the history. It never registered a model,
-            so no weights and no registry version are affected.
-          </p>
-        )}
-      />
-
-      {exportOpen && audit.model && (
-        <div className="border-t border-hairline px-3 py-3">
-          <p className="mb-2 text-xs text-ink-secondary">
-            Copy{" "}
-            <span className="tabular">{audit.model.group} v{audit.model.version}</span> as{" "}
-            a versioned .pt file into a folder. Use "New folder name" to create
-            one that does not exist yet. If the same export filename already exists,
-            it is archived before the new copy is written.
-          </p>
-          <Track2S3FolderBrowser
-            prefix={exportPrefix}
-            folders={exportFolders}
-            onNavigate={setExportPrefix}
-            onSelect={setExportTarget}
-            selected={exportTarget}
-            allowCreate
-          />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              disabled={copying || !exportTarget}
-              onClick={handleCopyToFolder}
-              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-            >
-              {copying ? "Exporting..." : "Export here"}
-            </button>
-            {exportTarget && (
-              <span className="tabular text-xs text-ink-muted">
-                Destination: {exportTarget}/
-              </span>
-            )}
-          </div>
-          {exportMessage && (
-            <p className="tabular mt-2 break-all text-xs text-ink-secondary">{exportMessage}</p>
-          )}
-        </div>
-      )}
+      {/* The row's actions (Use this dataset, Export training record as
+          CSV, Download .pt, Export .pt to S3, Delete) were removed on
+          request (2026-11-24). Exports of a run's .pt, dataset and
+          metadata are on Model export and Catalog export. */}
 
       {open && (
         <div className="border-t border-hairline px-3 py-3">

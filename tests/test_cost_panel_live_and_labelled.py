@@ -209,9 +209,14 @@ def test_the_job_list_is_in_start_order():
     assert 'useCardOpen("cost_today_newest_first", false)' in src
 
 
-def test_the_history_buttons_say_what_they_export():
+def test_the_run_row_has_no_action_buttons():
+    """Removed on request (2026-11-24): the run row under a chosen version
+    no longer carries Use this dataset / Export training record as CSV /
+    Download .pt / Export .pt to S3 / Delete. Exports live on Model export
+    and Catalog export."""
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1] / "web" / "src"
            / "components" / "Track2TrainingAuditPanel.tsx").read_text(encoding="utf-8")
-    assert "Export training record as CSV" in src
-    assert '"Export .pt to S3"' in src
+    for handler in ("handleExport", "handleExportWeights", "handleCopyToFolder", "handleDelete",
+                    "track2-use-saved-dataset"):
+        assert handler not in src
