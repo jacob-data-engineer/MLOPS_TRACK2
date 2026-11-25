@@ -67,6 +67,12 @@ test('baseline registry, optional selection, saved-run results and retry', async
     await page.getByLabel('Baseline Model version').waitFor();
     assert.equal(await page.getByLabel('Baseline Model version').inputValue(),'baseline-v1');
     await page.getByLabel('Other comparison models').selectOption('source-v1');
+    await page.getByRole('button',{name:'Add model',exact:true}).click();
+    await page.getByLabel('Selected comparison models').getByRole('checkbox').check();
+    await page.getByRole('button',{name:'Remove selected models',exact:true}).click();
+    assert.equal(await page.getByLabel('Selected comparison models').getByRole('checkbox').count(),0);
+    await page.getByLabel('Other comparison models').selectOption('source-v1');
+    await page.getByRole('button',{name:'Add model',exact:true}).click();
     await page.getByRole('button',{name:'Run comparison',exact:true}).click();
     await page.getByRole('status').filter({hasText:'Completed'}).waitFor();
     assert.deepEqual(requests[0], {selection:{enabled:true,baseline_arn:'baseline-v1',other_arns:['source-v1']}});

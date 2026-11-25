@@ -7,6 +7,8 @@ import {ConfirmDialog} from './ConfirmDialog';
 export function Track2BaselineComparison({value, onChange, disabled = false, completed = false}: {
   value: BaselineSelection; onChange: (value: BaselineSelection) => void; disabled?: boolean; completed?: boolean;
 }) {
+  const [modelToAdd,setModelToAdd]=useState('');
+  const [modelsToRemove,setModelsToRemove]=useState<string[]>([]);
   const [versions, setVersions] = useState<BaselineVersion[]>([]);
   const [models, setModels] = useState<Track2MetricsRow[]>([]);
   const [error, setError] = useState('');
@@ -94,15 +96,19 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
       <button type="button" className="rounded border border-critical/40 px-3 py-2 text-critical disabled:opacity-40"
         disabled={!versions.some(v=>v.arn===value.baseline_arn)}
         onClick={()=>{setDeleteError('');setDeleteTarget(versions.find(v=>v.arn===value.baseline_arn)??null);}}>Delete baseline model</button>
-      <label className="block">Other trained models (optional, up to four)
-        <select multiple size={4} aria-label="Other comparison models" className="mt-1 block w-full rounded border border-hairline bg-page p-2"
-          value={value.other_arns || []} onChange={e => onChange({...value,
-            other_arns: Array.from(e.target.selectedOptions, o => o.value).slice(0, 4)})}>
-          {(value.other_arns || []).filter(a => !models.some(m => m.model_package_arn === a)).map(a =>
-            <option key={a} value={a}>Unavailable saved version: {a}</option>)}
-          {models.map(m => <option key={m.model_package_arn} value={m.model_package_arn}>{m.group_name} · v{m.version}</option>)}
-        </select>
-      </label>
+      <div className="space-y-2">
+        <label className="block">Other trained models (optional, up to four)
+          <select aria-label="Other comparison models" className="mt-1 block w-full rounded border border-hairline bg-page p-2" value={modelToAdd} onChange={e=>setModelToAdd(e.target.value)}>
+            <option value="">Choose a model version</option>
+            {models.filter(m=>!(value.other_arns||[]).includes(m.model_package_arn)).map(m=><option key={m.model_package_arn} value={m.model_package_arn}>{m.group_name} / v{m.version}</option>)}
+          </select>
+        </label>
+        <button type="button" className="rounded border px-3 py-2 disabled:opacity-40" disabled={!modelToAdd||(value.other_arns||[]).length>=4||(value.other_arns||[]).includes(modelToAdd)} onClick={()=>{onChange({...value,other_arns:[...(value.other_arns||[]),modelToAdd]});setModelToAdd('');}}>Add model</button>
+        <p className="text-xs">Selected models ({(value.other_arns||[]).length}/4)</p>
+        <ul aria-label="Selected comparison models" className="space-y-1">{(value.other_arns||[]).map(arn=>{const model=models.find(m=>m.model_package_arn===arn);return <li key={arn} className="rounded border p-2"><label className="flex items-center gap-2"><input type="checkbox" checked={modelsToRemove.includes(arn)} onChange={e=>setModelsToRemove(current=>e.target.checked?[...current,arn]:current.filter(a=>a!==arn))}/>{model?`${model.group_name} / v${model.version}`:`Unavailable saved version: ${arn}`}</label></li>;})}</ul>
+        <button type="button" className="rounded border border-critical/40 px-3 py-2 text-critical disabled:opacity-40" disabled={!(value.other_arns||[]).some(a=>modelsToRemove.includes(a))} onClick={()=>{onChange({...value,other_arns:(value.other_arns||[]).filter(a=>!modelsToRemove.includes(a))});setModelsToRemove([]);}}>Remove selected models</button>
+        <p className="text-xs text-ink-muted">Removal only changes this comparison list. Registered models are kept.</p>
+      </div>
       <p className="text-xs text-ink-muted">{completed ? 'Evaluate' : 'After training, evaluate'} these fixed versions on this run’s preserved validation images and labels. This starts a separate billed evaluation job; it does not train the baseline or change the serving model.</p>
     </>}
 
