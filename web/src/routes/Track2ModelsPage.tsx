@@ -28,11 +28,6 @@ import {
   type Track2PreparationJob,
   ApiError,
   getTrack2Metrics,
-  getTrack2QueueAfterPull,
-  saveTrack2QueueAfterPull,
-  getTrack2Retrain,
-  type Track2QueueAfterPull,
-  type Track2RetrainStatus,
   getTrack2DatasetClasses,
   getTrack2Detectors,
   getTrack2PullControl,
@@ -528,18 +523,6 @@ export function TrainingForm({
   // metrics, so picking a base model from it meant choosing on a version
   // number alone with no idea how good that version was.
   const [registryRows, setRegistryRows] = useState<Track2MetricsRow[]>([]);
-  // The unattended half: queue a run whenever a pull finishes, leaving a
-  // person to release it.
-  const [afterPull, setAfterPull] = useState<Track2QueueAfterPull | null>(null);
-  const [afterPullBusy, setAfterPullBusy] = useState(false);
-  /** The retrain schedule's own clock -- read even when the pull is the
-   * trigger, because `follows_pull` on the response is what decides
-   * whether the cadence fields are shown at all. */
-  const [retrain, setRetrain] = useState<Track2RetrainStatus | null>(null);
-  // No cadence state here any more: the interval and the time are set
-  // ONCE, in the PULL, BUILD, QUEUE, TRAIN strip, which mirrors them
-  // onto this clock server-side. `retrain` is still read so the card
-  // can say when the next run is.
   // Read the chosen dataset's taxonomy and PRESELECT the pipeline from it,
   // rather than letting the operator discover from a rejection that their
   // data is not person/helmet. Advisory only: it never routes the run,
@@ -573,12 +556,6 @@ export function TrainingForm({
         if (store) setSelection({ datasetFolder: `${store}_decay`, evalFolder: `${store}_decay` });
 
       })
-      .catch(() => undefined);
-    getTrack2Retrain()
-      .then((res) => !cancelled && setRetrain(res))
-      .catch(() => undefined);
-    getTrack2QueueAfterPull()
-      .then((res) => !cancelled && setAfterPull(res))
       .catch(() => undefined);
     // The metrics rows carry everything the package list did, plus the
     // measured quality, so there is one source rather than two that can
@@ -949,93 +926,6 @@ export function TrainingForm({
       </div>
 
 
-
-      {/* Automatic queueing uses the prepared dataset too. */}
-      <div className="mt-3 rounded-md border border-black/15 p-3">
-        {/* READ-ONLY (2026-10-26). "Enabled for scheduling" was a tick
-            here, a third switch for the chain beside the Retention card's
-            and the strip's mode. The strip is the one switch now:
-            `queue_after_pull.settings` derives on/off from the pull mode. */}
-        <p className="text-sm">
-          <span className="font-medium text-ink">Runs automatically: </span>
-          <span className={afterPull?.settings.enabled ? "text-ink" : "text-ink-muted"}>
-            {afterPull?.settings.enabled
-              ? (afterPull.settings.triggers ?? []).includes("arrival")
-                ? "when files arrive"
-                : "after each scheduled pull"
-              : "off"}
-          </span>
-          <span className="mt-0.5 block text-xs text-ink-muted">
-            Switched on and off by <strong>TRAINING SCHEDULE</strong> at
-            the top. The background worker pulls fresh data, rebuilds and preserves the
-            decayed dataset, then queues the run and starts it, even when this page is closed.
-            Working datasets are cleaned up automatically after both manual and scheduled runs.
-          </span>
-          {/* When the training clock is in charge -- Pull Control is not
-              a source, so no sweep runs -- its next slot, from the same
-              settings the strip writes. */}
-          {retrain && retrain.follows_pull === false && (
-            <span className="mt-2 block text-xs text-ink-muted">
-              {retrain.settings.enabled && retrain.next_runs?.length
-                ? `Next run ${localDate(retrain.next_runs[0])}.`
-                : "Not armed -- set “On a schedule” in TRAINING SCHEDULE at the top."}
-              {retrain.problems?.some((p) => p.level === "blocking") && (
-                <span className="mt-1 block text-critical">
-                  {retrain.problems.filter((p) => p.level === "blocking")[0].text}
-                </span>
-              )}
-            </span>
-          )}
-        </p>
-
-        {afterPull?.settings.enabled && (
-          <div className="mt-2 space-y-1 border-t border-hairline pt-2">
-            <label className="flex items-start gap-2 text-xs text-ink-secondary">
-              <input
-                type="checkbox"
-                className="mt-0.5 shrink-0"
-                disabled={afterPullBusy}
-                checked={!!afterPull.settings.even_if_nothing_moved}
-                onChange={async (e) => {
-                  setAfterPullBusy(true);
-                  try {
-                    setAfterPull(await saveTrack2QueueAfterPull({
-                      even_if_nothing_moved: e.target.checked,
-                    }));
-                  } catch {
-                    /* keep what is on screen */
-                  } finally {
-                    setAfterPullBusy(false);
-                  }
-                }}
-              />
-              <span>
-                Queue even when the pull moved no files
-                <span className="block text-ink-muted">
-                  Off, a pull that found nothing is skipped -- the corpus is
-                  unchanged, so the run would repeat the last model and bill
-                  for it.
-                </span>
-              </span>
-            </label>
-
-            <p className="text-xs text-ink-muted">
-              <span className="font-medium">Next:</span>{" "}
-              {afterPull.next.act
-                ? `would queue a run for pull ${afterPull.next.run?.run_id ?? ""}`
-                : afterPull.next.reason}
-            </p>
-            {afterPull.settings.last_result?.at && (
-              <p className="tabular text-xs text-ink-muted">
-                <span className="font-medium">Last:</span>{" "}
-                {afterPull.settings.last_result.ok ? "queued" : "did not queue"}{" "}
-                after pull {afterPull.settings.last_result.run_id} --{" "}
-                {afterPull.settings.last_result.detail}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
 
     </Card>
 
