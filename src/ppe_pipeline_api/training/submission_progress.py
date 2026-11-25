@@ -8,11 +8,12 @@ def table():
     return record_store.Table(os.getenv('TRAINING_AUDIT_TABLE', 'track2-yolo-training-audit'))
 
 
-def write(audit_id, stage, completed=0, total=0):
+def write(audit_id, stage, completed=0, total=0, *, resource_wait=False, detail=''):
     if not record_store.enabled():
         return
     table().put_item(Item={'id': audit_id + ':recording', 'record_type':'training_recording',
         'audit_id':audit_id, 'stage':stage, 'completed':completed, 'total':total,
+        'resource_wait': resource_wait, 'detail': detail,
         'updated_at':dt.datetime.now(dt.timezone.utc).isoformat()})
 
 

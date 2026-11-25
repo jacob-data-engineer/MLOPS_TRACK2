@@ -3466,7 +3466,7 @@ def get_training_progress(pipeline_name: str = "") -> dict | None:
     }
 
 
-def get_cpu_resource_usage() -> list[dict]:
+def get_cpu_resource_usage(*, strict=False) -> list[dict]:
     """Every InProgress PROCESSING job -- the CPU half of a run.
 
     A pipeline execution is not one machine. `TrainYolo` holds the single
@@ -3489,18 +3489,25 @@ def get_cpu_resource_usage() -> list[dict]:
         )["ProcessingJobSummaries"]
     except Exception as exc:                                   # noqa: BLE001
         print(f"Could not list processing jobs: {exc}")
+        if strict:
+            raise
         return []
     jobs = []
     for summary in summaries:
         name = summary["ProcessingJobName"]
         instance_type = ""
+        started = None
         try:
-            instance_type = sm.describe_processing_job(
+            described = sm.describe_processing_job(
                 ProcessingJobName=name,
-            )["ProcessingResources"]["ClusterConfig"]["InstanceType"]
+            )
+            instance_type = described["ProcessingResources"]["ClusterConfig"]["InstanceType"]
+            started = bool(described.get('ProcessingStartTime'))
         except Exception as exc:                               # noqa: BLE001
             # Named but not described: still worth reporting as busy.
             print(f"Could not describe processing job {name}: {exc}")
+            if strict:
+                raise
         # "pipelines-<execution>-<StepName>-<suffix>" is how SageMaker
         # names a step's job, so the step is readable straight off it.
         step = ""
@@ -3511,7 +3518,8 @@ def get_cpu_resource_usage() -> list[dict]:
             "name": name,
             "step": step,
             "instance_type": instance_type,
-            "own_pipeline": name.startswith("pipelines-"),
+            "own_pipeline": name.startswith(("pipelines-", "track2-compare-")),
+            "started": started,
         })
     return jobs
 
@@ -3593,7 +3601,7 @@ def is_own_processing_job(name: str) -> bool:
     return name.startswith("pipelines-")
 
 
-def get_gpu_resource_usage() -> list[dict]:
+def get_gpu_resource_usage(*, strict=False) -> list[dict]:
     """Every InProgress training job in this AWS account (not just this
     app's own pipeline) running on GPU_INSTANCE_TYPE -- the account has
     exactly 1 such instance available in total, shared across every
@@ -3608,6 +3616,8 @@ def get_gpu_resource_usage() -> list[dict]:
         )["TrainingJobSummaries"]
     except Exception as exc:
         print(f"Could not list training jobs: {exc}")
+        if strict:
+            raise
         return []
     jobs = []
     for s in summaries:
@@ -3617,6 +3627,8 @@ def get_gpu_resource_usage() -> list[dict]:
             instance_type = details["ResourceConfig"]["InstanceType"]
         except Exception as exc:
             print(f"Could not describe training job {name}: {exc}")
+            if strict:
+                raise
             continue
         if instance_type == GPU_INSTANCE_TYPE:
             # From the DESCRIBE, not the summary. `TrainingJobSummary`
@@ -5634,11 +5646,16 @@ def try_advance_queue() -> None:
             if entry.get('reproducible'):
                 _forget_queue_entry(entry['id'])
         except Exception as exc:
-            if entry.get('reproducible') and isinstance(exc, ValueError):
+            from .resource_wait import is_resource_shortage
+            resource_wait = is_resource_shortage(exc)
+            if entry.get('reproducible') and isinstance(exc, ValueError) and not resource_wait:
                 _forget_queue_entry(entry['id'])
             # Durable submissions retry transient failures with the same AWS token.
             # Invalid entries and legacy submissions are removed.
-            disposition = 'will retry' if entry.get('reproducible') and not isinstance(exc, ValueError) else 'skipped'
+            disposition = 'will retry' if entry.get('reproducible') and (resource_wait or not isinstance(exc, ValueError)) else 'skipped'
+            if entry.get('reproducible') and resource_wait:
+                submission_progress.write('run-' + entry['id'], 'Waiting for resources',
+                                          resource_wait=True, detail=str(exc)[:1000])
             with _queue_lock:
                 _queue_last_error = (
                     f"Queue entry (YOLO{entry.get('generation', '?')}-"

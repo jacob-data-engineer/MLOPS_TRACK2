@@ -516,7 +516,7 @@ def _cpu_status() -> dict:
     like a contradiction.
     """
     try:
-        jobs = t2.get_cpu_resource_usage()
+        jobs = t2.get_cpu_resource_usage(strict=True)
     except Exception as exc:                                # noqa: BLE001
         return {"known": False, "busy": False, "step": "", "jobs": [],
                 "error": str(exc)}
@@ -541,14 +541,14 @@ def chain_status(session=Depends(require_session)) -> dict:
     """
     gpu: list = []
     try:
-        gpu = t2.get_gpu_resource_usage()
+        gpu = t2.get_gpu_resource_usage(strict=True)
     except Exception as exc:                                # noqa: BLE001
         # A bar is not worth erroring a page over; say it is unknown.
         return {**rs.chain_progress(), "pull": _pull_status(),
                 "gpu": {"known": False, "busy": False,
                         "jobs": [], "error": str(exc)},
                 "cpu": _cpu_status()}
-    return {
+    result = {
         **rs.chain_progress(),
         "pull": _pull_status(),
         "cpu": _cpu_status(),
@@ -570,6 +570,12 @@ def chain_status(session=Depends(require_session)) -> dict:
             "error": "",
         },
     }
+    from ..training.resource_wait import describe
+    try:
+        result['resources'] = describe(t2.queue_snapshot(), result['gpu'], result['cpu'])
+    except Exception:
+        result['resources'] = {'waiting': False, 'detail': 'Could not read the training queue.'}
+    return result
 
 
 class SnapshotRequest(BaseModel):

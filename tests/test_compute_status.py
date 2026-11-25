@@ -74,7 +74,7 @@ def test_a_listing_that_raises_does_not_break_the_bar(monkeypatch):
 
 
 def test_the_chain_status_cpu_block(monkeypatch):
-    monkeypatch.setattr(retention.t2, "get_cpu_resource_usage", lambda: [
+    monkeypatch.setattr(retention.t2, "get_cpu_resource_usage", lambda **kw: [
         {"name": "pipelines-a-EvaluateYolo-b", "step": "EvaluateYolo",
          "instance_type": "ml.m5.xlarge", "own_pipeline": True}])
     got = retention._cpu_status()
@@ -84,7 +84,7 @@ def test_the_chain_status_cpu_block(monkeypatch):
 
 
 def test_the_cpu_block_when_idle(monkeypatch):
-    monkeypatch.setattr(retention.t2, "get_cpu_resource_usage", lambda: [])
+    monkeypatch.setattr(retention.t2, "get_cpu_resource_usage", lambda **kw: [])
     got = retention._cpu_status()
     assert got["busy"] is False
     assert got["step"] == ""
@@ -92,7 +92,7 @@ def test_the_cpu_block_when_idle(monkeypatch):
 
 
 def test_the_cpu_block_survives_a_failure(monkeypatch):
-    def boom():
+    def boom(**kw):
         raise RuntimeError("no")
     monkeypatch.setattr(retention.t2, "get_cpu_resource_usage", boom)
     got = retention._cpu_status()

@@ -85,13 +85,13 @@ export function Track2ChainStatusBar() {
       // A PULL counts as something happening -- it is the stage that
       // moves thousands of files and the one most often left unwatched.
       const live = status?.running || status?.pull?.status === "running"
-        || status?.gpu?.busy || status?.cpu?.busy;
+        || status?.gpu?.busy || status?.cpu?.busy || status?.resources?.waiting;
       if (!cancelled) timer = window.setTimeout(tick, live ? 3000 : 20000);
     };
     void tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status?.running, status?.pull?.status, status?.gpu?.busy, status?.cpu?.busy]);
+  }, [status?.running, status?.pull?.status, status?.gpu?.busy, status?.cpu?.busy, status?.resources?.waiting]);
 
   if (!status) return null;
 
@@ -166,6 +166,9 @@ export function Track2ChainStatusBar() {
           eight stages onto a second line, which is a bigger change to
           the bar than "put the evaluation status under the GPU one". */}
       <span className="flex flex-col gap-0.5 self-start">
+        {status.resources?.waiting && <span role="status" className="font-semibold text-amber-700" title={status.resources.detail}>
+          Waiting for resources
+        </span>}
         <span className={`font-medium ${gpuTone}`} title={gpuDetail}>{gpuLabel}</span>
         {/* How long it has been held. Muted and beside the label rather
             than inside it: the label answers "can I start a run", this

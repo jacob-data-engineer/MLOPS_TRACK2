@@ -3395,6 +3395,7 @@ export interface Track2ChainStage {
 }
 
 export interface Track2ChainStatus {
+  resources?: {waiting: boolean; detail: string};
   running: boolean;
   trigger: string;
   started_at: string;

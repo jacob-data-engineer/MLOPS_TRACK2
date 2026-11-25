@@ -353,7 +353,7 @@
    "fields": [
     "Queue after pull is off, so a pull does not start a retrain."
    ],
-   "text": "Queue after pull is off, so a pull does not start a retrain.\nNo pull yet\nnothing follows a pull\nGPU unknown\nGPU free\nGPU in use -- this pipeline\nGPU in use -- another job\nNo training job is holding the GPU.\nCPU in use -- evaluating\nCPU in use"
+   "text": "Queue after pull is off, so a pull does not start a retrain.\nWaiting for resources\nNo pull yet\nnothing follows a pull\nGPU unknown\nGPU free\nGPU in use -- this pipeline\nGPU in use -- another job\nNo training job is holding the GPU.\nCPU in use -- evaluating\nCPU in use"
   },
   {
    "id": "components/Track2ComparisonExport.tsx",
