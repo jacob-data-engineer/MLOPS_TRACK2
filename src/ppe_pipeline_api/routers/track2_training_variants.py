@@ -1,5 +1,6 @@
 """Authenticated saved-variant and training batch API. Creation explicitly starts paid background work."""
 from uuid import UUID
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, ConfigDict
 from ..auth import require_session
@@ -24,7 +25,8 @@ class VariantBatch(BaseModel):
     detector_slug:str
     architecture:str
     baseline_arn:str
-    dataset_version_id:str
+    dataset_version_id:str=""
+    data_mode:Literal["saved","prepared"]="saved"
     shared:dict=Field(default_factory=dict)
     evaluation:Evaluation=Field(default_factory=Evaluation)
     variants:list[Variant]=Field(min_length=1,max_length=20)
@@ -42,7 +44,8 @@ class Draft(BaseModel):
     detector_slug:str
     architecture:str
     baseline_arn:str
-    dataset_version_id:str
+    dataset_version_id:str=""
+    data_mode:Literal["saved","prepared"]="saved"
     revision:int=Field(default=0,ge=0)
     variants:list[SavedVariant]=Field(max_length=20)
 def call(fn):

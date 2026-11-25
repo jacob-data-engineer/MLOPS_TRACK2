@@ -192,3 +192,33 @@ def test_draft_context_isolated_and_names_unique(draft_store):
     assert first['id']!=second['id'] and len(draft_store[0].rows)==2
     p['revision']=1;p['variants'].append({**p['variants'][0],'id':str(uuid.uuid4()),'name':'reference settings'})
     with pytest.raises(ValueError,match='unique'):e.save_draft(p)
+
+def test_fresh_draft_saves_without_dataset_or_preparation(draft_store,monkeypatch):
+    p=draft_payload();p.update(data_mode='prepared',dataset_version_id='')
+    monkeypatch.setattr(e.data,'freeze_prepared_training',lambda *a,**k:pytest.fail('draft must not prepare'))
+    saved=e.save_draft(p)
+    assert saved['data_mode']=='prepared' and saved['dataset_version_id']==''
+
+
+def test_fresh_batch_prepares_once_and_replays_after_restart(store,monkeypatch):
+    from ppe_pipeline_api.chain import retrain_schedule as rs
+    config={'source':'original'}
+    monkeypatch.setattr(e.pc,'read_config',lambda:config)
+    p=payload();p.update(data_mode='prepared',dataset_version_id='')
+    e.create(p);config['source']='changed later'
+    j=e.read(p['id']);assert j['preparation_config']=={'source':'original'}
+    j['baseline']={'key':'pinned.pt'}
+    calls=[];used=[]
+    monkeypatch.setattr(e.t2,'queue_snapshot',lambda:{})
+    monkeypatch.setattr(rs,'combine_and_decay',lambda c,**kw:calls.append(('prepare',copy.deepcopy(c))))
+    monkeypatch.setattr(e.data,'freeze_prepared_training',lambda c,**kw:calls.append(('freeze',c)) or {'version_id':'fresh-shared'})
+    monkeypatch.setattr(e.data,'prepare_saved_training',lambda ident,**kw:used.append(ident) or {'version_id':'replay'})
+    monkeypatch.setattr(e.data,'version_run_fields',lambda v:{'dataset_version_id':v['version_id']})
+    monkeypatch.setattr(e.data,'mark_version',lambda *a,**kw:None)
+    monkeypatch.setattr(e,'publish',lambda j,v,entry:e.save(j))
+    e.prepare_variant(j,j['variants'][0])
+    j=e.read(p['id'])
+    e.prepare_variant(j,j['variants'][1])
+    assert [x[0] for x in calls]==['prepare','freeze']
+    assert used==['fresh-shared','fresh-shared']
+    assert j['dataset_version_id']=='fresh-shared'

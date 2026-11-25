@@ -13,10 +13,10 @@ export const API_BASE_URL: string =
 export interface BaselineSelection { enabled: boolean; baseline_arn?: string; other_arns?: string[] }
 export type VariantSettingsSnapshot = {epochs:number;img_size:number;batch:number;seed:number;patience:number;hyperparams:Record<string,unknown>};
 export type SavedTrainingVariant = {id:string;name:string;settings:VariantSettingsSnapshot;selected:boolean};
-export type TrainingVariantDraft = {id:string;revision:number;detector_slug:string;architecture:string;baseline_arn:string;dataset_version_id:string;variants:SavedTrainingVariant[]};
+export type TrainingVariantDraft = {id:string;revision:number;detector_slug:string;architecture:string;baseline_arn:string;dataset_version_id:string;data_mode?:"saved"|"prepared";variants:SavedTrainingVariant[]};
 export interface VariantRunRecord {
   id:string; name:string; state:string; stage?:string; error?:string; created_at:string;
-  baseline_arn:string; dataset_version_id:string; shared:Record<string,unknown>;
+  baseline_arn:string; dataset_version_id:string; data_mode?:"saved"|"prepared"; shared:Record<string,unknown>;
   variants:{index:number;name:string;state:string;training_status?:string;run_id?:string;run_number?:number;model_package_arn?:string;error?:string;settings:Record<string,unknown>}[];
   comparison?:RunComparisonSummary['comparison'];
 }

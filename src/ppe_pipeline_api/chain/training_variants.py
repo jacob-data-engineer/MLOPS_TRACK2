@@ -43,7 +43,13 @@ def save_draft(payload):
     """Save configurations only. No queue, S3 preparation or AWS job calls."""
     data.require_training_sql()
     context={k:payload[k] for k in ('detector_slug','architecture','baseline_arn','dataset_version_id')}
-    if not all(context.values()):
+    mode=payload.get('data_mode','saved')
+    if mode not in ('saved','prepared'):
+        raise ValueError('Choose saved or freshly prepared data.')
+    if mode=='prepared':
+        context['data_mode']=mode
+        context['dataset_version_id']=''
+    if not all(context[k] for k in ('detector_slug','architecture','baseline_arn')) or (mode=='saved' and not context['dataset_version_id']):
         raise ValueError('Choose a model, registered baseline and saved dataset first.')
     cmp._arn(context['baseline_arn'])
     ident=hashlib.sha256(json.dumps(context,sort_keys=True).encode()).hexdigest()
@@ -101,7 +107,11 @@ def create(payload):
     package = t2.sm.describe_model_package(ModelPackageName=baseline)
     if package.get('ModelPackageStatus') != 'Completed':
         raise ValueError('The baseline model is not ready.')
-    check = data.check_saved_training(payload['dataset_version_id'], detector['classes'])
+    mode=payload.get('data_mode','saved')
+    if mode not in ('saved','prepared'):
+        raise ValueError('Choose saved or freshly prepared data.')
+    check = data.check_saved_training(payload['dataset_version_id'], detector['classes']) if mode=='saved' else {}
+    config=copy.deepcopy(pc.read_config()) if mode=='prepared' else None
     shared = settings(payload['shared'])
     variants=[]
     for index, row in enumerate(payload['variants']):
@@ -113,7 +123,8 @@ def create(payload):
     job = {'kind':KIND,'sort':ident,'id':ident,'name':payload['name'], 'request_digest':digest,
            'created_at':now(),'updated_at':now(),'state':'Pending','detector':detector,
            'architecture':payload['architecture'],'baseline_arn':baseline,
-           'dataset_version_id':payload['dataset_version_id'],'dataset':check,'shared':shared,
+           'data_mode':mode,'preparation_config':config,
+           'dataset_version_id':payload['dataset_version_id'] if mode=='saved' else '', 'dataset':check,'shared':shared,
            'evaluation':payload['evaluation'],'variants':variants,'comparison_attempt':0}
     try:
         table().put_item(Item=job,ConditionExpression='attribute_not_exists(#k)',ExpressionAttributeNames={'#k':'kind'})
@@ -170,6 +181,15 @@ def prepare_variant(job, variant):
     def progress(stage, completed, total):
         job['stage']=f"{variant['name']}: {stage}" + (f' ({completed}/{total})' if total else '')
         save(job)
+    if job.get('data_mode')=='prepared' and not job.get('dataset_version_id'):
+        from . import retrain_schedule as rs
+        progress('Preparing shared fresh dataset for all variants',0,0)
+        rs.combine_and_decay(job['preparation_config'],for_run=True,progress=progress)
+        shared=data.freeze_prepared_training(job['preparation_config'],trigger='variant_batch',
+            target_classes=job['detector']['classes'],progress=progress)
+        job['dataset_version_id']=shared['version_id']
+        job['dataset']=shared
+        save(job)  # Persist shared SQL recipe before any variant is queued.
     version=data.prepare_saved_training(job['dataset_version_id'],target_classes=job['detector']['classes'],trigger='experiment',progress=progress)
     generation,size=t2.split_architecture(job['architecture'])
     entry={**data.version_run_fields(version),**variant['settings'], 'id':entry_id(job,variant),

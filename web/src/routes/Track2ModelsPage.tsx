@@ -924,6 +924,7 @@ export function TrainingForm({
       {allowVariants && <Track2TrainingVariants
         key={`${detectorSlug}|${architecture}|${basePackageArn}|${dataChoice.mode}|${dataChoice.id}`}
         detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
+        dataMode={dataChoice.mode}
         dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
         settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} />}
       <div className="mt-3 flex gap-2">
