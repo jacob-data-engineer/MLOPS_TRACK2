@@ -360,11 +360,11 @@ export function Layout() {
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto bg-page">
+      <main className="min-w-0 flex-1 overflow-y-auto bg-page">
         <StaleBuildBanner />
         <Track2CompletionNotices />
 
-        <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
+        <div className={`mx-auto w-full px-4 py-6 md:px-8 md:py-8 ${location.pathname === '/track2/metrics' ? '' : 'max-w-6xl'}`}>
           {/* Keyed by path so navigating away clears a failure: a latched
               boundary would make every page after a broken one look
               broken too. */}

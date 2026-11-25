@@ -516,7 +516,7 @@ export function Track2MetricsPage() {
       )}
 
       <Track2RunComparisons />
-      <fieldset disabled={restoringSettings} aria-busy={restoringSettings}>
+      <fieldset className="min-w-0 w-full" disabled={restoringSettings} aria-busy={restoringSettings}>
       {rows && (
         <Track2ModelPicker
           rows={rows}
