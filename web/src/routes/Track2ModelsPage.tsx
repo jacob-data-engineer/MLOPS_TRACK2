@@ -16,7 +16,6 @@ import { useCardOpen } from "../lib/cardState";
 import { formatDayTime } from "../lib/format";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
-import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ProgressBar } from "../components/ProgressBar";
 import { Track2TrainingRunProgress } from "../components/Track2TrainingRunProgress";
 import { StatTile } from "../components/StatTile";
@@ -41,7 +40,6 @@ import {
   getTrack2Models,
   getTrack2ModelsLive,
   removeTrack2Queue,
-  stopTrack2Training,
   type Track2DatasetClasses,
   type Track2Detector,
   type Track2PullConfig,
@@ -1198,56 +1196,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
   // and then stayed on screen after the queue had moved on. The queue is
   // the record; `load()` refreshes it so it is right by the time the
   // button finishes.
-  /** Which of the three queue buttons is mid-flight.
-   *
-   * Each of them is a round trip that can take a moment -- Stop Training
-   * calls SageMaker -- and all three left the button looking exactly as
-   * it did before. Pressing again was the only way to find out whether
-   * the first press had registered, and "Start Queue" was pressed eleven
-   * times in a row that way. */
-  const [queueBusy, setQueueBusy] =
-    useState<"" | "start" | "stop" | "stop-training">("");
-  /** What the last queue action replied, shown IN the queue card.
-   *
-   * The page's own banners sit nearly three hundred lines above these
-   * buttons, off the top of the screen. "Queue is empty -- add at least
-   * one run first" delivered up there is the refusal arriving somewhere
-   * the person pressing is not looking. */
-  const [queueNote, setQueueNote] =
-    useState<{ text: string; bad: boolean } | null>(null);
-  /** Stop Training asks first, because it can now reach jobs this app
-   * did not start. `alsoForeign` is the harsher answer, carried in the
-   * same dialog rather than behind a second control somewhere else. */
-  const [stopOpen, setStopOpen] = useState(false);
-  const [alsoForeign, setAlsoForeign] = useState(false);
-
-  /** Kills the run currently on the GPU. NOT the same as Stop Queue:
-   * /queue/stop only halts the loop and lets the in-flight run finish,
-   * so without this there is no way to end a run early and the
-   * single-GPU guard blocks everything else until it times out. */
-  async function handleStopTraining(includeForeign: boolean) {
-    if (queueBusy) return;
-    setQueueBusy("stop-training");
-    setQueueNote(null);
-    try {
-      const res = await stopTrack2Training(includeForeign);
-      setStopOpen(false);
-      setAlsoForeign(false);
-      setQueueNote({ text: res.message, bad: !!res.problems?.length });
-    } catch (err) {
-      setQueueNote({
-        text: err instanceof ApiError ? err.detail : "Stop failed.",
-        bad: true,
-      });
-    } finally {
-      // In `finally`, not after the await: this one calls SageMaker, so
-      // a failure is exactly when the button must stop saying
-      // "Stopping training..." forever.
-      setQueueBusy("");
-      load();
-    }
-  }
-
   function handleSubmitted() {
     // No banner. The queue below is where a queued run is read, and it
     // is refreshed here so the entry is there by the time the button
@@ -1255,20 +1203,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
     setHistoryKey((k) => k + 1);
     load();
   }
-
-  /** GPU jobs this app did not start. `own_pipeline` ones belong to a
-   * pipeline execution and are stopped through THAT -- stopping the job
-   * under a running execution leaves the execution to fail its step
-   * rather than stop cleanly. */
-  const foreignGpuJobs = (data?.gpu_jobs ?? []).filter((j) => !j.own_pipeline);
-  /** Whether there is a run of ours to stop at all. The button is also
-   * reachable with only a foreign job on the GPU, and the dialog has to
-   * say which of the two situations it is. */
-  const stoppableOwnRun = Boolean(
-    data?.queue.running
-    || data?.training_progress?.status === "Executing"
-    || data?.custom_run_id,
-  );
 
   return (
     <div>
@@ -1504,47 +1438,8 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                 ? `1 running, ${data.queue.pending.length} queued (max ${data.queue.max_size})`
                 : `${data.queue.pending.length} of ${data.queue.max_size} max`
             }
-            action={
-              <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
-                  onClick={() => { setAlsoForeign(false); setStopOpen(true); }}
-                  title="Stops a running training job. Dataset preparation cannot be stopped with this button."
-                  // custom_run_id matters: during a custom run
-                  // training_progress reports the last PRODUCTION
-                  // execution, which is a finished one -- keying off it
-                  // alone greys this out exactly when the single-GPU
-                  // guard makes stopping most necessary.
-                  // Reachable when a FOREIGN job holds the GPU as well.
-                  // The single-GPU guard refuses to start anything while
-                  // one does, and this was greyed out in exactly that
-                  // state -- the app could name the job in the status
-                  // bar and offered no way to end it.
-                  disabled={
-                    !!queueBusy || (
-                      !data.queue.running &&
-                      data.training_progress?.status !== "Executing" &&
-                      !data.custom_run_id &&
-                      !data.gpu_jobs.some((j) => !j.own_pipeline)
-                    )
-                  }
-                  className="rounded-md bg-red-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
-                >
-                  {queueBusy === "stop-training" ? "Stopping training..." : "Stop Training"}
-                </button>
-              </div>
-            }
+            action={<TrainingStopAll />}
           >
-            {!stoppableOwnRun && foreignGpuJobs.length === 0 && <p className="mb-2 text-xs text-ink-muted">Stop Training becomes available when a training job starts. It does not cancel dataset preparation.</p>}
-            <TrainingStopAll />
-            {/* The answer, where the question was asked. The buttons are
-                in this card's header; the page's own banners are nearly
-                three hundred lines above, off the top of the screen. */}
-            {queueNote && (
-              <p className={`mb-2 text-xs ${queueNote.bad ? "text-critical" : "text-ink-secondary"}`}>
-                {queueNote.text}
-              </p>
-            )}
             {/* Run status lives here rather than in its own card. The old
                 "Latest training run" panel read from training_progress,
                 which covers the PRODUCTION pipeline only -- so during a
@@ -1608,78 +1503,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             <Track2TrainingHistory reloadKey={historyKey} />
           </Card>
 
-          {/* Destructive, and it can now reach outside this app -- so it
-              names what goes, says what does not, and carries the
-              harsher choice itself rather than sending the operator to
-              find a second control. */}
-          <ConfirmDialog
-            open={stopOpen}
-            title="Stop training?"
-            destructive
-            busy={queueBusy === "stop-training"}
-            confirmLabel={
-              alsoForeign
-                ? `Stop ${foreignGpuJobs.length + (stoppableOwnRun ? 1 : 0)} job${
-                    foreignGpuJobs.length + (stoppableOwnRun ? 1 : 0) === 1 ? "" : "s"
-                  }`
-                : "Stop training"
-            }
-            cancelLabel="Cancel"
-            body={
-              <>
-                {stoppableOwnRun ? (
-                  <p>
-                    The run started here stops now. SageMaker cannot resume a
-                    stopped execution &mdash; a fresh run has to be started
-                    instead.
-                  </p>
-                ) : (
-                  <p>No run started here is executing.</p>
-                )}
-                {foreignGpuJobs.length > 0 && (
-                  <div className="mt-3 rounded-md border border-hairline bg-page p-2.5">
-                    <p className="text-xs text-ink-secondary">
-                      {foreignGpuJobs.length === 1 ? "This job is" : "These jobs are"}{" "}
-                      on the GPU and {foreignGpuJobs.length === 1 ? "was" : "were"} not
-                      started here:
-                    </p>
-                    <ul className="tabular mt-1 text-xs text-ink">
-                      {foreignGpuJobs.map((j) => (
-                        <li key={j.name}>
-                          {j.name}
-                          {j.spot && <span className="text-ink-muted"> &middot; spot</span>}
-                          {!j.started && (
-                            <span className="text-ink-muted">
-                              {" "}&middot; no instance allocated yet
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                    <label className="mt-2 inline-flex items-start gap-1.5 text-xs text-critical">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5 h-3.5 w-3.5"
-                        checked={alsoForeign}
-                        onChange={(e) => setAlsoForeign(e.target.checked)}
-                      />
-                      Stop {foreignGpuJobs.length === 1 ? "it" : "them"} too &mdash;{" "}
-                      {foreignGpuJobs.length === 1 ? "it belongs" : "they belong"} to
-                      another system.
-                    </label>
-                  </div>
-                )}
-                <p className="mt-3 text-xs text-ink-muted">
-                  <strong>Nothing else is touched.</strong> No dataset, no
-                  snapshot and no registered model changes, and the training
-                  queue keeps its entries &mdash; stopping a run is not the
-                  same as stopping the queue.
-                </p>
-              </>
-            }
-            onConfirm={() => void handleStopTraining(alsoForeign)}
-            onCancel={() => { setStopOpen(false); setAlsoForeign(false); }}
-          />
+
 
         </div>
       )}
