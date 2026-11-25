@@ -266,6 +266,17 @@ def advance(job):
     else:
         job.update(state='Failed',error='No successful variants to compare.');save(job)
 
+def advance_current(ident):
+    """Re-read after acquiring this experiment's lock; stale listings cannot revive removals."""
+    def owned():
+        job=read(ident)
+        if job['state'] in ('Pending','Preparing','Training','Comparing'):
+            try:
+                advance(job)
+            except Exception as exc:
+                job.update(state='Needs attention',error=str(exc)[:1500]);save(job)
+    return record_store.exclusive('training_variant:'+ident)(owned)()
+
 @record_store.exclusive('training_variants')
 def tick():
     if not record_store.enabled():
@@ -274,7 +285,7 @@ def tick():
         if job['state'] not in ('Pending','Preparing','Training','Comparing'):
             continue
         try:
-            advance(job)
+            advance_current(job['id'])
         except Exception as exc:
             job.update(state='Needs attention',error=str(exc)[:1500]);save(job)
         # One experiment per tick keeps preparation and AWS calls bounded.
@@ -302,9 +313,11 @@ def retry(ident, index=None):
     return public(job)
 
 
-@record_store.exclusive('training_variants')
 def remove_pending(ident):
-    """Remove an unstarted experiment under the same ownership lock as tick."""
+    return record_store.exclusive('training_variant:'+ident)(lambda: _remove_pending(ident))()
+
+def _remove_pending(ident):
+    """Lock only this experiment, so other preparation cannot block removal."""
     job=read(ident)
     if job['state']=='Cancelled':
         return public(job)

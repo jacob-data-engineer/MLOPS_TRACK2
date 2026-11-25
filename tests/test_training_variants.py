@@ -282,3 +282,39 @@ def test_remove_rejects_started_experiments(store,state):
     j=job(store);j['state']=state;e.save(j)
     with pytest.raises(ValueError,match='not started'):e.remove_pending(j['id'])
     assert e.read(j['id'])['state']==state
+
+
+def test_removal_does_not_acquire_global_worker_lock(store,monkeypatch):
+    j=job(store);locks=[]
+    def exclusive(name):
+        locks.append(name)
+        assert name!='training_variants'
+        return lambda fn:fn
+    monkeypatch.setattr(e.record_store,'exclusive',exclusive)
+    assert e.remove_pending(j['id'])['state']=='Cancelled'
+    assert locks==['training_variant:'+j['id']]
+    monkeypatch.setattr(e,'advance',lambda j:pytest.fail('Stale listing revived removed job'))
+    e.advance_current(j['id'])
+
+
+def test_running_other_experiment_does_not_block_pending_removal(store,monkeypatch):
+    import threading
+    a=job(store);b=job(store)
+    locks={};entered=threading.Event();release=threading.Event()
+    def exclusive(name):
+        lock=locks.setdefault(name,threading.Lock())
+        def decorate(fn):
+            def wrapped(*args,**kwargs):
+                if not lock.acquire(blocking=False):return {'started':False}
+                try:return fn(*args,**kwargs)
+                finally:lock.release()
+            return wrapped
+        return decorate
+    monkeypatch.setattr(e.record_store,'exclusive',exclusive)
+    monkeypatch.setattr(e,'advance',lambda j:(entered.set(),release.wait(5)))
+    thread=threading.Thread(target=e.advance_current,args=(a['id'],));thread.start()
+    try:
+        assert entered.wait(2)
+        assert e.remove_pending(b['id'])['state']=='Cancelled'
+        assert e.remove_pending(a['id'])=={'started':False}
+    finally:release.set();thread.join(5)

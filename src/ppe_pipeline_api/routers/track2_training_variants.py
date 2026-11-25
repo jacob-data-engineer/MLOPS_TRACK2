@@ -79,5 +79,5 @@ def report(ident:str,session=Depends(require_session)):
 def remove_pending(ident:str,session=Depends(require_session)):
     result=call(lambda:e.remove_pending(ident))
     if result.get('started') is False:
-        raise HTTPException(409,'The worker is updating the queue. Nothing was removed; retry after the current preparation step finishes.')
+        raise HTTPException(409,'This experiment is starting or running and cannot be removed. Refresh its status.')
     return result
