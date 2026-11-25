@@ -19,7 +19,7 @@ test('page Save and Load restore comparison models and metric checkboxes', async
       const p=new URL(route.request().url()).pathname;
       let json={};
       if(p.endsWith('/metrics'))json={rows};
-      else if(p.endsWith('/comparisons'))json={runs:[]};
+      else if(p.endsWith('/comparisons'))json={runs:[{id:'run-73',run_number:73,label:'Helmet',status:'Completed',submitted_at:'2026-11-24T00:00:00Z'}]};
       else if(p.endsWith('/export/defaults'))json={destination:'s3',bucket:'track2-s3',prefix:'_exports',format:'zip'};
       else if(p.endsWith('/settings/save')){saved=route.request().postDataJSON().settings;lastLoaded='comparison';json={name:'comparison'};}
       else if(p.endsWith('/settings/forget')){lastLoaded='';json={last_loaded:''};}
@@ -30,7 +30,7 @@ test('page Save and Load restore comparison models and metric checkboxes', async
       else if(p.endsWith('/settings'))json={last_loaded:lastLoaded,writable:true,files:saved?[{name:'comparison'}]:[]};
       else if(p.endsWith('/detectors'))json={detectors:[]};
       else if(p.endsWith('/pull-control'))json={config:{}};
-      else if(p.endsWith('/runs-by-model'))json={runs:{}};
+      else if(p.endsWith('/runs-by-model'))json={runs:{'arn:2':{run_id:'run-73',run_number:73,detector:'helmet'}}};
       else if(p.endsWith('/audit'))json={audits:[]};
       else if(p.endsWith('/export/groups'))json={groups:[]};
       else if(p.endsWith('/export/auto'))json={settings:{enabled:false}};
@@ -49,6 +49,11 @@ test('page Save and Load restore comparison models and metric checkboxes', async
     assert.equal(await exports.nth(1).isChecked(),true);
     await page.getByRole('radio',{name:'Compare with baseline',exact:true}).check();
     await page.getByRole('combobox',{name:'Training run',exact:true}).waitFor();
+    await page.getByRole('combobox',{name:'Training run',exact:true}).selectOption('run-73');
+    const baselineExports=page.locator('[aria-label="Rank and export compared models"]:visible input[type="checkbox"][aria-label^="Export "]');
+    assert.equal(await baselineExports.count(),1);
+    assert.equal(await baselineExports.first().isChecked(),true);
+    assert.equal(await page.getByRole('button',{name:'Review selected packages',exact:true}).isEnabled(),true);
     assert.equal(await page.locator('#model-export').isVisible(),false);
     assert.equal(await page.locator('#comparison').isVisible(),false);
     await page.getByRole('radio',{name:'Compare across models',exact:true}).check();

@@ -1105,6 +1105,10 @@
    ],
    "cards": [
     {
+     "title": "Model export",
+     "caption": ""
+    },
+    {
      "title": "Comparison",
      "caption": ""
     }
@@ -1121,7 +1125,7 @@
     "mAP50-95",
     "the legacy evaluator's number -- blank on anything trained recently"
    ],
-   "text": "Comparison\nJump to a section\nModel export\nmAP50\nmAP50-95\nPrecision\nRecall\nAccuracy\nRefresh metrics, training audits and model run details. Selections and filters are kept.\nthe legacy evaluator's number -- blank on anything trained recently\nTrack2 Review & Metrics\nReading training audits...\nRetry\nComparison mode\nCompare with baseline\nCompare across models\nJump to\nLoading metrics...\nNo model versions are registered yet, so there is nothing to compare or export.\n(legacy)\nPick a version above and press\nSelect this\nChoose at least one metric.\nCould not read the training audits.\nCouldn't load metrics.\nThis version has no recorded metrics, so there is nothing to\nNone of these versions has recorded metrics, so there is nothing\nThese versions do not detect the same classes, so their metrics\nBelow about fifty, a single picture moves mAP by whole percentage\nRefreshing...\nRefresh all\nNot loaded yet"
+   "text": "Model export\nComparison\nJump to a section\nmAP50\nmAP50-95\nPrecision\nRecall\nAccuracy\nRefresh metrics, training audits and model run details. Selections and filters are kept.\nthe legacy evaluator's number -- blank on anything trained recently\nTrack2 Review & Metrics\nReading training audits...\nRetry\nComparison mode\nCompare with baseline\nCompare across models\nJump to\nLoading metrics...\nExport the selected training run's model, data and metadata. Choose the package contents and destination below.\nChoose a training run above to export.\nNo registered model is available for this run, or its model details are still loading.\nNo model versions are registered yet, so there is nothing to compare or export.\n(legacy)\nPick a version above and press\nSelect this\nChoose at least one metric.\nCould not read the training audits.\nCouldn't load metrics.\nThis version has no recorded metrics, so there is nothing to\nNone of these versions has recorded metrics, so there is nothing\nThese versions do not detect the same classes, so their metrics\nBelow about fifty, a single picture moves mAP by whole percentage\nRefreshing...\nRefresh all\nNot loaded yet"
   },
   {
    "id": "routes/Track2ModelsPage.tsx",

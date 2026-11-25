@@ -5,7 +5,7 @@ import {Track2BaselineComparison} from './Track2BaselineComparison';
 import {formatDayTime} from '../lib/format';
 
 const metrics = ['mAP50-95', 'mAP50', 'precision', 'recall', 'f1'] as const;
-export function Track2RunComparisons({initialRun = ''}: {initialRun?: string} = {}) {
+export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun?: string; onRunChange?: (id: string) => void} = {}) {
   const [runs, setRuns] = useState<RunComparisonSummary[]>([]);
   const [selected, setSelected] = useState(initialRun);
   const [selection, setSelection] = useState<BaselineSelection>({enabled: false});
@@ -35,7 +35,7 @@ export function Track2RunComparisons({initialRun = ''}: {initialRun?: string} = 
     <h2 className="font-semibold">Saved-run baseline comparisons</h2>
     <p className="my-2 text-xs text-ink-muted">Every result here evaluates all selected models on one saved validation snapshot. Original training scores below remain unchanged.</p>
     <label className="block text-sm">Training run<select className="my-2 block w-full rounded border border-hairline bg-page p-2" value={selected}
-      onChange={e => {setSelected(e.target.value); setSelection({enabled:false});}}>
+      onChange={e => {setSelected(e.target.value); onRunChange?.(e.target.value); setSelection({enabled:false});}}>
       <option value="">Choose a saved training run</option>
       {runs.map(r => <option key={r.id} value={r.id}>{r.run_number != null ? `Run ${r.run_number}` : r.id} · {r.label} · {formatDayTime(r.submitted_at)} · {r.status}</option>)}
     </select></label>
