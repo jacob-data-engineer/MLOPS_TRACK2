@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { isSeedVersion, statusLabel } from "../lib/slug";
 import { formatDayTime } from "../lib/format";
 import {
@@ -59,7 +59,9 @@ export function Track2BaseModelPicker({
   value,
   onChange,
   refreshKey,
+  modeControl,
 }: {
+  modeControl?: ReactNode;
   detectorSlug: string;
   detectorLabel: string;
   architecture: string;
@@ -131,6 +133,7 @@ export function Track2BaseModelPicker({
           removed as not needed. This card never switches off anyway: it
           is the only way a run gets its starting weights, so a box that
           could disable it would be a control that breaks the page. */}
+      {modeControl}
       <p className="mb-2 text-sm font-medium text-ink">Train on an existing model</p>
       <p className="mb-2 text-xs text-ink-muted">
         Which registered version this run starts from. Unapproved versions are

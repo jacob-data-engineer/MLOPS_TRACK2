@@ -1,3 +1,4 @@
+import {Track2TrainingMode,type TrainingMode} from "../components/Track2TrainingMode";
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import {usePageSave} from "../lib/pageSave";
 import { Track2TrainingDataFile } from "../components/Track2TrainingDataFile";
@@ -368,6 +369,7 @@ export function TrainingForm({
   onSubmitted,
   detectorsVersion,
   allowVariants = false,
+  trainingMode = "single",
 }: {
   selection: TrainingSelection;
   setSelection: (patch: Partial<TrainingSelection>) => void;
@@ -381,6 +383,7 @@ export function TrainingForm({
    * below is never offering a list that no longer exists. */
   detectorsVersion: number;
   allowVariants?: boolean;
+  trainingMode?: TrainingMode;
 }) {
   const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
@@ -714,10 +717,11 @@ export function TrainingForm({
   // cards queue, and the queue is what gets started. The backend still
   // exposes both start endpoints, so this is a UI decision, not a
   // capability that has gone.
+  const experiments=allowVariants&&trainingMode==="experiments";
   const variantQueueRef=useRef<{start:()=>Promise<void>}>(null);
   const [variantQueue,setVariantQueue]=useState({count:0,blocked:true,name:''});
   async function handleAddToQueue() {
-    if(allowVariants&&variantQueue.count){await variantQueueRef.current?.start();return;}
+    if(experiments){if(!variantQueue.count||variantQueue.blocked){setError("Save a batch with at least one selected variant first.");return;}await variantQueueRef.current?.start();return;}
     const parameterErrors = trainingSettingsErrors({epochs,imgSize,batch,seed,patience,hyperparams});
     if (parameterErrors.length) {setError(parameterErrors.join(' ')); return;}
     setBusy(true);
@@ -889,18 +893,18 @@ export function TrainingForm({
       {restoringComparison && <p role="status" className="text-xs">Restoring saved comparison selections…</p>}
       {comparisonRestoreError && <p role="alert" className="text-xs text-critical">{comparisonRestoreError}</p>}
       </fieldset>
-      {allowVariants && <Track2TrainingVariants queueRef={variantQueueRef} onQueueState={setVariantQueue}
+      {allowVariants && <fieldset aria-label="Experiment variant setups" disabled={!experiments} className={!experiments ? "opacity-40" : ""}><Track2TrainingVariants active={experiments} queueRef={variantQueueRef} onQueueState={setVariantQueue}
         key={`${detectorSlug}|${architecture}|${basePackageArn}|${dataChoice.mode}|${dataChoice.id}`}
         detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
         dataMode={dataChoice.mode}
         dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
-        settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} />}
-      {allowVariants&&variantQueue.count>0&&<p className="mt-3 text-xs">Add to Queue will run the saved variant batch: {variantQueue.name||"Save a batch name first"}.</p>}
+        settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} /></fieldset>}
+      {experiments&&variantQueue.count>0&&<p className="mt-3 text-xs">Add to Queue will run the saved variant batch: {variantQueue.name||"Save a batch name first"}.</p>}
       <div className="mt-3 flex gap-2">
         <button
           type="button"
           onClick={handleAddToQueue}
-          disabled={allowVariants&&variantQueue.count>0 ? busy||preparing||variantQueue.blocked : busy || preparing || restoringComparison || !!comparisonRestoreError || baseSelectionIncomplete || analysis.blocking || !!(selection.comparison?.enabled && !selection.comparison.baseline_arn)}
+          disabled={experiments ? busy||preparing||!variantQueue.count||variantQueue.blocked : busy || preparing || restoringComparison || !!comparisonRestoreError || baseSelectionIncomplete || analysis.blocking || !!(selection.comparison?.enabled && !selection.comparison.baseline_arn)}
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
           {busy || preparing
@@ -974,6 +978,8 @@ export function TrainingForm({
  */
 export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard" | "multi" } = {}) {
   const multi = variant === "multi";
+  const [trainingMode,setTrainingMode]=useState<TrainingMode>("single");
+  usePageSnapshot("training-mode",{trainingMode},v=>setTrainingMode(v.trainingMode==="experiments"?"experiments":"single"));
   const [data, setData] = useState<Track2ModelsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // `message` went with the queue buttons that were its only writer --
@@ -1366,7 +1372,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               bring in a checkpoint at all. Nested here they are the same
               implementation on both, which is the only way the two tabs
               cannot drift. */}
-          <Track2DetectorsPanel
+          <Track2DetectorsPanel trainingDisabled={multi&&trainingMode==="experiments"}
             // Dimmed UNLESS a checkpoint has been read with its own
             // class names declined. That is the one state in which
             // defining a Class by hand is the next thing to do -- and
@@ -1452,7 +1458,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                 the single GPU slot everything here queues behind.
                 Importing is neither mode -- it moved up beside "Define a
                 new Model Name". */}
-            <Track2BaseModelPicker
+            <Track2BaseModelPicker modeControl={multi ? <Track2TrainingMode value={trainingMode} onChange={setTrainingMode}/> : undefined}
               detectorSlug={modelChoice.slug}
               detectorLabel={modelChoice.slug || "this Model Name"}
               architecture={modelChoice.architecture}
@@ -1509,6 +1515,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             onSubmitted={handleSubmitted}
             detectorsVersion={detectorsVersion}
             allowVariants={multi}
+            trainingMode={trainingMode}
           />
 
           {/* The pull queue is on the Data Preparation tab now, with the
