@@ -4444,3 +4444,5 @@ export function uploadTrack2AssistantDoc(file: File): Promise<{ name: string; by
 export function deleteTrack2AssistantDoc(name: string): Promise<{ name: string; deleted: boolean }> {
   return apiDelete(`/track2/assistant/docs/${encodeURIComponent(name)}`);
 }
+
+export function stopSelectedTraining(runId:string):Promise<{message:string}>{return apiPost("/track2/models/train/stop-selected",{run_id:runId});}

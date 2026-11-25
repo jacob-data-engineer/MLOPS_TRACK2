@@ -1,3 +1,4 @@
+import {StopTrainingButton} from "../components/StopTrainingButton";
 import {Track2ExperimentRuns} from "../components/Track2ExperimentRuns";
 import {Track2TrainingMode,type TrainingMode} from "../components/Track2TrainingMode";
 import {usePageSnapshot} from "../lib/pageSnapshot";
@@ -177,6 +178,7 @@ function QueueEntryBlock({
         <div className="mb-1.5 flex items-center gap-2">
           <Badge tone={running ? "pending" : "neutral"} label={entry.experiment_id ? (running ? "Variant running" : `Variant queued #${position}`) : (running ? "Running" : `Queued #${position}`)} />
           <span className="text-xs text-ink-muted">{entry.experiment_id ? 'Comparison after variant batch' : entry.comparison?.enabled ? 'Comparison after training' : 'No comparisons'}</span>
+          {running && <StopTrainingButton runId={`run-${entry.id}`} label={entry.experiment_id?"experiment variant":"single model"}/>}
           {running && runPhase(progress) && (
             <span className="text-xs font-medium text-ink">{runPhase(progress)}</span>
           )}

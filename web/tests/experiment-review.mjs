@@ -11,15 +11,21 @@ test('experiment queue and review include every variant, live status, comparison
  await writeFile(path.join(dir,'main.tsx'),`import '../src/index.css';import React from 'react';import {createRoot} from 'react-dom/client';import {Track2ExperimentRuns} from '../src/components/Track2ExperimentRuns';createRoot(document.getElementById('root')).render(<><Track2ExperimentRuns queue/><Track2ExperimentRuns/></>);`);
  const base='arn:aws:sagemaker:ap-southeast-1:123456789012:model-package/yolo26s-helmet-detector/';
  const variants=Array.from({length:6},(_,i)=>({index:i,name:'Variant '+(i+1),state:i===0?'Queued':'Pending',training_status:i===0?'Waiting for resources':undefined,settings:{epochs:(i+1)*10,batch:16,hyperparams:{lr0:.01*(i+1)}},run_number:i===0?81:undefined}));
+ let stopped=[];
  let run={id:'experiment-a',name:'Helmet experiment',created_at:'2026-11-25T11:00:00Z',state:'Training',baseline_arn:base+'1',dataset_version_id:'shared-data',shared:variants[0].settings,variants},models=[],browser,server;
  try{
  server=await createServer({root,server:{host:'127.0.0.1',port:0}});await server.listen();browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/track2/**',route=>{const p=new URL(route.request().url()).pathname;let body={};if(route.request().method()==='DELETE'){run={...run,state:'Cancelled',variants:run.variants.map(v=>({...v,state:'Cancelled'}))};body=run;}else if(p.endsWith('/training-variants'))body={runs:[run]};else if(p.endsWith('/metrics'))body={rows:models};else if(p.endsWith('/runs-by-model'))body={runs:{}};else if(p.endsWith('/buckets'))body={buckets:[]};return route.fulfill({json:body});});
+ await page.route('**/track2/**',route=>{const p=new URL(route.request().url()).pathname;let body={};if(p.endsWith('/train/stop-selected')){stopped.push(route.request().postDataJSON());body={message:'Stop requested for selected run.'};}else if(route.request().method()==='DELETE'){run={...run,state:'Cancelled',variants:run.variants.map(v=>({...v,state:'Cancelled'}))};body=run;}else if(p.endsWith('/training-variants'))body={runs:[run]};else if(p.endsWith('/metrics'))body={rows:models};else if(p.endsWith('/runs-by-model'))body={runs:{}};else if(p.endsWith('/buckets'))body={buckets:[]};return route.fulfill({json:body});});
  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(dir)}/index.html`);
  const queue=page.getByLabel('Queued experiments'),review=page.getByLabel('Experiment review');
  await queue.getByText('Waiting for resources',{exact:true}).waitFor();assert.equal(await queue.getByRole('table',{name:'Experiment variants'}).getByRole('row').count(),7);
  await queue.getByText('Run 81',{exact:true}).waitFor();await review.getByText('Comparison results will appear after training and baseline evaluation finish.').waitFor();
  assert.equal(await queue.getByRole('progressbar').getAttribute('aria-valuenow'),'0');
+ run={...run,variants:run.variants.map((v,i)=>i===0?{...v,training_status:'Executing',run_id:'run-81'}:v)};
+ await queue.getByRole('button',{name:'Stop training: Variant 1',exact:true}).waitFor({timeout:12000});
+ await queue.getByRole('button',{name:'Stop training: Variant 1',exact:true}).click();
+ await queue.getByText('Stop requested for selected run.',{exact:true}).waitFor();
+ assert.deepEqual(stopped,[{run_id:'run-81'}]);
  run={...run,state:'Preparing',stage:'Epoch1: decay (100/200)'};
  await queue.getByRole('progressbar',{name:'Dataset preparation progress'}).waitFor({timeout:12000});
  assert.equal(await queue.getByRole('progressbar').getAttribute('aria-valuenow'),'100');

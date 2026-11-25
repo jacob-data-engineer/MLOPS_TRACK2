@@ -1232,3 +1232,28 @@ def stop_queue(session=Depends(require_session)) -> dict:
     t2.queue_stop()
     return {"message": "Queue stopped -- any run already in progress will finish; remaining entries stay queued."}
 
+
+
+class StopSelectedRunRequest(BaseModel):
+    run_id: str
+
+
+@router.post('/train/stop-selected')
+def stop_selected_training(payload: StopSelectedRunRequest, session=Depends(require_session)):
+    """Stop only the execution recorded for this saved run, never a global fallback."""
+    audit=t2.training_audit_table().get_item(Key={'id':payload.run_id}).get('Item')
+    if not audit:
+        raise HTTPException(409,'This training run has not started yet. Use Remove from queue for pending experiments.')
+    arn=audit.get('execution_arn')
+    if not arn:
+        raise HTTPException(409,'The training execution is not available yet. Wait for training to start.')
+    state=t2.sm.describe_pipeline_execution(PipelineExecutionArn=arn).get('PipelineExecutionStatus')
+    if state=='Stopping':
+        return {'message':'Stopping this training run. Remaining queued variants will continue.'}
+    if state!='Executing':
+        raise HTTPException(409,'This training run is no longer running. Nothing was stopped.')
+    try:
+        t2.sm.stop_pipeline_execution(PipelineExecutionArn=arn)
+    except Exception as exc:
+        raise HTTPException(502,f'Could not stop the selected training run: {exc}') from exc
+    return {'message':'Stop requested for this training run. Remaining queued variants will continue.'}
