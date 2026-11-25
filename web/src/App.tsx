@@ -36,6 +36,7 @@ import { Track2HelpPage } from "./routes/Track2HelpPage";
 import { Track2LineagePage } from "./routes/Track2LineagePage";
 import { Track2MetricsPage } from "./routes/Track2MetricsPage";
 import { Track2PtViewPage } from "./routes/Track2PtViewPage";
+import { Track2ExperimentsPage } from "./routes/Track2ExperimentsPage";
 import { Track2ModelsPage } from "./routes/Track2ModelsPage";
 import { Track2NotificationsPage } from "./routes/Track2NotificationsPage";
 import { Track2ScheduledPage } from "./routes/Track2ScheduledPage";
@@ -109,6 +110,7 @@ export function App() {
         <Route path="/track2/lineage" element={<Track2LineagePage />} />
         <Route path="/track2/metrics" element={<Track2MetricsPage />} />
         <Route path="/track2/pt-view" element={<Track2PtViewPage />} />
+        <Route path="/track2/experiments" element={<Track2ExperimentsPage />} />
         <Route path="/track2/deploy" element={<Track2DeployPage />} />
         <Route path="/track2/eval" element={<Track2EvalPage />} />
         {/* Inference folded into Deploy (one endpoint-status banner, one

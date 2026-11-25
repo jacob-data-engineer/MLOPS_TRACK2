@@ -42,6 +42,11 @@
    "file": "routes/Track2PtViewPage.tsx"
   },
   {
+   "path": "/track2/experiments",
+   "name": "Experiments",
+   "file": "routes/Track2ExperimentsPage.tsx"
+  },
+  {
    "path": "/track2/deploy",
    "name": "Track2 Deploy",
    "file": "routes/Track2DeployPage.tsx"
@@ -188,6 +193,7 @@
    "cards": [],
    "fields": [
     "Close navigation",
+    "Experiments",
     "Open navigation",
     "PT View",
     "Track2 Data Preparation",
@@ -198,7 +204,7 @@
     "Track2 SQL Database Query",
     "Track2 Scheduled - prototype"
    ],
-   "text": "Open navigation\nClose navigation\nTrack2 SQL Database Query\nTrack2 Data Preparation\nTrack2 Multi-Auto Training\nTrack2 Review & Metrics\nPT View\nTrack2 Scheduled - prototype\nTrack2 Notifications\nTrack2 Help\nTraining and Development\nJurong Port · case review\nLog out\nThis page is out of date.\nReload\nIn use\nPrototype -- still changing\nKept in view -- not being worked on\nYou have an unsaved annotation. Leave anyway?"
+   "text": "Open navigation\nClose navigation\nTrack2 SQL Database Query\nTrack2 Data Preparation\nTrack2 Multi-Auto Training\nExperiments\nTrack2 Review & Metrics\nPT View\nTrack2 Scheduled - prototype\nTrack2 Notifications\nTrack2 Help\nTraining and Development\nJurong Port · case review\nLog out\nThis page is out of date.\nReload\nIn use\nPrototype -- still changing\nKept in view -- not being worked on\nYou have an unsaved annotation. Leave anyway?"
   },
   {
    "id": "components/RouteBoundary.tsx",
@@ -495,6 +501,16 @@
     "YOLO11"
    ],
    "text": "Model types and Model Names\nDefine a new Model Name\nVehicle detection\nYOLO11\nmatchedIndices[i]\nModel Name\nis a name plus the list of class names it detects, in order. Registering one decides two things later: which registry a trained model is versioned into, and what the dataset's class names are checked against.\nThe order matters and cannot be changed afterwards without retraining. A label file says\n, not \"person\", so if index 2 means something different here than it does in your data, every box trains under the wrong name and nothing errors.\nEverything about\nwhich model\nis here: define a Model Name, choose the YOLO generation and size it trains as, import a COCO release or weights somebody already trained, and pick the registered version a run continues from. Step 6 only starts the run.\nTrain as this\non a row is the choice the rest of the page follows -- the training form pre-selects it, and the scheduled retrain always uses it.\nNew name\nIdentifier\nEverything downstream follows it\n— what runs train as, the Assemble and Import cards, the unattended retrain, and anything already queued.\nVersions already registered\nstay where they are\n. A registry group cannot be renamed — SageMaker has no such operation — so they are kept readable under the old name rather than moved. They still show here and a run can still continue from them.\nNothing is deleted and no weights move.\nDeleting it anyway removes\nevery registered version\nin those registries as well. Models already deployed keep running; what goes is the record of where they came from, and nothing can be rolled back to them afterwards.\nThis cannot be undone.\nRemoves the Model Name and its class list. Datasets and trained weights are untouched.\nA Model Name is defined from an imported checkpoint. Read one above and untick\nUse the classes in this file\nto name it here - or type an existing Model Name below to change what it detects.\nA model has already been selected.\nYour Model Names\nbelow - choose it in the import card above to register the waiting checkpoint into it.\nA checkpoint is waiting for a Model Name. Press\nShow\nto name one and register it.\nOpen this to define a Model Name - a name plus the class names it detects, in order.\nis the taxonomy a model is trained for:\n0: helmet, 1: gloves\n, never \"vehicle\".\nReading the names from a data.yaml\nis the safe way to fill it in, from your computer or from a bucket. They live only in that file, so retyping them is where index 0 quietly becomes the wrong name for every model in the group afterwards.\nRegistry groups are named after it, so the name is permanent in practice.\nStart a new one\n1 · Name the Model Name\n(what this Model Name is called, and what its registry group is named after)\n, because versions are already filed under it. The name is what changes.\n, which owns the production registries. Pick another name.\n2 · Read its classes from a data.yaml\nThe class names live only in that file, in index order. Reading them is safer than retyping: get the order wrong and every model in this group is mislabelled, and nothing errors.\n(order matters -- the first line is class 0, and must match the dataset's data.yaml exactly)\ndata.yaml\n(.yaml or .yml)\nS3 bucket\nloading...\nRead this file\nSelect all\nSelect none\nLeaving a class out re-numbers the ones after it. The label files still carry the data.yaml numbers, so the dataset has to be remapped before a run uses this list.\nRegister\nfiles this checkpoint into\nRegisters into:\nA checkpoint is waiting for this Model Name\nthe head is rebuilt on the first training run\n, so those names do not survive it.\nUntil that run the weights and the registry disagree, so it is registered as a\nseed\n- marked in its description and left Pending rather than Approved. Do not deploy it as it stands.\nreally is class 0. Those classes predict exactly what they predict now; nothing is learned or lost, the other outputs are removed.\nnot a seed\n, and can be deployed without a training run. The original file is left alone.\n(what everything below follows)\nModel type\nSize\nRename\nDelete\nHow every run trains\nUsed by the training form, by\nTrain on this\non a frozen snapshot, and by the scheduled retrain. Change it once here.\n(carried onto every run, including unattended ones)\nPatience 0\nmeans never stop early, which is what makes two runs comparable. A non-zero value stops once the score has not improved for that many epochs.\nvehicle\\nforklift\\ntruck\nSmall\nMedium\nLarge\nExtra-Large\nCould not load the Model Names.\nThe Model Name was saved, but the checkpoint could not be registered into it.\nA Model Name needs at least one class name.\nCould not save the Model Name.\nRenamed.\nCould not rename it.\nCould not delete the Model Name.\nStep 2, Pick Golden Set / Edge Case -- or skip it and go straight to Step 3, Pull Control.\nRename and update the workflow\nDelete it and its versions\nLeave it alone\nCancel\nA name plus the class names it detects, in order. This is what a trained model is filed under, and what a dataset is checked against.\nFrom my computer\nFrom the bucket\nSaving and registering...\nRegister New Model Name\nSaving...\nSave classes\nNo models defined yet\nClear the selection\nPick a Model\nPick a Model Name to see where its versions are filed.\nEpochs\nImage size\nBatch\nSeed\nPatience"
+  },
+  {
+   "id": "components/Track2ExperimentResults.tsx",
+   "file": "components/Track2ExperimentResults.tsx",
+   "pages": [],
+   "cards": [],
+   "fields": [
+    "Rank comparison by"
+   ],
+   "text": "Rank comparison by\nCompare training parameters\nHighlighted cells differ from the shared training settings. These are the new variants’ settings, not the baseline’s historical training settings.\nParameter\nShared\nDifferences are percentage points from the baseline. All models use the same recorded validation images and evaluation settings.\nModel\nPer-class results"
   },
   {
    "id": "components/Track2ExportProgress.tsx",
@@ -861,7 +877,7 @@
     "train on a slice, for a quick check",
     "turn mosaic off for the last N epochs"
    ],
-   "text": "Optimizer\nInitial LR\nFinal LR factor\nMomentum\nWeight decay\nWarmup epochs\nWarmup momentum\nWarmup bias LR\nCosine schedule\nFreeze layers\nDropout\nMulti-scale\nRectangular batches\nMixed precision\nDataset fraction\nBox\nClass\nDFL\nNominal batch\nHue\nSaturation\nBrightness\nRotation\nTranslate\nScale\nShear\nPerspective\nFlip up/down\nFlip left/right\nMosaic\nClose mosaic\nMixup\nCutmix\nCopy-paste\nRandom erasing\nBGR flip\nAuto augment\nauto picks SGD or AdamW from the run's size\nfinal LR = lr0 x this\nfirst N layers, or a list like 0,1,2\ntrain on a slice, for a quick check\nturn mosaic off for the last N epochs\n; onChange: (next: Record\nSet these training parameters for the run\nOff, none of this is sent and Ultralytics uses its own defaults. On,\nevery field below is sent\n-- the ones shown as defaults included -- so the run is pinned to these numbers and the audit records them. Two runs months apart are then comparable even if Ultralytics changed a default in between.\ntrue\nfalse\nPut everything back to the defaults\nOptimiser\nHow the weights move. The first thing to reach for when a run will not converge, or converges and then wanders.\nAdam\nLoss weights\nWhat the run is being asked to care about. Raise cls when classes are confused, box when the boxes are loose.\nAugmentation\nHide\nShow\nA field left blank is sent as the default shown in it.\nAn unknown or misspelled key is refused by the trainer"
+   "text": "Optimizer\nInitial LR\nFinal LR factor\nMomentum\nWeight decay\nWarmup epochs\nWarmup momentum\nWarmup bias LR\nCosine schedule\nFreeze layers\nDropout\nMulti-scale\nRectangular batches\nMixed precision\nDataset fraction\nBox\nClass\nDFL\nNominal batch\nHue\nSaturation\nBrightness\nRotation\nTranslate\nScale\nShear\nPerspective\nFlip up/down\nFlip left/right\nMosaic\nClose mosaic\nMixup\nCutmix\nCopy-paste\nRandom erasing\nBGR flip\nAuto augment\nauto picks SGD or AdamW from the run's size\nfinal LR = lr0 x this\nfirst N layers, or a list like 0,1,2\ntrain on a slice, for a quick check\nturn mosaic off for the last N epochs\n; onChange: (next: Record\nAll training parameters, including the displayed defaults, are recorded for this experiment.\nSet these training parameters for the run\nOff, none of this is sent and Ultralytics uses its own defaults. On,\nevery field below is sent\n-- the ones shown as defaults included -- so the run is pinned to these numbers and the audit records them. Two runs months apart are then comparable even if Ultralytics changed a default in between.\ntrue\nfalse\nPut everything back to the defaults\nOptimiser\nHow the weights move. The first thing to reach for when a run will not converge, or converges and then wanders.\nAdam\nLoss weights\nWhat the run is being asked to care about. Raise cls when classes are confused, box when the boxes are loose.\nAugmentation\nHide\nShow\nA field left blank is sent as the default shown in it.\nAn unknown or misspelled key is refused by the trainer"
   },
   {
    "id": "components/Track2TrainingAuditPanel.tsx",
@@ -1057,6 +1073,38 @@
     "Results"
    ],
    "text": "Queue an evaluation\nQueue\nResults\nGeneration\nNo Approved versions for this size.\nNot registered yet, and doesn't need to be Approved -- this is exactly how you'd evaluate a candidate before deciding whether to approve it.\nDataset folder (needs images/ and labels/ inside)\nTrack2 Evaluation Queue\nScore a registry version -- or your own candidate weights -- against a chosen dataset, with real precision/recall/mAP metrics a reviewer can judge performance from. Runs one at a time; results persist here.\nLoading...\nStart Queue\nStop Queue\nNothing queued.\nRemove\nNo completed evaluations yet.\nModel\nStatus\nDataset\nmAP50\nmAP50-95\nPrecision\nRecall\nAccuracy\nImages\nApproved\nAdd to queue failed.\nRegistry version\nMy own .pt weights\nCouldn't load the evaluation queue.\nStart failed."
+  },
+  {
+   "id": "routes/Track2ExperimentsPage.tsx",
+   "file": "routes/Track2ExperimentsPage.tsx",
+   "pages": [
+    "Experiments"
+   ],
+   "cards": [
+    {
+     "title": "New experiment",
+     "caption": ""
+    },
+    {
+     "title": "Saved experiments",
+     "caption": ""
+    },
+    {
+     "title": "Export experiment models",
+     "caption": ""
+    }
+   ],
+   "fields": [
+    "Architecture",
+    "Baseline and starting checkpoint",
+    "Export experiment models",
+    "Model name",
+    "New experiment",
+    "Saved dataset",
+    "Saved experiment",
+    "Saved experiments"
+   ],
+   "text": "New experiment\nSaved experiments\nExport experiment models\nModel name\nArchitecture\nBaseline and starting checkpoint\nSaved dataset\nSaved experiment\n;params:Record\n([]),[datasets,setDatasets]=useState\n([]),[runs,setRuns]=useState\nExperiments\nTrain variants from one fixed baseline and saved dataset, then compare every successful variant on the same validation images. The backend continues when this page is closed.\nExperiment name\nChoose a model name\nChoose architecture\nChoose an exact version\nChoose a saved SQL dataset\nShared training settings\nEvery variant starts from the baseline. Changed values are highlighted. Duplicate a variant or edit its training parameters.\nVariant\nEpochs\nInitial learning rate\nBatch\nActions\nDuplicate\nRemove\nAll settings\nAdd variant\nCommon evaluation settings\nReview experiment\nEffective settings for every variant\nRefresh experiments\nChoose an experiment\nRun\nStatus\nRecorded settings\nAction\nView settings\nRetry variant\nResume / retry comparison\nDownload experiment report (JSON)\nSelect the baseline and successful variants to export. Download the experiment report above for the complete configuration and comparison results.\nLoading available registered models. Refresh the page if the registry is still updating."
   },
   {
    "id": "routes/Track2ExportPage.tsx",

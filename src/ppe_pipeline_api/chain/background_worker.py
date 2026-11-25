@@ -10,6 +10,11 @@ async def preparation_loop():
             await asyncio.to_thread(preparation_jobs.tick)
         except Exception as exc:
             print(f'Preparation worker: {exc}', flush=True)
+        try:
+            from . import experiments
+            await asyncio.to_thread(experiments.tick)
+        except Exception as exc:
+            print(f'Experiment worker: {exc}', flush=True)
         await asyncio.sleep(3)
 
 
