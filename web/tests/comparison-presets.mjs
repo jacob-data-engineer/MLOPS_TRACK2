@@ -43,6 +43,17 @@ test('page Save and Load restore comparison models and metric checkboxes', async
     await page.getByRole('button',{name:'Select this',exact:true}).click();
     await page.locator('#comparison').getByLabel('Precision',{exact:true}).uncheck();
     await page.getByRole('radio',{name:'Manual',exact:true}).check();
+    const exports = page.locator('[aria-label="Rank and export compared models"] input[type="checkbox"][aria-label^="Export "]');
+    assert.equal(await exports.count(),2);
+    assert.equal(await exports.nth(0).isChecked(),true);
+    assert.equal(await exports.nth(1).isChecked(),true);
+    await page.getByRole('radio',{name:'Compare with baseline',exact:true}).check();
+    await page.getByRole('combobox',{name:'Training run',exact:true}).waitFor();
+    assert.equal(await page.locator('#model-export').isVisible(),false);
+    assert.equal(await page.locator('#comparison').isVisible(),false);
+    await page.getByRole('radio',{name:'Compare across models',exact:true}).check();
+    assert.equal(await page.getByRole('combobox',{name:'Training run',exact:true}).count(),0);
+    assert.equal(await exports.nth(0).isChecked(),true);
     await page.getByLabel('Actual images and labels').uncheck();
     await page.getByText('Metadata categories (14)',{exact:true}).click();
     await page.getByLabel('Identity',{exact:true}).uncheck();

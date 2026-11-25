@@ -16,8 +16,9 @@ type Metric = typeof METRICS[number];
 type Target = { row: Track2MetricsRow; run?: Track2RunForModel; estimate?: PackageSizeEstimate };
 const message = (e: unknown) => e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "Export failed.";
 
-export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRun, settings, onChange }: {
+export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSelect = false, onOpenRun, settings, onChange }: {
   rows: Track2MetricsRow[]; runs: Record<string, Track2RunForModel>; browseAll?: boolean;
+  autoSelect?: boolean;
   onOpenRun?: (id:string)=>void;
   settings: Track2ExportSettings; onChange: (value: Track2ExportSettings) => void;
 }) {
@@ -101,6 +102,9 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, onOpenRu
   const matchingModels = showBy === "model" ? typedModels.filter(row => !sizeFilter || row.size === sizeFilter) : ranked;
   const visibleRows = matchingModels.filter(row => `${nameOf(row)} ${displayName(nameOf(row))} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const selectionKey = rows.map(r => r.model_package_arn).join("|");
+  useEffect(() => {
+    if (autoSelect) setChosen(selectionKey ? selectionKey.split('|') : []);
+  }, [autoSelect, selectionKey]);
   useEffect(() => { setPreview([]); }, [selectionKey, chosen, images, model, metadata, groups, destination, metric]);
 
   async function review(arns: string[]) {

@@ -233,6 +233,7 @@ export function Track2MetricsPage() {
   const [exportSettings, setExportSettings] =
     useState<Track2ExportSettings>(EXPORT_DEFAULTS);
   const [restoringSettings, setRestoringSettings] = useState(true);
+  const [comparisonView, setComparisonView] = useState<'baseline' | 'models'>('models');
   const selectedVersions = exportSettings.comparison_versions ?? [];
   const selectedMetrics = new Set<MetricKey>((exportSettings.comparison_metrics ?? [...DEFAULT_METRIC_KEYS])
     .filter((key): key is MetricKey => METRICS.some(m => m.key === key)));
@@ -482,7 +483,12 @@ export function Track2MetricsPage() {
       {/* `top` is the stale-build banner's height (0 when there is none),
           which is sticky at the very top of the same scroll container --
           without it the banner covered this toolbar. */}
-      <div className="sticky z-20 mb-5" style={{ top: "var(--stale-banner-h, 0px)" }}>
+      <fieldset className="mb-5 flex flex-wrap gap-5 rounded border border-hairline p-4">
+        <legend className="px-1 text-sm font-medium">Comparison mode</legend>
+        <label><input type="radio" name="comparison-view" checked={comparisonView === 'baseline'} onChange={() => setComparisonView('baseline')} /> Compare with baseline</label>
+        <label><input type="radio" name="comparison-view" checked={comparisonView === 'models'} onChange={() => setComparisonView('models')} /> Compare across models</label>
+      </fieldset>
+      <div hidden={comparisonView !== 'models'} className="sticky z-20 mb-5" style={{ top: "var(--stale-banner-h, 0px)" }}>
         <Card collapsible={false}>
         <Track2ExportSettingsBar
           onRestoringChange={setRestoringSettings}
@@ -515,8 +521,8 @@ export function Track2MetricsPage() {
         </div>
       )}
 
-      <Track2RunComparisons />
-      <fieldset className="min-w-0 w-full" disabled={restoringSettings} aria-busy={restoringSettings}>
+      {comparisonView === 'baseline' && <Track2RunComparisons />}
+      <fieldset hidden={comparisonView !== 'models'} className="min-w-0 w-full" disabled={restoringSettings} aria-busy={restoringSettings}>
       {rows && (
         <Track2ModelPicker
           rows={rows}
@@ -585,6 +591,7 @@ export function Track2MetricsPage() {
       {rows && (
         <div id="model-export" className="scroll-mt-48">
           <Track2MetricsExportCard
+            comparedOnly
             selectedRows={compareRows}
             rows={rows}
             settings={exportSettings}

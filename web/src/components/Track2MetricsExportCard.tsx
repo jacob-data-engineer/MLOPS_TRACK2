@@ -6,6 +6,7 @@ import { Track2ComparisonExport } from "./Track2ComparisonExport";
 import { Track2AutoExportPanel } from "./Track2AutoExportPanel";
 export function Track2MetricsExportCard(props: {
   rows: Track2MetricsRow[]; selectedRows?: Track2MetricsRow[];
+  comparedOnly?: boolean;
   settings: Track2ExportSettings; onChange: (value: Track2ExportSettings) => void;
   runsByArn?: Record<string, Track2RunForModel>; onOpenRun?: (id: string) => void;
 }) {
@@ -22,8 +23,8 @@ export function Track2MetricsExportCard(props: {
     {legacy?.enabled&&<p className="mb-3 rounded border border-hairline p-3 text-xs">The previous new-registration watcher is still active for {legacy.group_name}. It is separate from the schedules below. <button className="underline" onClick={()=>void disarmTrack2AutoExport().then(r=>setLegacy(r.settings)).catch(e=>setLegacyError(e instanceof ApiError?e.detail:"Could not stop the watcher."))}>Stop previous watcher</button></p>}
     {legacyError&&<p className="text-xs text-critical">{legacyError}</p>}
     {auto ? <Track2AutoExportPanel rows={rows} selectedRows={selectedRows} settings={settings} onChange={onChange} runs={runsByArn} onOpenRun={props.onOpenRun}/> : <>
-      <p className="mb-3 text-xs">Manual: browse all registered models, scroll through the list, and tick any versions to export. Comparison does not restrict this list.</p>
-      <Track2ComparisonExport rows={rows} runs={runsByArn} settings={settings} onChange={onChange} browseAll onOpenRun={props.onOpenRun} />
+      <p className="mb-3 text-xs">{props.comparedOnly ? 'Export the models selected for comparison above. All compared models are selected initially; untick any you do not want to export.' : 'Manual: browse all registered models, scroll through the list, and tick any versions to export. Comparison does not restrict this list.'}</p>
+      <Track2ComparisonExport rows={props.comparedOnly ? selectedRows : rows} runs={runsByArn} settings={settings} onChange={onChange} browseAll={!props.comparedOnly} autoSelect={props.comparedOnly} onOpenRun={props.onOpenRun} />
     </>}
   </Card>;
 }
