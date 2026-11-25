@@ -1,4 +1,4 @@
-﻿import type {ComparisonMetricRow} from '../lib/api';
+import type {ComparisonMetricRow} from '../lib/api';
 const scores = ['mAP50-95','mAP50','precision','recall','f1'] as const;
 const colors = ['#2563eb','#d97706','#059669','#7c3aed','#db2777'];
 export function Track2BaselineChart({rows}: {rows:ComparisonMetricRow[]}) {
@@ -19,7 +19,7 @@ export function Track2BaselineChart({rows}: {rows:ComparisonMetricRow[]}) {
     <p className="text-xs text-ink-muted">Error counts: lower is better. Bars share a scale within each chart.</p>
     <div className="grid gap-4 md:grid-cols-2">{(['fp','fn'] as const).map(key=>{
       const maximum=Math.max(1,...ordered.map(r=>r[key]));const title=key==='fp'?'False detections':'Missed objects';
-      return <section key={key} className="rounded border border-hairline p-3" aria-label={`${title} comparison`}><h3 className="mb-3 text-sm font-semibold">{title}</h3>
+      return <section key={key} className="rounded border border-hairline p-3" aria-label={`${title} comparison`}><h3 className="mb-3 text-sm font-semibold">{title} <span className="text-xs font-normal text-ink-muted">(Fewer is better)</span></h3>
         {ordered.map((r,i)=><div key={r.role+r.id} className="mb-2 flex items-center gap-2" title={label(r)}><div className="h-5 flex-1 rounded bg-black/5" role="img" aria-label={`${label(r)}, ${title}: ${r[key]}`}><div className="h-full rounded" style={{width:`${Math.max(0,r[key])/maximum*100}%`,backgroundColor:colors[i%colors.length]}}/></div><span className="w-16 text-right text-xs tabular-nums">{r[key].toLocaleString()}</span></div>)}
       </section>;
     })}</div>

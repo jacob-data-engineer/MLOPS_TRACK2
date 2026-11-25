@@ -285,7 +285,7 @@
    "fields": [
     "Baseline comparison bar charts"
    ],
-   "text": "Baseline comparison bar charts\nScores: higher is better. All score bars use the same 0–100% scale.\nError counts: lower is better. Bars share a scale within each chart."
+   "text": "Baseline comparison bar charts\nScores: higher is better. All score bars use the same 0–100% scale.\nError counts: lower is better. Bars share a scale within each chart.\n(Fewer is better)"
   },
   {
    "id": "components/Track2BaselineComparison.tsx",
