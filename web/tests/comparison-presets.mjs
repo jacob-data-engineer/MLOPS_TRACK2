@@ -19,6 +19,7 @@ test('page Save and Load restore comparison models and metric checkboxes', async
       const p=new URL(route.request().url()).pathname;
       let json={};
       if(p.endsWith('/metrics'))json={rows};
+      else if(p.endsWith('/training-variants'))json={runs:[]};
       else if(p.endsWith('/comparisons'))json={runs:[{id:'run-73',run_number:73,label:'Helmet',status:'Completed',submitted_at:'2026-11-24T00:00:00Z'}]};
       else if(p.endsWith('/export/defaults'))json={destination:'s3',bucket:'track2-s3',prefix:'_exports',format:'zip'};
       else if(p.endsWith('/settings/save')){saved=route.request().postDataJSON().settings;lastLoaded='comparison';json={name:'comparison'};}
@@ -49,6 +50,10 @@ test('page Save and Load restore comparison models and metric checkboxes', async
     assert.equal(await exports.nth(1).isChecked(),true);
     await page.getByRole('radio',{name:'Compare with baseline',exact:true}).check();
     await page.getByRole('combobox',{name:'Training run',exact:true}).waitFor();
+    await page.getByRole('radio',{name:'Experiment (all variants)',exact:true}).check();
+    await page.getByLabel('Experiment review').getByText('No experiments have been submitted yet.').waitFor();
+    assert.equal(await page.getByRole('combobox',{name:'Training run',exact:true}).count(),0);
+    await page.getByRole('radio',{name:'Single training run',exact:true}).check();
     await page.getByRole('combobox',{name:'Training run',exact:true}).selectOption('run-73');
     const baselineExports=page.locator('[aria-label="Rank and export compared models"]:visible input[type="checkbox"][aria-label^="Export "]');
     assert.equal(await baselineExports.count(),1);

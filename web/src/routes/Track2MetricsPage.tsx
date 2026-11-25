@@ -1,3 +1,4 @@
+import {Track2ExperimentRuns} from "../components/Track2ExperimentRuns";
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import { AlertCircle, BarChart3, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -237,6 +238,7 @@ export function Track2MetricsPage() {
   const [restoringSettings, setRestoringSettings] = useState(true);
   const [comparisonView, setComparisonView] = useState<'baseline' | 'models'>('models');
   const [baselineRun, setBaselineRun] = useState('');
+  const [baselineSource,setBaselineSource]=useState<'single'|'experiment'>('single');
   const selectedVersions = exportSettings.comparison_versions ?? [];
   const selectedMetrics = new Set<MetricKey>((exportSettings.comparison_metrics ?? [...DEFAULT_METRIC_KEYS])
     .filter((key): key is MetricKey => METRICS.some(m => m.key === key)));
@@ -245,7 +247,7 @@ export function Track2MetricsPage() {
   // no way to tell a page from five minutes ago from one from five hours
   // ago -- which on a page about which model is best is the difference
   // between a decision and a guess.
-  usePageSnapshot('comparison-view',{comparisonView,baselineRun},v=>{setComparisonView(v.comparisonView);setBaselineRun(v.baselineRun);});
+  usePageSnapshot('comparison-view',{comparisonView,baselineRun,baselineSource},v=>{setComparisonView(v.comparisonView);setBaselineRun(v.baselineRun);setBaselineSource(v.baselineSource??'single');});
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [reloading, setReloading] = useState(false);
   // The audits are a second read: their own loading and failure, never
@@ -526,6 +528,8 @@ export function Track2MetricsPage() {
       )}
 
       {comparisonView === 'baseline' && <>
+        <fieldset aria-label="Baseline comparison source" className="my-4 flex gap-4"><label><input type="radio" name="baseline-source" checked={baselineSource==='single'} onChange={()=>setBaselineSource('single')}/> Single training run</label><label><input type="radio" name="baseline-source" checked={baselineSource==='experiment'} onChange={()=>setBaselineSource('experiment')}/> Experiment (all variants)</label></fieldset>
+        {baselineSource==='experiment'?<Track2ExperimentRuns/>:<>
         <Track2RunComparisons initialRun={baselineRun} onRunChange={setBaselineRun} />
         <Card title="Model export">
           <p className="mb-3 text-xs">Export the selected training run's model, data and metadata. Choose the package contents and destination below.</p>
@@ -538,6 +542,7 @@ export function Track2MetricsPage() {
                 runs={runsByArn} settings={exportSettings} onChange={setExportSettings} autoSelect
               />}
         </Card>
+        </>}
       </>}
       <fieldset hidden={comparisonView !== 'models'} className="min-w-0 w-full" disabled={restoringSettings} aria-busy={restoringSettings}>
       {rows && (

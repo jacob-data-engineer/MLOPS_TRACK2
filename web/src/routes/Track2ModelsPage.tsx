@@ -1,3 +1,4 @@
+import {Track2ExperimentRuns} from "../components/Track2ExperimentRuns";
 import {Track2TrainingMode,type TrainingMode} from "../components/Track2TrainingMode";
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import {usePageSave} from "../lib/pageSave";
@@ -1631,12 +1632,13 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             {data.queue.last_error && (
               <p className="mb-2 text-xs text-critical">{data.queue.last_error}</p>
             )}
+            <Track2ExperimentRuns queue/>
             <Track2RecordingProgress progress={data.queue.submission_progress}/>
             <div className="mb-3">
               <StatTile label="Completed" value={data.queue.completed_count} />
             </div>
             {!data.queue.running && data.queue.pending.length === 0 ? (
-              <p className="text-sm text-ink-muted">Queue is empty.</p>
+              <p className="text-sm text-ink-muted">No individual training job is queued. Experiment preparation and remaining variants are shown above.</p>
             ) : (
               <div className="flex flex-col gap-2">
                 {/* Running first, then the queue in order. One list, so a
