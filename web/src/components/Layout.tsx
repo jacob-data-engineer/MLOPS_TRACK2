@@ -365,7 +365,7 @@ export function Layout() {
         <StaleBuildBanner />
         <Track2CompletionNotices />
 
-        <div className={`mx-auto w-full px-4 py-6 md:px-8 md:py-8 ${location.pathname === '/track2/metrics' ? '' : 'max-w-6xl'}`}>
+        <div className="mx-auto w-full min-w-0 px-4 py-6 md:px-8 md:py-8">
           {/* Keyed by path so navigating away clears a failure: a latched
               boundary would make every page after a broken one look
               broken too. */}

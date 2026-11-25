@@ -218,7 +218,7 @@ export function Track2ScheduledPage() {
   const isPicked = (name: string) => picks === "*" || picks.includes(name);
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="w-full min-w-0">
       <h1 className="mb-1 flex items-center gap-2 text-xl font-semibold text-ink">
         <CalendarDays size={20} className="text-accent" strokeWidth={2} />
         Track2 Scheduled
