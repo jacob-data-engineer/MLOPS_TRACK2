@@ -709,7 +709,10 @@ export function TrainingForm({
   // cards queue, and the queue is what gets started. The backend still
   // exposes both start endpoints, so this is a UI decision, not a
   // capability that has gone.
+  const variantQueueRef=useRef<{start:()=>Promise<void>}>(null);
+  const [variantQueue,setVariantQueue]=useState({count:0,blocked:true,name:''});
   async function handleAddToQueue() {
+    if(allowVariants&&variantQueue.count){await variantQueueRef.current?.start();return;}
     const parameterErrors = trainingSettingsErrors({epochs,imgSize,batch,seed,patience,hyperparams});
     if (parameterErrors.length) {setError(parameterErrors.join(' ')); return;}
     setBusy(true);
@@ -881,17 +884,18 @@ export function TrainingForm({
       {restoringComparison && <p role="status" className="text-xs">Restoring saved comparison selections…</p>}
       {comparisonRestoreError && <p role="alert" className="text-xs text-critical">{comparisonRestoreError}</p>}
       </fieldset>
-      {allowVariants && <Track2TrainingVariants
+      {allowVariants && <Track2TrainingVariants queueRef={variantQueueRef} onQueueState={setVariantQueue}
         key={`${detectorSlug}|${architecture}|${basePackageArn}|${dataChoice.mode}|${dataChoice.id}`}
         detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
         dataMode={dataChoice.mode}
         dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
         settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} />}
+      {allowVariants&&variantQueue.count>0&&<p className="mt-3 text-xs">Add to Queue will run the saved variant batch: {variantQueue.name||"Save a batch name first"}.</p>}
       <div className="mt-3 flex gap-2">
         <button
           type="button"
           onClick={handleAddToQueue}
-          disabled={busy || preparing || restoringComparison || !!comparisonRestoreError || baseSelectionIncomplete || analysis.blocking || !!(selection.comparison?.enabled && !selection.comparison.baseline_arn)}
+          disabled={allowVariants&&variantQueue.count>0 ? busy||preparing||variantQueue.blocked : busy || preparing || restoringComparison || !!comparisonRestoreError || baseSelectionIncomplete || analysis.blocking || !!(selection.comparison?.enabled && !selection.comparison.baseline_arn)}
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
           {busy || preparing

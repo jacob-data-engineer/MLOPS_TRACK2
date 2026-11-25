@@ -68,7 +68,7 @@ def save_draft(payload):
         revision=int(previous.get('revision',0))
         if revision!=payload['revision']:
             raise ValueError('These variants changed in another window. Refresh saved variants before saving again.')
-        draft={**key,**context,'id':ident,'variants':variants,'revision':revision+1,
+        draft={**key,**context,'batch_name':str(payload.get('batch_name','')).strip(),'id':ident,'variants':variants,'revision':revision+1,
                'created_at':previous.get('created_at',now()),'updated_at':now()}
         tab._save(cur,draft);conn.commit()
     return draft

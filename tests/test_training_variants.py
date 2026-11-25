@@ -222,3 +222,11 @@ def test_fresh_batch_prepares_once_and_replays_after_restart(store,monkeypatch):
     assert [x[0] for x in calls]==['prepare','freeze']
     assert used==['fresh-shared','fresh-shared']
     assert j['dataset_version_id']=='fresh-shared'
+
+
+def test_batch_name_is_saved_without_starting_work(draft_store):
+    p=draft_payload();p['batch_name']='My batch'
+    saved=e.save_draft(p)
+    assert saved['batch_name']=='My batch'
+    assert saved['variants'][0]['selected']
+    assert draft_store[1].rows=={}

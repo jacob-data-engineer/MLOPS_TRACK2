@@ -40,6 +40,7 @@ class SavedVariant(BaseModel):
     settings:dict
     selected:bool=True
 class Draft(BaseModel):
+    batch_name:str=Field(default="",max_length=150)
     model_config=ConfigDict(extra='forbid')
     detector_slug:str
     architecture:str

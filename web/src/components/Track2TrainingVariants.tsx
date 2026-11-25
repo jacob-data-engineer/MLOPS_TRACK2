@@ -1,4 +1,4 @@
-import {useEffect,useState} from "react";
+import {useEffect,useState,useImperativeHandle,type Ref} from "react";
 import {Card} from "./Card";
 import {TrainingParameterInput} from "./TrainingParameterInput";
 import {Track2TrainingAdvanced,effectiveHyperparams} from "./Track2TrainingAdvanced";
@@ -14,10 +14,10 @@ const flatten=(s:VariantSettingsSnapshot):Record<string,unknown>=>{const {hyperp
 const copyJson=<T,>(value:T):T=>JSON.parse(JSON.stringify(value));
 const show=(v:unknown)=>v===undefined?'—':JSON.stringify(v);
 
-export function Track2TrainingVariants({detector,architecture,baseline,dataset,dataMode='saved',settings}:{detector:string;architecture:string;baseline:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot}){
+export function Track2TrainingVariants({detector,architecture,baseline,dataset,dataMode='saved',settings,queueRef,onQueueState}:{detector:string;architecture:string;baseline:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot;queueRef?:Ref<{start:()=>Promise<void>}>;onQueueState?:(state:{count:number;blocked:boolean;name:string})=>void}){
  const [draft,setDraft]=useState<TrainingVariantDraft|null>(null),[loaded,setLoaded]=useState(false);
  const [variantName,setVariantName]=useState(''),[editing,setEditing]=useState('');
- const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[review,setReview]=useState(false);
+ const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [runId,setRunId]=useState(uuid),[batchName,setBatchName]=useState('');
  const [runs,setRuns]=useState<VariantRunRecord[]>([]),[selectedRun,setSelectedRun]=useState('');
  const [models,setModels]=useState<Track2MetricsRow[]>([]),[modelRuns,setModelRuns]=useState<Record<string,Track2RunForModel>>({});
@@ -27,7 +27,7 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,d
  const ready=Boolean(detector&&architecture&&baseline&&(dataMode==='prepared'||dataset));
  const context={detector_slug:detector,architecture,baseline_arn:baseline,dataset_version_id:dataset,data_mode:dataMode};
  const matches=(row:{baseline_arn:string;dataset_version_id:string;data_mode?:string})=>row.baseline_arn===baseline&&(row.data_mode??'saved')===dataMode&&(dataMode==='prepared'||row.dataset_version_id===dataset);
- async function refreshDraft(){setLoaded(false);try{const result=await listTrainingVariantDrafts();setDraft(result.drafts.find(matches)??null);setLoaded(true);setError('');}catch(e){setError(message(e));}}
+ async function refreshDraft(){setLoaded(false);try{const result=await listTrainingVariantDrafts();const found=result.drafts.find(matches)??null;setDraft(found);setBatchName(found?.batch_name??'');setLoaded(true);setError('');}catch(e){setError(message(e));}}
  async function refreshRuns(){try{setRuns((await listVariantRuns()).runs.filter(matches));}catch(e){setError(message(e));}}
  useEffect(()=>{void refreshDraft();void refreshRuns();const timer=setInterval(()=>void refreshRuns(),8000);return()=>clearInterval(timer);},[]);
  const variants=draft?.variants??[], selected=variants.filter(v=>v.selected);
@@ -35,9 +35,9 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,d
  const run=runs.find(r=>r.id===selectedRun)??runs[0];
  useEffect(()=>{if(!run)return;let alive=true;Promise.all([getTrack2Metrics(),getTrack2RunsByModel()]).then(([m,r])=>{if(alive){setModels(m.rows);setModelRuns(r.runs);}}).catch(e=>{if(alive)setError(message(e));});return()=>{alive=false;};},[run?.id,run?.state]);
  const frozen:VariantSettingsSnapshot={...localSettings,hyperparams:{...effectiveHyperparams({},true),...localSettings.hyperparams}};
- async function persist(rows:SavedTrainingVariant[]){
-  setBusy(true);setError('');setNotice('');setReview(false);
-  try{const saved=await saveTrainingVariantDraft({...context,revision:draft?.revision??0,variants:rows});setDraft(saved);setNotice('Variants saved in SQL. No training has started.');return true;}catch(e){setError(message(e));return false;}finally{setBusy(false);}
+ async function persist(rows:SavedTrainingVariant[],name=draft?.batch_name??''){
+  setBusy(true);setError('');setNotice('');
+  try{const saved=await saveTrainingVariantDraft({...context,revision:draft?.revision??0,batch_name:name,variants:rows});setDraft(saved);setNotice('Variants saved in SQL. No training has started.');return true;}catch(e){setError(message(e));return false;}finally{setBusy(false);}
  }
  async function save(asNew:boolean){
   if(saveBlocked){setError(saveBlocked);return;}
@@ -47,7 +47,7 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,d
   }catch(e){setError(message(e));}
  }
  function edit(v:SavedTrainingVariant){
-  setEditing(v.id);setVariantName(v.name);setReview(false);
+  setEditing(v.id);setVariantName(v.name);
   setLocalSettings(copyJson(v.settings));
   setNotice(`Editing ${v.name}. Change the Training Settings below, then Update variant or Save as new variant.`);
  }
@@ -55,10 +55,13 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,d
   let name=v.name+' copy',n=2;while(variants.some(row=>row.name===name))name=v.name+' copy '+n++;
   void persist([...variants,{...copyJson(v),id:uuid(),name}]);
  }
- const payload={id:runId,name:batchName.trim()||`${detector} variants`,...context,shared:selected[0]?.settings??frozen,
+ const payload={id:runId,name:draft?.batch_name||`${detector} variants`,...context,shared:selected[0]?.settings??frozen,
   evaluation:{imgsz:selected[0]?.settings.img_size??640,confidence:.25,ap_conf:.001,nms_iou:.7,max_det:300},
   variants:selected.map(v=>({name:v.name,overrides:v.settings}))};
- async function start(){setBusy(true);setError('');try{const result=await startVariantRun(payload);setSelectedRun(result.id);setRunId(uuid());setReview(false);setNotice('Selected variants submitted. The background worker continues when this page is closed.');await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
+ const batchBlocked=!ready||!loaded||busy||!selected.length||!draft?.batch_name||batchName.trim()!==draft.batch_name;
+ useImperativeHandle(queueRef,()=>({start}));
+ useEffect(()=>{onQueueState?.({count:variants.length,blocked:batchBlocked,name:draft?.batch_name??''});},[variants.length,batchBlocked,draft?.batch_name,onQueueState]);
+ async function start(){if(batchBlocked){setError('Save the batch name and select at least one variant first.');return;}setBusy(true);setError('');try{const result=await startVariantRun(payload);setSelectedRun(result.id);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
  async function retry(index?:number){if(!run)return;setBusy(true);try{await retryVariantRun(run.id,index);await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
  async function report(){if(!run)return;try{const doc=await getVariantReport(run.id);const url=URL.createObjectURL(new Blob([JSON.stringify(doc,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`training-variants-${run.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError(message(e));}}
  const first:Record<string,unknown>=variants[0]?flatten(variants[0].settings):{}, keys=[...new Set(variants.flatMap(v=>Object.keys(flatten(v.settings))))];
@@ -94,10 +97,12 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,d
    <p className="text-xs">{variants.length}/20 saved variants. Highlighted values differ from the first saved variant. All displayed training defaults are captured. Saving does not start training.</p>
    <div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Run?</th><th>Variant</th>{columns.map(k=><th key={k} className="px-2">{k}</th>)}<th>Actions</th></tr></thead><tbody>{variants.map(v=><tr key={v.id} className="border-t"><td><input aria-label={`Run ${v.name}`} type="checkbox" checked={v.selected} onChange={e=>void persist(variants.map(row=>row.id===v.id?{...row,selected:e.target.checked}:row))}/></td><th className="p-2">{v.name}</th>{columns.map(k=><td key={k} className={`p-2 ${show(flatten(v.settings)[k])!==show(first[k])?'bg-amber-100':''}`}>{show(flatten(v.settings)[k])}</td>)}<td className="whitespace-nowrap space-x-3"><button type="button" className="underline" onClick={()=>edit(v)}>Edit</button><button type="button" disabled={variants.length>=20} className="underline" onClick={()=>duplicate(v)}>Duplicate</button><button type="button" className="underline" onClick={()=>void persist(variants.filter(row=>row.id!==v.id))}>Remove</button></td></tr>)}</tbody></table></div>
    <details><summary>All recorded variant settings</summary><pre className="max-h-72 overflow-auto text-xs">{JSON.stringify(variants,null,2)}</pre></details>
-   <label>Batch name <input aria-label="Variant batch name" className="rounded border p-2" value={batchName} onChange={e=>{setBatchName(e.target.value);setReview(false);}} placeholder={`${detector} variants`}/></label>
-   <button type="button" disabled={!ready||!loaded||!selected.length} className="ml-3 rounded border px-3 py-2" onClick={()=>setReview(true)}>Review selected variants</button>
+   <label>Batch name <input aria-label="Variant batch name" className="rounded border p-2" value={batchName} onChange={e=>{setBatchName(e.target.value);}} placeholder={`${detector} variants`}/></label>
+   <button type="button" disabled={!ready||!loaded||!selected.length||!batchName.trim()} className="ml-3 rounded border px-3 py-2 disabled:opacity-40" onClick={()=>void persist(variants,batchName.trim())}>Save batch</button>
+   <p className="text-xs">Save batch stores its name and selected variants without starting training. Add to Queue below starts all selected saved variants, followed by their baseline comparison. Unsaved edits in the settings form are not included.</p>
+   {selected.length>0&&<p className="text-xs">{selected.length} selected: {selected.map(v=>`${v.name} (${v.settings.epochs} epochs)`).join(', ')}</p>}
+   {variants.length>0&&batchBlocked&&<p className="text-xs">Save the batch name and select at least one variant before adding it to the queue.</p>}
   </fieldset>
-  {review&&<div className="rounded border p-3"><p>{selected.length} training jobs followed by one comparison with the original baseline. AWS charges apply. This uses the saved variants, not unsaved edits in the settings above. {dataMode==='prepared'&&'The current applied data preparation settings are captured on submission. The worker prepares one shared dataset, records it in SQL, and reuses its exact split for every variant.'}</p><ul>{selected.map(v=><li key={v.id}>{v.name}: {v.settings.epochs} epochs</li>)}</ul><button type="button" disabled={busy} className="mt-2 rounded bg-ink px-3 py-2 text-white" onClick={()=>void start()}>Run selected variants</button></div>}
   {!!runs.length&&<div className="space-y-3"><h3 className="font-semibold">Variant runs and comparisons</h3><div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Batch</th><th>Status</th><th>Created</th><th/></tr></thead><tbody>{runs.map(r=><tr key={r.id}><td>{r.name}</td><td>{r.state}</td><td>{r.created_at}</td><td><button type="button" className="underline" onClick={()=>setSelectedRun(r.id)}>View results</button></td></tr>)}</tbody></table></div>
    {run&&<><p role="status">{run.name}: {run.state} — {run.stage}</p>{run.error&&<p role="alert">{run.error}</p>}<div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th>Variant</th><th>Run</th><th>Status</th><th>Action</th></tr></thead><tbody>{run.variants.map(v=><tr key={v.index}><td>{v.name}</td><td>{v.run_number?`Run ${v.run_number}`:v.run_id??'Not submitted'}</td><td>{v.state==='Queued'?(v.training_status??v.state):v.state}{v.error&&<p>{v.error}</p>}</td><td>{!['Succeeded','Queued'].includes(v.state)&&!['Pending','Preparing','Training','Comparing'].includes(run.state)&&<button type="button" disabled={busy} onClick={()=>void retry(v.index)}>Retry variant</button>}</td></tr>)}</tbody></table></div>
    {['Needs attention','Comparison failed'].includes(run.state)&&<button type="button" disabled={busy} onClick={()=>void retry()}>Resume / retry comparison</button>}
