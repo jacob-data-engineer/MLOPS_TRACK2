@@ -35,7 +35,7 @@ async def queue_poll_loop() -> None:
         try:
             from . import training_control
             if await asyncio.to_thread(lambda: training_control.state().get('halted')):
-                await asyncio.to_thread(training_control.sweep)
+                await asyncio.to_thread(training_control.auto_resume)
                 continue
         except Exception as exc:
             print(f'Training stop control unavailable: {exc}')

@@ -2,6 +2,7 @@
 import uuid
 import time
 import threading
+from botocore.exceptions import ClientError
 from .. import record_store, pull_control as pc
 
 KEY = {'kind': 'training_control', 'sort': 'stop_all'}
@@ -85,19 +86,30 @@ def stop():
     value={**KEY,'halted':True,'generation':uuid.uuid4().hex}
     record_store.Table(pc.TABLE_NAME).put_item(Item=value)  # Stop new work before any AWS calls.
     result=sweep()
-    return {**value,**result,'message':'Stop All requested. Preparation stops at its next checkpoint; AWS jobs may take longer. Automation remains paused.'}
+    return {**value,**result,'message':'Stop All requested. Preparation stops at its next checkpoint; AWS jobs may take longer. Automation will re-enable automatically after all stopping work finishes.'}
 
+@record_store.exclusive('training_variants')
 @record_store.exclusive('prepared_training_jobs')
 @record_store.exclusive('training_queue')
 @record_store.exclusive('baseline_comparison')
 def resume():
     if not record_store.enabled():
         raise ValueError('Training control is available only in SQL development.')
+    before=state()
+    if not before.get('halted'): return before
     result=sweep()
     if result['problems'] or result['pending']:
         raise ValueError('Stopping is not finished. Retry after active jobs stop. '+ '; '.join(result['problems']))
-    value={**state(),'halted':False}
-    record_store.Table(pc.TABLE_NAME).put_item(Item=value)
+    value={**before,'halted':False}
+    try:
+        record_store.Table(pc.TABLE_NAME).put_item(Item=value,
+            ConditionExpression='#generation = :generation',
+            ExpressionAttributeNames={'#generation':'generation'},
+            ExpressionAttributeValues={':generation':before['generation']})
+    except ClientError as exc:
+        if exc.response['Error']['Code']=='ConditionalCheckFailedException':
+            raise ValueError('A newer Stop All request is still being processed.') from exc
+        raise
     return {**value,'message':'Automation enabled. Cancelled work is not restarted; submit a new run when ready.'}
 
 
@@ -114,3 +126,12 @@ def checkpoint_fast():
             _cached_halted = state().get('halted', False)
             _checked_at = time.monotonic()
         if _cached_halted: raise Stopped('Stopped by Stop All')
+
+
+def auto_resume():
+    """Locks and AWS checks must all clear; never resume on a timer alone."""
+    if not state().get('halted'): return state()
+    try:
+        return resume()
+    except ValueError as exc:
+        return {**state(), 'message': str(exc)}

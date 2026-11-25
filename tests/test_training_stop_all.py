@@ -1,5 +1,7 @@
 import copy
 from unittest.mock import Mock
+import inspect
+from botocore.exceptions import ClientError
 import pytest
 from ppe_pipeline_api.chain import training_control as c, training_variants as v, preparation_jobs as p
 from ppe_pipeline_api.training import track2_shared as t, comparison
@@ -9,7 +11,10 @@ def control(monkeypatch):
     row={'halted':False,'generation':'old'}
     class Table:
         def get_item(self,**kw):return {'Item':copy.deepcopy(row)}
-        def put_item(self,Item,**kw):row.clear();row.update(copy.deepcopy(Item))
+        def put_item(self,Item,**kw):
+            if kw.get('ConditionExpression') and row['generation'] != kw['ExpressionAttributeValues'][':generation']:
+                raise ClientError({'Error':{'Code':'ConditionalCheckFailedException'}},'PutItem')
+            row.clear();row.update(copy.deepcopy(Item))
     monkeypatch.setattr(c.record_store,'enabled',lambda:True)
     monkeypatch.setattr(c.record_store,'Table',lambda *a:Table())
     monkeypatch.setattr(t,'queue_stop',Mock())
@@ -66,3 +71,35 @@ def test_fast_checkpoint_limits_database_polling(control,monkeypatch):
     c.checkpoint_fast();control['halted']=True
     now[0]=11.1
     with pytest.raises(c.Stopped):c.checkpoint_fast()
+
+
+def test_automation_reenables_after_stop_completes(control,monkeypatch):
+    control['halted']=True
+    monkeypatch.setattr(c,'resume',inspect.unwrap(c.resume))
+    result=c.auto_resume()
+    assert result['halted'] is False and control['halted'] is False
+    assert control['generation']=='old'
+
+@pytest.mark.parametrize('result',[{'pending':True,'problems':[]},{'pending':False,'problems':['AWS refused stop']}])
+def test_automation_stays_paused_until_aws_stops(control,monkeypatch,result):
+    control['halted']=True
+    monkeypatch.setattr(c,'resume',inspect.unwrap(c.resume))
+    monkeypatch.setattr(c,'sweep',lambda:result)
+    c.auto_resume()
+    assert control['halted']
+
+def test_new_stop_cannot_be_overwritten_by_auto_resume(control,monkeypatch):
+    control['halted']=True
+    monkeypatch.setattr(c,'resume',inspect.unwrap(c.resume))
+    def sweep():
+        control['generation']='new-stop'
+        return {'pending':False,'problems':[]}
+    monkeypatch.setattr(c,'sweep',sweep)
+    c.auto_resume()
+    assert control['halted'] and control['generation']=='new-stop'
+
+def test_busy_preparation_lock_does_not_enable_automation(control,monkeypatch):
+    control['halted']=True
+    monkeypatch.setattr(c,'resume',lambda:{'started':False,'reason':'busy'})
+    c.auto_resume()
+    assert control['halted']
