@@ -9,7 +9,7 @@
   {
    "path": "/track2/multi-auto-training",
    "name": "Track2 Multi-Auto Training",
-   "file": "routes/Track2ModelsPage.tsx"
+   "file": "routes/Track2MultiAutoTrainingPage.tsx"
   },
   {
    "path": "/track2/data-preparation",
@@ -40,11 +40,6 @@
    "path": "/track2/pt-view",
    "name": "PT View",
    "file": "routes/Track2PtViewPage.tsx"
-  },
-  {
-   "path": "/track2/experiments",
-   "name": "Experiments",
-   "file": "routes/Track2ExperimentsPage.tsx"
   },
   {
    "path": "/track2/deploy",
@@ -193,7 +188,6 @@
    "cards": [],
    "fields": [
     "Close navigation",
-    "Experiments",
     "Open navigation",
     "PT View",
     "Track2 Data Preparation",
@@ -204,7 +198,7 @@
     "Track2 SQL Database Query",
     "Track2 Scheduled - prototype"
    ],
-   "text": "Open navigation\nClose navigation\nTrack2 SQL Database Query\nTrack2 Data Preparation\nTrack2 Multi-Auto Training\nExperiments\nTrack2 Review & Metrics\nPT View\nTrack2 Scheduled - prototype\nTrack2 Notifications\nTrack2 Help\nTraining and Development\nJurong Port · case review\nLog out\nThis page is out of date.\nReload\nIn use\nPrototype -- still changing\nKept in view -- not being worked on\nYou have an unsaved annotation. Leave anyway?"
+   "text": "Open navigation\nClose navigation\nTrack2 SQL Database Query\nTrack2 Data Preparation\nTrack2 Multi-Auto Training\nTrack2 Review & Metrics\nPT View\nTrack2 Scheduled - prototype\nTrack2 Notifications\nTrack2 Help\nTraining and Development\nJurong Port · case review\nLog out\nThis page is out of date.\nReload\nIn use\nPrototype -- still changing\nKept in view -- not being worked on\nYou have an unsaved annotation. Leave anyway?"
   },
   {
    "id": "components/RouteBoundary.tsx",
@@ -1078,7 +1072,7 @@
    "id": "routes/Track2ExperimentsPage.tsx",
    "file": "routes/Track2ExperimentsPage.tsx",
    "pages": [
-    "Experiments"
+    "Track2 Multi-Auto Training"
    ],
    "cards": [
     {
@@ -1215,6 +1209,16 @@
     "Training queue"
    ],
    "text": "Start the training run\nTraining queue\nDataset preparation\nStop training?\nModel:\nDataset version:\n(evaluation is the val split its data.yaml declares)\nRemove\nChoose newly prepared data or a saved SQL dataset with your current step 1 settings.\nNew data rebuilds the decayed dataset from your Data Preparation settings before each run. A saved dataset uses its recorded central store, even if today’s store has changed. Check saved dataset verifies the files and class names. Matching names in a different order are remapped automatically; selecting a subset is not supported here. Add to Queue saves a new SQL recipe before training starts.\nWhen the validation set lives under a different prefix - its own download, read by the evaluation step - it is listed separately as\nEvaluation\n. The training job validates on its own images in that case, because folders under another prefix are not on its disk, so the held-out numbers are the ones the evaluation step reports.\nThe model comes from step 1, where the\nModel Name\nModel\nand\nSize\ndropdowns pick it. The Model Name decides\nwhich registry\nthe trained model is versioned into, and its class names are what the dataset is checked against. If the dataset declares more class names than the Model Name wants, the run trains on just that Model Name's names and nothing in S3 is rewritten.\nSubmitting adds it to the queue below. A run takes GPU time, so check both lines say what you expect before pressing it.\n(chosen in step 1, Model types and Model Names)\ndropdown.\n(chosen in step 1)\nAnalysis\nPick a dataset and a Model Name in step 1 to check them.\nWorking datasets are automatically deleted after training finishes and the queue is clear. Each new-data run rebuilds a fresh decay dataset. Saved-data runs recreate their recorded selection. Central-store files and SQL records remain available for comparisons, repeat runs and exports.\nYou can close this page. The background worker will continue; progress returns when you reopen it.\nRestoring saved comparison selections…\nStart All Over\nRuns automatically:\nSwitched on and off by\nTRAINING SCHEDULE\nat the top. The background worker pulls fresh data, rebuilds and preserves the decayed dataset, then queues the run and starts it, even when this page is closed. Working datasets are cleaned up automatically after both manual and scheduled runs.\nQueue even when the pull moved no files\nOff, a pull that found nothing is skipped -- the corpus is unchanged, so the run would repeat the last model and bill for it.\nNext:\nLast:\nTrack2 Training\nDataset/weights browsing, GPU status, training progress, and the training queue for the Track2 YOLO pipeline.\nLoading...\nQueue is empty.\nThe run started here stops now. SageMaker cannot resume a stopped execution - a fresh run has to be started instead.\nNo run started here is executing.\n· spot\nNothing else is touched.\nNo dataset, no snapshot and no registered model changes, and the training queue keeps its entries - stopping a run is not the same as stopping the queue.\nExecuting\nRegistering the model\nEvaluating\nTraining\nSucceeded\nFinishing up\nStarting up\nRunning\nCustom classes\nTraining rebuilds a fresh decay dataset from the selected sources. Its exact files and settings are preserved before queueing.\nNo Model Name chosen -- the model lands in the shared open registry,\nEnter all dataset Label classes in Data Preparation before queueing training.\nNo starting version selected.\nCould not preserve and queue the prepared dataset.\nAdd to queue failed.\nThe Training queue below -- press Start Queue to let it run.\nPreserving the prepared dataset and queueing...\nAdd to Queue\nCouldn't load training status.\nCould not start the queue.\nCould not stop the queue.\nStop failed.\nStarting queue...\nStart Queue\nStopping queue...\nStop Queue\nStopping training...\nStop Training\nCompleted\nStop training\nCancel\nThis job is\nThese jobs are"
+  },
+  {
+   "id": "routes/Track2MultiAutoTrainingPage.tsx",
+   "file": "routes/Track2MultiAutoTrainingPage.tsx",
+   "pages": [
+    "Track2 Multi-Auto Training"
+   ],
+   "cards": [],
+   "fields": [],
+   "text": "Multi-Auto Training mode"
   },
   {
    "id": "routes/Track2NotificationsPage.tsx",

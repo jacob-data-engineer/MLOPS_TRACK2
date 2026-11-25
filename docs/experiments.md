@@ -1,6 +1,11 @@
 # Experiments
 
-Open **Experiments** below Multi-Auto Training. Select a model name, architecture,
+Open **Multi-Auto Training**, then select **Experiment: baseline + variants**.
+Use **Standard training** for the existing manual and scheduled workflow. Only
+the selected mode's cards are visible. Switching modes preserves unfinished form
+edits while the page remains open; the URL preserves the selected mode on reload.
+Old Experiments links redirect to this mode, and saved experiments remain available.
+Select a model name, architecture,
 exact registered baseline version, and a saved SQL dataset. Older datasets without
 a permanent central-store recipe are rejected rather than silently rebuilt from
 today's source folders. Dataset and model class names must match.
