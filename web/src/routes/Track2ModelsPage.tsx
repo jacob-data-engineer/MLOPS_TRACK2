@@ -876,23 +876,6 @@ export function TrainingForm({
         Each new-data run rebuilds a fresh decay dataset. Saved-data runs recreate their recorded selection.
         Central-store files and SQL records remain available for comparisons, repeat runs and exports.
       </p>
-      {preparationJob && (
-        <div className="mt-3 rounded-md border border-black/15 bg-page p-3 text-xs"
-          role="status" aria-live="polite">
-          <div className="mb-2 flex justify-between gap-3">
-            <span>{preparationJob.stage}</span><span>{preparationJob.percent}%</span>
-          </div>
-          <div role="progressbar" aria-label="Dataset preparation" aria-valuemin={0}
-            aria-valuemax={100} aria-valuenow={preparationJob.percent}>
-            <ProgressBar processed={preparationJob.percent} total={100} />
-          </div>
-          {preparationJob.total > 0 && <p className="mt-1">
-            {preparationJob.completed.toLocaleString()} / {preparationJob.total.toLocaleString()} image and label pairs
-          </p>}
-          {preparing && <p className="mt-1 text-ink-muted">You can close this page. The background worker will continue; progress returns when you reopen it.</p>}
-          {preparationJob.error && <p className="mt-1 text-critical">{preparationJob.error}</p>}
-        </div>
-      )}
       <Track2BaselineComparison value={selection.comparison || {enabled: false}}
         onChange={comparison => setSelection({comparison})} disabled={busy || preparing || restoringComparison}/>
       {restoringComparison && <p role="status" className="text-xs">Restoring saved comparison selections…</p>}
@@ -927,6 +910,23 @@ export function TrainingForm({
 
 
 
+      {preparationJob && (
+        <div className="mt-3 rounded-md border border-black/15 bg-page p-3 text-xs"
+          role="status" aria-live="polite">
+          <div className="mb-2 flex justify-between gap-3">
+            <span>{preparationJob.stage}</span><span>{preparationJob.percent}%</span>
+          </div>
+          <div role="progressbar" aria-label="Dataset preparation" aria-valuemin={0}
+            aria-valuemax={100} aria-valuenow={preparationJob.percent}>
+            <ProgressBar processed={preparationJob.percent} total={100} />
+          </div>
+          {preparationJob.total > 0 && <p className="mt-1">
+            {preparationJob.completed.toLocaleString()} / {preparationJob.total.toLocaleString()} image and label pairs
+          </p>}
+          {preparing && <p className="mt-1 text-ink-muted">You can close this page. The background worker will continue; progress returns when you reopen it.</p>}
+          {preparationJob.error && <p className="mt-1 text-critical">{preparationJob.error}</p>}
+        </div>
+      )}
     </Card>
 
     {/* LAST in this form, which puts it immediately above the Training
