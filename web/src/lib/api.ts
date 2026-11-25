@@ -19,6 +19,7 @@ export interface ComparisonMetricRow {
   per_class: {class: string; 'mAP50-95': number | null; precision: number; recall: number; fp: number; fn: number}[];
 }
 export interface RunComparisonSummary {
+  run_number?: number | null;
   id: string; label: string; submitted_at: string; status: string; training_status: string; can_compare: boolean;
   comparison?: {id?: string; status: string; error?: string; result?: {
     status: string; rows?: ComparisonMetricRow[]; validation_images?: number;

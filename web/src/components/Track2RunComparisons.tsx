@@ -37,7 +37,7 @@ export function Track2RunComparisons({initialRun = ''}: {initialRun?: string} = 
     <label className="block text-sm">Training run<select className="my-2 block w-full rounded border border-hairline bg-page p-2" value={selected}
       onChange={e => {setSelected(e.target.value); setSelection({enabled:false});}}>
       <option value="">Choose a saved training run</option>
-      {runs.map(r => <option key={r.id} value={r.id}>{r.label} · {formatDayTime(r.submitted_at)} · {r.id} · {r.status}</option>)}
+      {runs.map(r => <option key={r.id} value={r.id}>{r.run_number != null ? `Run ${r.run_number}` : r.id} · {r.label} · {formatDayTime(r.submitted_at)} · {r.status}</option>)}
     </select></label>
     {run && <>
       <p role="status" className="my-2 text-sm font-medium">{run.status}</p>

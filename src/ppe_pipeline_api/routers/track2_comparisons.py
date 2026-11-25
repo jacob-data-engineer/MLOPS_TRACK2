@@ -49,11 +49,20 @@ def saved_selection(version_id: str, session=Depends(require_session)):
 
 @router.get('')
 def comparisons(session=Depends(require_session)):
+    from ..data.catalog_view import run_numbers
+    audits = c.t2.scan_training_audits(limit=200)
+    try:
+        numbers = run_numbers([a['id'] for a in audits])
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning('Could not load catalog run numbers', exc_info=True)
+        numbers = {}
     return {'runs': [{'id': a['id'], 'label': a.get('detector_slug') or a['id'],
+                     'run_number': numbers.get(a['id']),
                      'submitted_at': a.get('submitted_at', ''), 'training_status': a.get('status'),
                      'status': c.status_for(a), 'comparison': a.get('comparison'),
                      'can_compare': a.get('status') == 'Succeeded'}
-                    for a in c.t2.scan_training_audits(limit=200)]}
+                    for a in audits]}
 
 
 @router.post('/{run_id}/run')
