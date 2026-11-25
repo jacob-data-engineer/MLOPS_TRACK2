@@ -79,7 +79,9 @@ test('normal training controls save isolated variants without launching, restore
   await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Add to Queue'&&!b.disabled));
   assert.equal(launches.length,0);
   await page.getByRole('button',{name:'Add to Queue',exact:true}).click();
-  await page.getByRole('cell',{name:'Run 74',exact:true}).waitFor();
+  await page.getByRole('status').filter({hasText:'Selected variants submitted.'}).waitFor();
+  assert.equal(await page.getByText('Variant runs and comparisons',{exact:true}).count(),0);
+  assert.equal(await page.getByText('Export variant models',{exact:true}).count(),0);
   assert.match(launches[0].name,/^helmet variants [a-f0-9]{8}$/);assert.equal(launches.length,1);assert.equal(launches[0].baseline_arn,arn);assert.equal(launches[0].dataset_version_id,'saved-data');
   assert.equal(launches[0].variants[0].overrides.notes,'Local variant notes');assert.equal(launches[0].variants.length,1);assert.equal(launches[0].variants[0].overrides.epochs,30);
   await page.getByRole('button',{name:'Use fresh data',exact:true}).click();
@@ -88,7 +90,9 @@ test('normal training controls save isolated variants without launching, restore
   await page.getByRole('checkbox',{name:'Run Fresh variant',exact:true}).waitFor();
   assert.equal(drafts.find(d=>d.data_mode==='prepared').dataset_version_id,'');
   await page.getByRole('button',{name:'Add to Queue',exact:true}).click();
-  await page.getByRole('cell',{name:'Run 74',exact:true}).waitFor();
+  await page.getByRole('status').filter({hasText:'Selected variants submitted.'}).waitFor();
+  assert.equal(await page.getByText('Variant runs and comparisons',{exact:true}).count(),0);
+  assert.equal(await page.getByText('Export variant models',{exact:true}).count(),0);
   assert.equal(launches[1].data_mode,'prepared');
   assert.equal(launches[1].dataset_version_id,'');
   assert.deepEqual(errors,[]);

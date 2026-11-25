@@ -931,7 +931,7 @@ export function TrainingForm({
 
 
       {experiments&&variantSubmission&&<p role="status" className="mt-3 text-sm">{variantSubmission}</p>}
-      {preparationJob && (
+      {!experiments && preparationJob && (
         <div className="mt-3 rounded-md border border-black/15 bg-page p-3 text-xs"
           role="status" aria-live="polite">
           <div className="mb-2 flex justify-between gap-3">

@@ -1,13 +1,10 @@
 import {usePageSave} from "../lib/pageSave";
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import {useEffect,useState,useImperativeHandle,type Ref} from "react";
-import {Card} from "./Card";
 import {TrainingParameterInput} from "./TrainingParameterInput";
 import {Track2TrainingAdvanced,effectiveHyperparams} from "./Track2TrainingAdvanced";
-import {VariantSettings,VariantResults} from "./Track2VariantResults";
-import {Track2ComparisonExport} from "./Track2ComparisonExport";
-import {ApiError,listTrainingVariantDrafts,saveTrainingVariantDraft,listVariantRuns,startVariantRun,retryVariantRun,getVariantReport,getTrack2Metrics,getTrack2RunsByModel,
- type TrainingVariantDraft,type SavedTrainingVariant,type VariantSettingsSnapshot,type VariantRunRecord,type Track2MetricsRow,type Track2RunForModel,type Track2ExportSettings} from "../lib/api";
+import {ApiError,listTrainingVariantDrafts,saveTrainingVariantDraft,startVariantRun,
+ type TrainingVariantDraft,type SavedTrainingVariant,type VariantSettingsSnapshot} from "../lib/api";
 
 const uuid=()=>globalThis.crypto?.randomUUID?.()??'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return(c==='x'?r:(r&3)|8).toString(16);});
 const message=(e:unknown)=>e instanceof ApiError?e.detail:e instanceof Error?e.message:'Request failed.';
@@ -21,22 +18,16 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
  const [variantName,setVariantName]=useState(''),[editing,setEditing]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [runId,setRunId]=useState(uuid);
- const [runs,setRuns]=useState<VariantRunRecord[]>([]),[selectedRun,setSelectedRun]=useState('');
- const [models,setModels]=useState<Track2MetricsRow[]>([]),[modelRuns,setModelRuns]=useState<Record<string,Track2RunForModel>>({});
- const [exportSettings,setExportSettings]=useState<Track2ExportSettings>({registry:'',generation:'',size:'',group_name:'',criterion:'mAP50',destination:'s3',bucket:'',prefix:'',retention:'keep_all',include_metadata:true,metadata_groups:[]});
  const [localSettings,setLocalSettings]=useState(()=>copyJson(settings));
  useEffect(()=>setLocalSettings(copyJson(settings)),[JSON.stringify(settings)]);
-  usePageSnapshot(`variant-editor/${detector}/${architecture}/${baseline}/${dataMode}/${dataset}`,{variantName,editing,localSettings,selectedRun,exportSettings,variants:draft?.variants??[]},v=>{setVariantName(v.variantName);setEditing(v.editing);setLocalSettings(v.localSettings);setSelectedRun(v.selectedRun);setExportSettings(v.exportSettings);setDraft(current=>({...context,...current,variants:v.variants??[],revision:current?.revision??0,batch_name:current?.batch_name??"",id:current?.id??""}));},loaded);
+  usePageSnapshot(`variant-editor/${detector}/${architecture}/${baseline}/${dataMode}/${dataset}`,{variantName,editing,localSettings,variants:draft?.variants??[]},v=>{setVariantName(v.variantName);setEditing(v.editing);setLocalSettings(v.localSettings);setDraft(current=>({...context,...current,variants:v.variants??[],revision:current?.revision??0,batch_name:current?.batch_name??"",id:current?.id??""}));},loaded);
  const ready=Boolean(detector&&architecture&&baseline&&(dataMode==='prepared'||dataset));
  const context={detector_slug:detector,architecture,baseline_arn:baseline,dataset_version_id:dataset,data_mode:dataMode};
  const matches=(row:{baseline_arn:string;dataset_version_id:string;data_mode?:string})=>row.baseline_arn===baseline&&(row.data_mode??'saved')===dataMode&&(dataMode==='prepared'||row.dataset_version_id===dataset);
  async function refreshDraft(){setLoaded(false);try{const result=await listTrainingVariantDrafts();const found=result.drafts.find(matches)??null;setDraft(found);setLoaded(true);setError('');}catch(e){setError(message(e));}}
- async function refreshRuns(){try{setRuns((await listVariantRuns()).runs.filter(matches));}catch(e){setError(message(e));}}
- useEffect(()=>{void refreshDraft();void refreshRuns();const timer=setInterval(()=>void refreshRuns(),8000);return()=>clearInterval(timer);},[]);
+ useEffect(()=>{void refreshDraft();},[]);
  const variants=draft?.variants??[], selected=variants.filter(v=>v.selected);
  const saveBlocked=!detector||!architecture?'Choose a model name and model type above.':!baseline?'Choose a registered starting model version above.':dataMode==='saved'&&!dataset?'Choose Saved SQL dataset above and select a dataset before saving a variant.':!loaded?'Saved variants have not loaded. Use Refresh saved variants to retry.':!variantName.trim()?'Enter a variant name.':'';
- const run=runs.find(r=>r.id===selectedRun)??runs[0];
- useEffect(()=>{if(!run)return;let alive=true;Promise.all([getTrack2Metrics(),getTrack2RunsByModel()]).then(([m,r])=>{if(alive){setModels(m.rows);setModelRuns(r.runs);}}).catch(e=>{if(alive)setError(message(e));});return()=>{alive=false;};},[run?.id,run?.state]);
  const frozen:VariantSettingsSnapshot={...localSettings,hyperparams:{...effectiveHyperparams({},true),...localSettings.hyperparams}};
  async function persist(rows:SavedTrainingVariant[],name=draft?.batch_name??''){
   setBusy(true);setError('');setNotice('');
@@ -73,14 +64,10 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
  const batchBlocked=!ready||!loaded||busy||!selected.length;
  useImperativeHandle(queueRef,()=>({start}));
  useEffect(()=>{onQueueState?.({count:variants.length,blocked:batchBlocked,name:runName});},[variants.length,batchBlocked,runName,onQueueState]);
- async function start(){if(!active||batchBlocked){throw new Error('Select at least one saved variant and a base model first.');}setBusy(true);setError('');try{const result=await startVariantRun(payload);setSelectedRun(result.id);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');await refreshRuns();return `Submitted ${selected.length} variants. The background worker will prepare the shared data, train each variant, then compare with the base model. Training entries appear in the queue after preparation.`;}catch(e){setError(message(e));throw e;}finally{setBusy(false);}}
- async function retry(index?:number){if(!run)return;setBusy(true);try{await retryVariantRun(run.id,index);await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
- async function report(){if(!run)return;try{const doc=await getVariantReport(run.id);const url=URL.createObjectURL(new Blob([JSON.stringify(doc,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`training-variants-${run.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError(message(e));}}
+ async function start(){if(!active||batchBlocked){throw new Error('Select at least one saved variant and a base model first.');}setBusy(true);setError('');try{await startVariantRun(payload);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');return `Submitted ${selected.length} variants. The background worker will prepare the shared data, train each variant, then compare with the base model. Training entries appear in the queue after preparation.`;}catch(e){setError(message(e));throw e;}finally{setBusy(false);}}
  const first:Record<string,unknown>=variants[0]?flatten(variants[0].settings):{}, keys=[...new Set(variants.flatMap(v=>Object.keys(flatten(v.settings))))];
  const changedKeys=keys.filter(k=>variants.some(v=>show(flatten(v.settings)[k])!==show(first[k])));
  const columns=[...new Set(['epochs','img_size','batch','seed','patience','lr0','optimizer',...changedKeys])];
- const exportArns=new Set(run?[run.baseline_arn,...run.variants.map(v=>v.model_package_arn)]:[]);
- const exportRows=models.filter(m=>exportArns.has(m.model_package_arn));
  return <section aria-label="Saved training variants" className="mt-5 space-y-4 rounded border border-hairline p-4">
   <h3 className="font-semibold">Save training setups as variants</h3>
   <p className="text-xs">Pick a model and baseline above, choose newly prepared data or a saved SQL dataset, then adjust Training Settings below and save each setup here. Every variant starts from that same baseline and uses the same train/validation images.</p>
@@ -113,12 +100,5 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
    {selected.length>0&&<p className="text-xs">{selected.length} selected: {selected.map(v=>`${v.name} (${v.settings.epochs} epochs)`).join(', ')}</p>}
    {variants.length>0&&batchBlocked&&<p className="text-xs">Choose a base model and select at least one saved variant before adding to the queue.</p>}
   </fieldset>
-  {!!runs.length&&<div className="space-y-3"><h3 className="font-semibold">Variant runs and comparisons</h3><div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Batch</th><th>Status</th><th>Created</th><th/></tr></thead><tbody>{runs.map(r=><tr key={r.id}><td>{r.name}</td><td>{r.state}</td><td>{r.created_at}</td><td><button type="button" className="underline" onClick={()=>setSelectedRun(r.id)}>View results</button></td></tr>)}</tbody></table></div>
-   {run&&<><p role="status">{run.name}: {run.state} — {run.stage}</p>{run.error&&<p role="alert">{run.error}</p>}<div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th>Variant</th><th>Run</th><th>Status</th><th>Action</th></tr></thead><tbody>{run.variants.map(v=><tr key={v.index}><td>{v.name}</td><td>{v.run_number?`Run ${v.run_number}`:v.run_id??'Not submitted'}</td><td>{v.state==='Queued'?(v.training_status??v.state):v.state}{v.error&&<p>{v.error}</p>}</td><td>{!['Succeeded','Queued'].includes(v.state)&&!['Pending','Preparing','Training','Comparing'].includes(run.state)&&<button type="button" disabled={busy} onClick={()=>void retry(v.index)}>Retry variant</button>}</td></tr>)}</tbody></table></div>
-   {['Needs attention','Comparison failed'].includes(run.state)&&<button type="button" disabled={busy} onClick={()=>void retry()}>Resume / retry comparison</button>}
-   {run.comparison?.error&&<p role="alert">{run.comparison.error}</p>}<VariantSettings experiment={run}/>{run.comparison?.result?.rows&&<VariantResults rows={run.comparison.result.rows}/>}
-   <button type="button" className="rounded border px-3 py-2" onClick={()=>void report()}>Download variant report (JSON)</button>
-   <Card title="Export variant models"><p className="mb-2 text-xs">Choose the original baseline and trained variants, package contents and destination. The report above contains the complete comparison.</p>{exportRows.length?<Track2ComparisonExport key={run.id} stateKey={`variant/${run.id}`} rows={exportRows} runs={modelRuns} settings={exportSettings} onChange={setExportSettings} autoSelect/>:<p className="text-xs">Registered models will appear when available.</p>}</Card></>}
-  </div>}
  </section>;
 }
