@@ -13,6 +13,7 @@ from __future__ import annotations
 import hmac
 import os
 import threading
+import time
 
 from fastapi import Header, HTTPException, Request
 from pydantic import BaseModel
@@ -20,8 +21,9 @@ from pydantic import BaseModel
 from .session_store import SESSIONS
 
 MAX_LOGIN_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 15 * 60
 
-_failed_attempts: dict[str, int] = {}
+_failed_attempts: dict[str, tuple[int, float]] = {}
 _failed_attempts_lock = threading.Lock()
 
 
@@ -43,16 +45,17 @@ def login(payload: LoginRequest, request: Request) -> LoginResponse:
 
     client_key = request.client.host if request.client else "unknown"
     with _failed_attempts_lock:
-        attempts = _failed_attempts.get(client_key, 0)
-    if attempts >= MAX_LOGIN_ATTEMPTS:
-        raise HTTPException(status_code=429, detail="Too many incorrect attempts.")
-
-    if not hmac.compare_digest(payload.password.encode("utf-8"), expected.encode("utf-8")):
-        with _failed_attempts_lock:
-            _failed_attempts[client_key] = attempts + 1
-        raise HTTPException(status_code=401, detail="Incorrect password.")
-
-    with _failed_attempts_lock:
+        now = time.monotonic()
+        for key, (_, deadline) in list(_failed_attempts.items()):
+            if deadline <= now:
+                _failed_attempts.pop(key, None)
+        attempts, deadline = _failed_attempts.get(client_key, (0, now + LOGIN_WINDOW_SECONDS))
+        if attempts >= MAX_LOGIN_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="Too many incorrect attempts. Try again after the cooldown.",
+                                headers={"Retry-After": str(max(1, int(deadline - now) + 1))})
+        if not hmac.compare_digest(payload.password.encode("utf-8"), expected.encode("utf-8")):
+            _failed_attempts[client_key] = (attempts + 1, deadline)
+            raise HTTPException(status_code=401, detail="Incorrect password.")
         _failed_attempts.pop(client_key, None)
     token = SESSIONS.create()
     return LoginResponse(token=token)

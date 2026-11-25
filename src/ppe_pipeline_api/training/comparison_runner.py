@@ -42,11 +42,12 @@ def counts(matrix, names):
     return per_class
 
 
-def evaluate(manifest, root, s3):
+def evaluate(manifest, root, s3, output=None):
     import yaml
     import ultralytics
     from ultralytics import YOLO
     root = Path(root)
+    results = Path(output) / 'plots' if output is not None else root / 'results'
     (root / 'images/val').mkdir(parents=True, exist_ok=True)
     (root / 'labels/val').mkdir(parents=True, exist_ok=True)
     labels, hashes = [], []
@@ -91,7 +92,7 @@ def evaluate(manifest, root, s3):
                       iou=settings['nms_iou'], max_det=settings['max_det'],
                       batch=1, device='cpu', workers=0, plots=True, save_json=False,
                       **fixed,
-                      project=str(root / 'results'), verbose=False)
+                      project=str(results), verbose=False)
         result = model.val(**common, conf=settings['ap_conf'], name=f'ap-{index}')
         operating = model.val(**common, conf=settings['confidence'], name=f'operating-{index}')
         per_class = counts(operating.confusion_matrix.matrix, names)
@@ -125,7 +126,7 @@ def main():
     output = Path('/opt/ml/processing/output')
     output.mkdir(parents=True, exist_ok=True)
     try:
-        result = {'status': 'Completed', **evaluate(manifest, '/opt/ml/processing/work', s3)}
+        result = {'status': 'Completed', **evaluate(manifest, '/opt/ml/processing/work', s3, output=output)}
     except Exception as exc:
         code = getattr(exc, 'response', {}).get('Error', {}).get('Code', '')
         unavailable = isinstance(exc, (ValueError, FileNotFoundError)) or code in ('NoSuchKey', '404', 'PreconditionFailed', '412')

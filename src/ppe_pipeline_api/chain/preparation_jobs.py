@@ -5,6 +5,7 @@ import os
 import uuid
 import time
 from boto3.dynamodb.conditions import Attr
+from botocore.exceptions import ClientError
 
 from .. import data, pull_control as pc, record_store
 
@@ -37,17 +38,28 @@ def latest():
     return public(found[0]) if found else None
 
 
-def submit(config=None, *, trigger='manual', submit='enqueue', overrides=None):
+def submit(config=None, *, trigger='manual', submit='enqueue', overrides=None, schedule_slot=None):
     data.require_training_sql()
     if submit not in ('enqueue', 'queue', 'start'):
         raise ValueError('Choose enqueue, queue or start.')
-    stamp = now()
-    ident = uuid.uuid4().hex
+    stamp = schedule_slot or now()
+    ident = uuid.uuid5(uuid.NAMESPACE_URL, 'track2-training-schedule:' + schedule_slot).hex if schedule_slot else uuid.uuid4().hex
     job = {'kind': KIND, 'sort': stamp + '#' + ident, 'id': ident, 'state': 'pending',
            'stage': 'Waiting for background worker', 'percent': 0, 'completed': 0, 'total': 0,
            'created_at': stamp, 'updated_at': stamp, 'config': config if config is not None else pc.read_config(),
            'trigger': trigger, 'submit': submit, 'overrides': overrides or {}}
-    table().put_item(Item=job)
+    if schedule_slot:
+        # The job itself is the claim: a lost response retries the same key,
+        # and never overwrites a job already picked up by the worker.
+        try:
+            table().put_item(Item=job, ConditionExpression='attribute_not_exists(#k)',
+                             ExpressionAttributeNames={'#k': 'kind'})
+        except ClientError as exc:
+            if exc.response['Error']['Code'] != 'ConditionalCheckFailedException':
+                raise
+            job = table().get_item(Key={'kind': KIND, 'sort': job['sort']})['Item']
+    else:
+        table().put_item(Item=job)
     return {'ok': True, 'job': public(job), 'steps': [{'step': 'background', 'ok': True,
             'detail': 'Preparation saved; the background worker will preserve and queue the dataset.'}]}
 

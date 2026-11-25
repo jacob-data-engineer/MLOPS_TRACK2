@@ -1,10 +1,11 @@
-export interface CompletionItem { id: string; state: string; label: string }
+export interface CompletionItem { id: string; state: string; label: string; attempt?: string }
 export interface CompletionSnapshot { initialized: boolean; states: Record<string, string> }
 export function detectCompletions(previous: CompletionSnapshot, items: CompletionItem[], terminal: string[]) {
   const events = previous.initialized ? items.filter(item => terminal.includes(item.state)
-    && previous.states[item.id] !== item.state) : [];
-  return {events, snapshot: {initialized: true, states: Object.fromEntries(items.map(item => [item.id, item.state]))}};
+    && previous.states[item.id] !== completionState(item)) : [];
+  return {events, snapshot: {initialized: true, states: Object.fromEntries(items.map(item => [item.id, completionState(item)]))}};
 }
+function completionState(item: CompletionItem) { return item.attempt ? `${item.attempt}:${item.state}` : item.state; }
 
 export function s3ConsoleUrl(uri: string): string | undefined {
   const match = /^s3:\/\/([a-z0-9.-]+)\/(.*)$/.exec(uri);

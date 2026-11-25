@@ -2174,6 +2174,24 @@ def check_training_schedule(config: dict | None = None) -> dict:
                               f"{missed['minutes_late']} minutes and has been "
                               f"let go. The next occurrence will run."}
         return {"started": False, "reason": "Nothing due."}
+    from .. import record_store
+    if record_store.enabled():
+        # Persist the scheduled preparation as the atomic slot claim. Retrying
+        # either a failed write or a lost response cannot queue a second run.
+        from . import preparation_jobs
+        try:
+            # Save deliberately consumes a just-passed slot so enabling a
+            # schedule cannot launch training immediately. Honor that marker,
+            # and claims written by older workers during a rolling upgrade.
+            suppressed = record_store.Table(pc.TABLE_NAME).get_item(
+                Key={'kind': 'claim#training_schedule', 'sort': slot}).get('Item')
+            if suppressed:
+                return {"started": False, "slot": slot, "reason": "This slot was already consumed."}
+            out = preparation_jobs.submit(config=automatic(config), trigger='schedule',
+                                          submit='queue', schedule_slot=slot)
+            return {"started": bool(out.get("ok")), "slot": slot, "steps": out.get("steps", [])}
+        except Exception as exc:
+            return {"started": False, "slot": slot, "reason": str(exc)}
     if not pc.claim_once("training_schedule", slot):
         return {"started": False, "reason": "Another instance has this slot."}
     try:

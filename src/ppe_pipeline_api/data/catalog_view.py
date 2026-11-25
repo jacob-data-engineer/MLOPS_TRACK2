@@ -691,6 +691,46 @@ def _finish(export_id: str, sql: str, params: tuple) -> bool | None:
                 print(f"Export {export_id}: could not record its result: {exc}")
 
 
+def reconcile_exports():
+    """Close abandoned builds after ten minutes without an owner heartbeat.
+
+    Never call a partial folder/ZIP complete or delete user data. The user may
+    retry into the exporter's usual new unique destination.
+    """
+    catalog.ensure_schema_once()
+    conn = catalog.connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE exports SET state='failed', finished_at=now(), updated_at=now(), "
+                    "stage='Interrupted; retry export', error=%s "
+                    "WHERE state IN ('building','stopping') "
+                    "AND COALESCE(updated_at, created_at) < now() - interval '10 minutes'",
+                    ('Export worker stopped responding. Output may be incomplete; retry the export into a new destination.',))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def _run_export(*args):
+    """Keep ownership fresh even during a long download or S3 upload."""
+    export_id = args[0]
+    stopped = threading.Event()
+
+    def heartbeat():
+        while not stopped.wait(30):
+            _finish(export_id, "UPDATE exports SET updated_at=now() WHERE id=%s "
+                    "AND state IN ('building','stopping')", (export_id,))
+
+    watcher = threading.Thread(target=heartbeat, name=f'export-heartbeat-{export_id}', daemon=True)
+    watcher.start()
+    try:
+        _build(*args)
+    finally:
+        stopped.set()
+        watcher.join(timeout=5)
+
+
 def start_export(kind: str, ident: str, *, destination: str = "local",
                  bucket: str = "", prefix: str = "", format: str | None = None,
                  include_metadata: bool = False, include_images: bool = True, include_model: bool = False,
@@ -763,7 +803,7 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
     except Exception:
         _building.release()
         raise
-    threading.Thread(target=_build, args=(export_id, kind, ident, label, entries, names, destination, bucket, prefix, format, metadata),
+    threading.Thread(target=_run_export, args=(export_id, kind, ident, label, entries, names, destination, bucket, prefix, format, metadata),
                      name=f"export-{export_id}", daemon=True).start()
     return {"id": export_id, "label": label, "state": "building"}
 

@@ -224,7 +224,9 @@ def test_local_yolo_evaluator_smoke_without_training_or_network(tmp_path):
         'label':'s3://fake/label.txt','label_etag':'fixed'}],'names':{0:'helmet'},'snapshot_id':'same','dataset_version_id':'saved'},
         'settings':{'imgsz':64,'ap_conf':0.001,'confidence':0.25,'nms_iou':0.7,'max_det':300},
         'models':[{'id':role,'role':role,'label':role,'uri':'s3://fake/model.pt','etag':'fixed'} for role in ('trained','baseline')]}
-    result = evaluate(manifest,tmp_path/'evaluation',SimpleNamespace(get_object=get_object))
+    result = evaluate(manifest,tmp_path/'evaluation',SimpleNamespace(get_object=get_object), output=tmp_path/'output')
+    assert list((tmp_path/'output/plots').rglob('confusion_matrix.png'))
+    assert not (tmp_path/'evaluation/results').exists()
     assert len(result['rows']) == 2 and result['validation_images'] == 1
     assert result['rows'][0]['weights_sha256'] == result['rows'][1]['weights_sha256']
     assert all(delta == 0 for delta in result['rows'][0]['delta_pp'].values())

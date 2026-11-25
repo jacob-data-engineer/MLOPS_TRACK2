@@ -21,14 +21,14 @@ test('completion panels open results and S3 link without downloads or navigation
     const page=await browser.newPage({viewport:{width:1280,height:900}});
     await page.clock.install();
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
-    let done=false, downloads=0, polls=0;
+    let done=false, downloads=0, polls=0, attempt='comparison-1';
     page.on('download',()=>downloads++);
     await page.route('**/track2/**', async route=>{
       const exports=new URL(route.request().url()).pathname.endsWith('/exports');
       if(!exports)polls++;
       await route.fulfill({json:exports ? {exports:[{id:'e1',label:'Run 72',state:done?'ready':'building',destination_uri:'s3://track2-s3/export/run-72.zip'}]} : {
         runs:[{id:'r1',label:'Test model',training_status:done?'Succeeded':'Executing',status:done?'Completed':'Pending',
-          can_compare:false,comparison:done?{result:{status:'Completed',validation_images:1788,dataset_version_id:'saved',snapshot_id:'fixed',rows:[]}}:undefined}]}});
+          can_compare:false,comparison:done?{id:attempt,status:'Completed',result:{status:'Completed',validation_images:1788,dataset_version_id:'saved',snapshot_id:'fixed',rows:[]}}:undefined}]}});
     });
     const url=`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`;
     await page.goto(url);
@@ -44,6 +44,10 @@ test('completion panels open results and S3 link without downloads or navigation
     assert.equal(page.url(),url);assert.equal(downloads,0);
     await page.clock.runFor(11000);
     assert.equal(await page.getByText('Training Succeeded: Test model').count(),1);
+    await page.locator('section').filter({hasText:'Comparison Completed: Test model'}).getByRole('button',{name:'Dismiss'}).click();
+    attempt='comparison-2';
+    await page.clock.runFor(11000);
+    await page.getByText('Comparison Completed: Test model').waitFor();
     await page.screenshot({path:path.resolve(root,'../tmp/completion-notices.png')});
     await page.reload();await page.clock.runFor(11000);
     assert.equal(await page.getByText('Training Succeeded: Test model').count(),0);

@@ -158,6 +158,12 @@ async def queue_poll_loop() -> None:
             await asyncio.to_thread(training.check_scheduled_exports)
         except Exception as exc:
             print(f"Scheduled model export check failed: {exc}")
+        try:
+            from ..data import catalog_view, catalog
+            if catalog.configured():
+                await asyncio.to_thread(catalog_view.reconcile_exports)
+        except Exception as exc:
+            print(f"Export recovery check failed: {exc}")
         # The safety net for a teardown that never ran because the process
         # died between the last job and it. Cheap when there is no endpoint:
         # one describe_endpoint that returns not-found.

@@ -20,7 +20,7 @@ export interface ComparisonMetricRow {
 }
 export interface RunComparisonSummary {
   id: string; label: string; submitted_at: string; status: string; training_status: string; can_compare: boolean;
-  comparison?: {status: string; error?: string; result?: {
+  comparison?: {id?: string; status: string; error?: string; result?: {
     status: string; rows?: ComparisonMetricRow[]; validation_images?: number;
     dataset_version_id?: string; snapshot_id?: string; ultralytics_version?: string;
     settings?: {confidence: number; ap_conf: number; imgsz: number};

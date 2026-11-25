@@ -22,7 +22,8 @@ def test_training_history_still_loads_when_catalog_is_unavailable(monkeypatch):
     def unavailable(ids):
         raise RuntimeError("catalog unavailable")
     monkeypatch.setattr(router.catalog_view, "run_numbers", unavailable)
-    assert router.training_audit(session={})["audits"] == [{"id": "run", "run_number": None}]
+    assert router.training_audit(session={})["audits"] == [{"id": "run", "run_number": None,
+                                                         "comparison_status": "No comparisons"}]
 
 
 def test_nothing_in_the_schema_drops_or_deletes():

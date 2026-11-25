@@ -63,6 +63,19 @@ def test_login_locks_out_after_max_attempts(monkeypatch):
     assert locked_out.status_code == 429
 
 
+def test_login_cooldown_expires_without_process_restart(monkeypatch):
+    monkeypatch.setenv('PPE_APP_PASSWORD', 'correct-horse')
+    clock = [100.0]
+    monkeypatch.setattr(auth_module.time, 'monotonic', lambda: clock[0])
+    client = _client()
+    for _ in range(auth_module.MAX_LOGIN_ATTEMPTS):
+        assert client.post('/auth/login', json={'password': 'wrong'}).status_code == 401
+    response = client.post('/auth/login', json={'password': 'correct-horse'})
+    assert response.status_code == 429 and int(response.headers['Retry-After']) > 0
+    clock[0] += auth_module.LOGIN_WINDOW_SECONDS + 1
+    assert client.post('/auth/login', json={'password': 'correct-horse'}).status_code == 200
+
+
 # These three used to probe /track1/hazard-types. That route was removed
 # with the PPE judge pages, and the SPA catch-all serves index.html for
 # any unmatched path -- so the request came back 200 with HTML. The two

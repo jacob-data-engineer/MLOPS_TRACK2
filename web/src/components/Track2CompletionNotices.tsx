@@ -27,6 +27,7 @@ export function Track2CompletionNotices() {
       if (runs.status === 'fulfilled') {
         for (const kind of ['training', 'comparison'] as const) {
           const detected = detectCompletions(snapshots[kind], runs.value.runs.map(r => ({id: r.id, label: r.label,
+            attempt: kind === 'comparison' ? r.comparison?.id : undefined,
             state: kind === 'training' ? r.training_status : r.status})),
             kind === 'training' ? ['Succeeded', 'Failed', 'Stopped'] : ['Completed', 'Failed', 'Unavailable']);
           snapshots[kind] = detected.snapshot;

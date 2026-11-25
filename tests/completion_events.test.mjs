@@ -19,3 +19,14 @@ test('S3 links encode object keys and reject external URI schemes', () => {
   assert.equal(s3ConsoleUrl('javascript:alert(1)'),undefined);
   assert.equal(s3ConsoleUrl('s3://track2-s3/folder/a b&c.zip'),'https://s3.console.aws.amazon.com/s3/buckets/track2-s3?prefix=folder%2Fa%20b%26c.zip&showversions=false');
 });
+
+test('a new comparison attempt notifies even when both polls see Completed', () => {
+  const first = detectCompletions({initialized:false,states:{}},
+    [{...item('run','Completed'),attempt:'comparison-1'}], ['Completed']);
+  const second = detectCompletions(first.snapshot,
+    [{...item('run','Completed'),attempt:'comparison-2'}], ['Completed']);
+  assert.equal(second.events.length, 1);
+  assert.equal(second.events[0].id, 'run');
+  assert.equal(detectCompletions(second.snapshot,
+    [{...item('run','Completed'),attempt:'comparison-2'}], ['Completed']).events.length, 0);
+});
