@@ -892,7 +892,7 @@ export function Track2DetectorsPanel({
           ticking a box before you could type a name, and meant the card
           sat greyed out for most of the time it was on screen.
 
-          Like "Your Model Names" below it and "How every run trains" at the
+          Like "Your Model Names" below it and "Training Settings" at the
           foot of the card: always available, whatever is selected. */}
       {bodyDimmed && (
         <p className="mb-2 rounded-sm border border-hairline bg-page px-2.5 py-1.5 text-xs text-ink-secondary">
@@ -1621,14 +1621,14 @@ export function Track2DetectorsPanel({
         </div>
       </div>
       {children && <div className="space-y-3">{children}</div>}
-      {/* How every run trains. Moved out of the training form so that
+      {/* Training Settings. Moved out of the training form so that
           ONE set of numbers is used by the form, by "train on this" on a
           snapshot, and by the scheduled retrain. They used to live in
           the form, which meant the schedule kept its own copy and the
           two could differ without anything saying so. */}
       <div id="track2-training-parameters" className="mt-4 rounded-md border border-black/15 p-3">
         <div className="mb-2 flex items-baseline justify-between gap-2">
-          <span className="text-xs font-medium text-ink">How every run trains</span>
+          <span className="text-xs font-medium text-ink">Training Settings</span>
           <span className="text-[11px] text-ink-muted">
             {shapeSaved ? "saved" : "unsaved -- click away to save"}
           </span>
