@@ -318,3 +318,68 @@ def test_running_other_experiment_does_not_block_pending_removal(store,monkeypat
         assert e.remove_pending(b['id'])['state']=='Cancelled'
         assert e.remove_pending(a['id'])=={'started':False}
     finally:release.set();thread.join(5)
+
+
+
+def scheduled_config():
+    prefix='/track2/multi-auto-training/'
+    return {'page_state':{prefix+'training-mode':{'trainingMode':'experiments'},
+            prefix+'scheduled-experiment':{'enabled':True,'detector_slug':'helmet','architecture':'yolo26s','baseline_arn':ARN,
+              'variants':[{'name':'One epoch','selected':True,'settings':{'epochs':1}},
+                          {'name':'Fifty epochs','selected':True,'settings':{'epochs':50}},
+                          {'name':'Not chosen','selected':False,'settings':{'epochs':100}}]}}}
+
+
+def test_schedule_uses_explicit_saved_selection_and_fresh_data():
+    config=scheduled_config();p=e.scheduled_payload(config,str(uuid.uuid4()))
+    assert [v['overrides']['epochs'] for v in p['variants']]==[1,50]
+    assert p['baseline_arn']==ARN and p['data_mode']=='prepared' and p['dataset_version_id']==''
+    config['page_state']['/track2/multi-auto-training/scheduled-experiment']['variants'][0]['settings']['epochs']=999
+    assert p['variants'][0]['overrides']['epochs']==1
+    assert e.scheduled_payload({},'id') is None
+
+
+def test_schedule_refuses_missing_variant_configuration():
+    config=scheduled_config();del config['page_state']['/track2/multi-auto-training/scheduled-experiment']
+    with pytest.raises(ValueError,match='Save the experiment'):e.scheduled_payload(config,'id')
+
+
+def test_scheduled_variants_pull_once_then_share_dataset(store,monkeypatch):
+    from ppe_pipeline_api.chain import retrain_schedule as rs
+    config=scheduled_config();p=e.scheduled_payload(config,str(uuid.uuid4()))
+    e.create(p,preparation_config=config,trigger='schedule')
+    j=e.read(p['id']);j['baseline']={'key':'base.pt'}
+    calls=[]
+    monkeypatch.setattr(e.t2,'queue_snapshot',lambda:{})
+    monkeypatch.setattr(e.pc,'pull_in_use',lambda c:True)
+    monkeypatch.setattr(e.pc,'active_run',lambda:None)
+    monkeypatch.setattr(e.pc,'new_run_id',lambda:'scheduled-pull')
+    monkeypatch.setattr(e.pc,'route_pending',lambda **kw:calls.append('pull') or {})
+    monkeypatch.setattr(rs,'combine_and_decay',lambda *a,**kw:calls.append('prepare'))
+    monkeypatch.setattr(e.data,'freeze_prepared_training',lambda *a,**kw:calls.append('freeze') or {'version_id':'shared'})
+    monkeypatch.setattr(e.data,'prepare_saved_training',lambda ident,**kw:calls.append(('replay',ident)) or {'version_id':ident})
+    monkeypatch.setattr(e.data,'version_run_fields',lambda v:{'dataset_version_id':v['version_id']})
+    monkeypatch.setattr(e.data,'mark_version',lambda *a,**kw:None)
+    monkeypatch.setattr(e,'publish',lambda j,v,entry:e.save(j))
+    e.prepare_variant(j,j['variants'][0])
+    restored=e.read(p['id']);e.prepare_variant(restored,restored['variants'][1])
+    assert calls==['pull','prepare','freeze',('replay','shared'),('replay','shared')]
+    assert e.create(p,preparation_config=config,trigger='schedule')['id']==p['id']
+    assert len(store[0].rows)==1
+
+
+@pytest.mark.parametrize('result',[{'errors':['SQL unavailable']},{'aborted':True},{'limit_reached':True}])
+def test_scheduled_pull_must_finish_before_preparation(store,monkeypatch,result):
+    from ppe_pipeline_api.chain import retrain_schedule as rs
+    p=e.scheduled_payload(scheduled_config(),str(uuid.uuid4()))
+    e.create(p,preparation_config=scheduled_config(),trigger='schedule');j=e.read(p['id'])
+    monkeypatch.setattr(e.t2,'queue_snapshot',lambda:{})
+    monkeypatch.setattr(e.pc,'pull_in_use',lambda c:True)
+    monkeypatch.setattr(e.pc,'active_run',lambda:None)
+    monkeypatch.setattr(e.pc,'new_run_id',lambda:'pull')
+    monkeypatch.setattr(e.pc,'route_pending',lambda **kw:result)
+    monkeypatch.setattr(rs,'combine_and_decay',lambda *a,**kw:pytest.fail('Premature preparation'))
+    if result.get('limit_reached'):e.prepare_variant(j,j['variants'][0])
+    else:
+        with pytest.raises(ValueError,match='pull failed'):e.prepare_variant(j,j['variants'][0])
+    assert not e.read(p['id']).get('pull_done')

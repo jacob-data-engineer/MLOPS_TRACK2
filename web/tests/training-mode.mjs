@@ -52,6 +52,11 @@ test('training mode gates editors and queues only the selected workflow with a s
   await page.getByRole('status').filter({hasText:'Submitted 2 variants.'}).waitFor();
   assert.match(launches[1].payload.name,/^helmet variants [a-f0-9]{8}$/);
   assert.equal(launches[1].kind,'experiments');assert.equal(launches[1].payload.baseline_arn,arn);assert.equal(launches[1].payload.variants.length,2);
+  assert.equal(Object.keys(config.page_state??{}).some(k=>k.endsWith('/scheduled-experiment')),false);
+  await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByRole('status').filter({hasText:'All page settings saved.'}).waitFor();
+  const schedule=Object.entries(config.page_state).find(([key])=>key.endsWith('/scheduled-experiment'))[1];
+  assert.equal(schedule.enabled,true);assert.equal(schedule.baseline_arn,arn);
+  assert.deepEqual(schedule.variants.map(v=>v.settings.epochs),[10,20]);
   await page.getByRole('checkbox',{name:'Run Ten',exact:true}).uncheck();await page.getByRole('checkbox',{name:'Run Twenty',exact:true}).uncheck();
   assert.equal(await page.getByRole('button',{name:'Add to Queue',exact:true}).isDisabled(),true);
   await page.getByRole('button',{name:'Save',exact:true}).click();await page.getByRole('status').filter({hasText:'All page settings saved.'}).waitFor();

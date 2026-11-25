@@ -89,7 +89,7 @@ def settings(raw):
     out['hyperparams'] = t2.normalize_hyperparams(out.get('hyperparams') or {})
     return out
 
-def create(payload):
+def create(payload, *, preparation_config=None, trigger="manual"):
     data.require_training_sql()
     ident = str(uuid.UUID(payload['id']))
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -115,7 +115,7 @@ def create(payload):
     if mode not in ('saved','prepared'):
         raise ValueError('Choose saved or freshly prepared data.')
     check = data.check_saved_training(payload['dataset_version_id'], detector['classes']) if mode=='saved' else {}
-    config=copy.deepcopy(pc.read_config()) if mode=='prepared' else None
+    config=copy.deepcopy(preparation_config if preparation_config is not None else pc.read_config()) if mode=='prepared' else None
     shared = settings(payload['shared'])
     variants=[]
     for index, row in enumerate(payload['variants']):
@@ -127,7 +127,7 @@ def create(payload):
     job = {'kind':KIND,'sort':ident,'id':ident,'name':payload['name'], 'request_digest':digest,
            'created_at':now(),'updated_at':now(),'state':'Pending','detector':detector,
            'architecture':payload['architecture'],'baseline_arn':baseline,
-           'data_mode':mode,'preparation_config':config,
+           'data_mode':mode,'preparation_config':config,'trigger':trigger,
            'dataset_version_id':payload['dataset_version_id'] if mode=='saved' else '', 'dataset':check,'shared':shared,
            'evaluation':payload['evaluation'],'variants':variants,'comparison_attempt':0}
     try:
@@ -185,6 +185,21 @@ def prepare_variant(job, variant):
     def progress(stage, completed, total):
         job['stage']=f"{variant['name']}: {stage}" + (f' ({completed}/{total})' if total else '')
         save(job)
+    if job.get('trigger')=='schedule' and not job.get('pull_done'):
+        config=job['preparation_config']
+        if pc.pull_in_use(config):
+            active=pc.active_run()
+            if active and active.get('status')=='running' and active.get('run_id')!=job.get('pull_run_id'):
+                progress('Waiting for current data pull to finish',0,0);return
+            progress('Pulling fresh data for scheduled experiment',0,0)
+            if not job.get('pull_run_id'):
+                job['pull_run_id']=pc.new_run_id();save(job)
+            result=pc.route_pending(config=config,trigger='training_schedule',run_id=job['pull_run_id'])
+            if result.get('errors') or result.get('aborted'):
+                raise ValueError('Scheduled experiment data pull failed; no variant was queued.')
+            if result.get('limit_reached'):
+                progress('Continuing scheduled experiment data pull',0,0);return
+        job['pull_done']=True;save(job)
     if job.get('data_mode')=='prepared' and not job.get('dataset_version_id'):
         from . import retrain_schedule as rs
         progress('Preparing shared fresh dataset for all variants',0,0)
@@ -328,3 +343,24 @@ def _remove_pending(ident):
         variant['state']='Cancelled'
     save(job)
     return public(job)
+
+
+def scheduled_payload(config, ident):
+    """Read only the explicitly saved active experiment; never infer from unrelated drafts."""
+    pages=config.get('page_state') or {}
+    prefix='/track2/multi-auto-training/'
+    if (pages.get(prefix+'training-mode') or {}).get('trainingMode')!='experiments':
+        return None
+    selected=pages.get(prefix+'scheduled-experiment') or {}
+    if not selected.get('enabled') or not all(selected.get(k) for k in ('detector_slug','architecture','baseline_arn')):
+        raise ValueError('Save the experiment model, baseline and selected variants before scheduling.')
+    variants=[v for v in selected.get('variants',[]) if v.get('selected')]
+    names=[str(v.get('name','')).strip() for v in variants]
+    if not 1<=len(variants)<=20 or not all(names) or len({n.casefold() for n in names})!=len(names):
+        raise ValueError('Save between 1 and 20 selected variants with unique names before scheduling.')
+    snapshots=[settings(v['settings']) for v in variants]
+    return {'id':ident,'name':f"Scheduled {selected['detector_slug']} variants {ident[:8]}",
+            **{k:selected[k] for k in ('detector_slug','architecture','baseline_arn')},
+            'data_mode':'prepared','dataset_version_id':'','shared':snapshots[0],
+            'evaluation':{'imgsz':snapshots[0]['img_size'],'confidence':.25,'ap_conf':.001,'nms_iou':.7,'max_det':300},
+            'variants':[{'name':name,'overrides':snapshot} for name,snapshot in zip(names,snapshots)]}

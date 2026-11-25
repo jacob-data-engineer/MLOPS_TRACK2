@@ -1,4 +1,5 @@
 """Durable preparation jobs; the browser submits and polls, the worker runs them."""
+import copy
 import contextlib
 import datetime as dt
 import os
@@ -22,7 +23,7 @@ def now():
 
 def public(job):
     return {k: job[k] for k in ('id', 'state', 'stage', 'completed', 'total', 'percent',
-            'created_at', 'updated_at', 'error', 'entry_id', 'dataset_version_id') if k in job}
+            'created_at', 'updated_at', 'error', 'entry_id', 'dataset_version_id', 'experiment_id') if k in job}
 
 
 def jobs(*, active=False):
@@ -46,8 +47,11 @@ def submit(config=None, *, trigger='manual', submit='enqueue', overrides=None, s
     ident = uuid.uuid5(uuid.NAMESPACE_URL, 'track2-training-schedule:' + schedule_slot).hex if schedule_slot else uuid.uuid4().hex
     job = {'kind': KIND, 'sort': stamp + '#' + ident, 'id': ident, 'state': 'pending',
            'stage': 'Waiting for background worker', 'percent': 0, 'completed': 0, 'total': 0,
-           'created_at': stamp, 'updated_at': stamp, 'config': config if config is not None else pc.read_config(),
+           'created_at': stamp, 'updated_at': stamp, 'config': copy.deepcopy(config if config is not None else pc.read_config()),
            'trigger': trigger, 'submit': submit, 'overrides': overrides or {}}
+    if trigger=='schedule':
+        from .training_variants import scheduled_payload
+        job['experiment_payload']=scheduled_payload(job['config'],ident)
     if schedule_slot:
         # The job itself is the claim: a lost response retries the same key,
         # and never overwrites a job already picked up by the worker.
@@ -103,6 +107,13 @@ def tick():
         table().put_item(Item=job)
     try:
         progress('Starting or resuming preparation', 0, 0)
+        if job.get('experiment_payload'):
+            from . import training_variants
+            experiment=training_variants.create(job['experiment_payload'],preparation_config=job['config'],trigger='schedule')
+            job.update(state='completed',stage='Experiment queued; worker will pull fresh data and train saved variants',
+                       percent=100,experiment_id=experiment['id'],updated_at=now())
+            table().put_item(Item=job)
+            return
         if job['trigger'] == 'schedule':
             from . import retrain_schedule as rs
             if not job.get('pull_done'):

@@ -148,3 +148,23 @@ def test_manual_jobs_rebuild_fresh_but_saved_replay_keeps_recorded_selection(wor
     monkeypatch.setattr(jobs.pc, 'route_pending', lambda **kw: pytest.fail('Manual training must not pull new SQL data'))
     jobs.tick.__wrapped__()
     assert calls == (['preserve'] if saved else ['rebuild', 'preserve'])
+
+
+
+def test_scheduled_experiment_dispatch_is_frozen_and_does_not_queue_single_run(world,monkeypatch):
+    from ppe_pipeline_api.chain import training_variants as variants
+    saved={'enabled':True,'detector_slug':'helmet','architecture':'yolo26s',
+           'baseline_arn':'arn:aws:sagemaker:ap-southeast-1:123456789012:model-package/yolo26s-helmet-detector/1',
+           'variants':[{'name':'First','selected':True,'settings':{'epochs':10}}]}
+    prefix='/track2/multi-auto-training/'
+    config={'page_state':{prefix+'training-mode':{'trainingMode':'experiments'},prefix+'scheduled-experiment':saved}}
+    response=jobs.submit(config=config,trigger='schedule',submit='queue')
+    saved['variants'][0]['settings']['epochs']=500
+    dispatched=[]
+    monkeypatch.setattr(variants,'create',lambda p,**kw:dispatched.append((p,kw)) or {'id':p['id']})
+    monkeypatch.setattr(prepared_training,'queue_prepared',lambda *a,**kw:pytest.fail('Queued a single run'))
+    jobs.tick.__wrapped__();jobs.tick.__wrapped__()
+    assert len(dispatched)==1
+    assert dispatched[0][0]['variants'][0]['overrides']['epochs']==10
+    assert dispatched[0][1]['trigger']=='schedule'
+    assert jobs.latest()['experiment_id']==response['job']['id']

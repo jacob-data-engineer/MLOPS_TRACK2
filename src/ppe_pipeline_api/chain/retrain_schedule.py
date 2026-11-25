@@ -2192,6 +2192,8 @@ def check_training_schedule(config: dict | None = None) -> dict:
             return {"started": bool(out.get("ok")), "slot": slot, "steps": out.get("steps", [])}
         except Exception as exc:
             return {"started": False, "slot": slot, "reason": str(exc)}
+    if ((config.get('page_state') or {}).get('/track2/multi-auto-training/training-mode') or {}).get('trainingMode')=='experiments':
+        return {'started':False,'slot':slot,'reason':'Scheduled experiments require the SQL background worker.'}
     if not pc.claim_once("training_schedule", slot):
         return {"started": False, "reason": "Another instance has this slot."}
     try:
