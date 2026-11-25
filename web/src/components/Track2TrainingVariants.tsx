@@ -16,7 +16,7 @@ const flatten=(s:VariantSettingsSnapshot):Record<string,unknown>=>{const {hyperp
 const copyJson=<T,>(value:T):T=>JSON.parse(JSON.stringify(value));
 const show=(v:unknown)=>v===undefined?'—':JSON.stringify(v);
 
-export function Track2TrainingVariants({active=true,detector,architecture,baseline,dataset,dataMode='saved',settings,queueRef,onQueueState}:{active?:boolean;detector:string;architecture:string;baseline:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot;queueRef?:Ref<{start:()=>Promise<void>}>;onQueueState?:(state:{count:number;blocked:boolean;name:string})=>void}){
+export function Track2TrainingVariants({active=true,detector,architecture,baseline,dataset,dataMode='saved',settings,queueRef,onQueueState}:{active?:boolean;detector:string;architecture:string;baseline:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot;queueRef?:Ref<{start:()=>Promise<string>}>;onQueueState?:(state:{count:number;blocked:boolean;name:string})=>void}){
  const [draft,setDraft]=useState<TrainingVariantDraft|null>(null),[loaded,setLoaded]=useState(false);
  const [variantName,setVariantName]=useState(''),[editing,setEditing]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -73,7 +73,7 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
  const batchBlocked=!ready||!loaded||busy||!selected.length;
  useImperativeHandle(queueRef,()=>({start}));
  useEffect(()=>{onQueueState?.({count:variants.length,blocked:batchBlocked,name:runName});},[variants.length,batchBlocked,runName,onQueueState]);
- async function start(){if(!active||batchBlocked){setError('Select at least one saved variant and a base model first.');return;}setBusy(true);setError('');try{const result=await startVariantRun(payload);setSelectedRun(result.id);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
+ async function start(){if(!active||batchBlocked){throw new Error('Select at least one saved variant and a base model first.');}setBusy(true);setError('');try{const result=await startVariantRun(payload);setSelectedRun(result.id);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');await refreshRuns();return `Submitted ${selected.length} variants. The background worker will prepare the shared data, train each variant, then compare with the base model. Training entries appear in the queue after preparation.`;}catch(e){setError(message(e));throw e;}finally{setBusy(false);}}
  async function retry(index?:number){if(!run)return;setBusy(true);try{await retryVariantRun(run.id,index);await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
  async function report(){if(!run)return;try{const doc=await getVariantReport(run.id);const url=URL.createObjectURL(new Blob([JSON.stringify(doc,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`training-variants-${run.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError(message(e));}}
  const first:Record<string,unknown>=variants[0]?flatten(variants[0].settings):{}, keys=[...new Set(variants.flatMap(v=>Object.keys(flatten(v.settings))))];

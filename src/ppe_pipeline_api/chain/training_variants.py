@@ -74,7 +74,7 @@ def save_draft(payload):
     return draft
 
 def settings(raw):
-    allowed = {'epochs','img_size','batch','seed','patience','hyperparams'}
+    allowed = {'epochs','img_size','batch','seed','patience','hyperparams','notes'}
     if set(raw)-allowed:
         raise ValueError('Unsupported training parameter.')
     out = {'epochs':20,'img_size':640,'batch':16,'seed':42,'patience':0, **raw}
@@ -84,6 +84,8 @@ def settings(raw):
         out[k] = int(out[k])
     if not 1 <= out['epochs'] <= 10000 or not 32 <= out['img_size'] <= 4096 or out['batch'] == 0 or out['batch'] < -1 or out['patience'] < 0 or not 0 <= out['seed'] <= 2**32-1:
         raise ValueError('Invalid epochs, image size, batch or patience.')
+    if 'notes' in out and not isinstance(out['notes'], str):
+        raise ValueError('Training notes must be text.')
     out['hyperparams'] = t2.normalize_hyperparams(out.get('hyperparams') or {})
     return out
 
@@ -102,8 +104,10 @@ def create(payload):
         raise ValueError('Choose a valid architecture.')
     # Validate the exact baseline version before storing a runnable experiment.
     baseline = cmp._arn(payload['baseline_arn'])
-    if baseline.split('/')[-2] != t2.detector_group_name(detector, payload['architecture']):
-        raise ValueError('Select a baseline from the chosen model name and architecture.')
+    # A registered seed can belong to another model name (including production).
+    # Match the architecture, not the destination registry name.
+    if baseline.split('/')[-2].split('-')[0] != f'yolo{generation}{size}':
+        raise ValueError('Select a baseline with the chosen model generation and size.')
     package = t2.sm.describe_model_package(ModelPackageName=baseline)
     if package.get('ModelPackageStatus') != 'Completed':
         raise ValueError('The baseline model is not ready.')

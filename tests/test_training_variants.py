@@ -47,9 +47,19 @@ def test_creation_is_idempotent_and_captures_settings(store):
     p['name']='Changed'
     with pytest.raises(ValueError,match='different'):e.create(p)
 
-def test_wrong_baseline_group_rejected(store):
+def test_registered_seed_from_another_model_name_is_allowed(store):
     p=payload();p['baseline_arn']=ARN.replace('helmet','person')
-    with pytest.raises(ValueError,match='chosen model'):e.create(p)
+    p['shared']['notes']='Compare learning rates'
+    result=e.create(p)
+    assert result['baseline_arn']==p['baseline_arn']
+    assert result['variants'][0]['settings']['notes']=='Compare learning rates'
+
+@pytest.mark.parametrize('architecture',['yolo11s','yolo26m'])
+def test_incompatible_baseline_architecture_rejected(store,architecture):
+    p=payload();p['baseline_arn']=ARN.replace('yolo26s',architecture)
+    with pytest.raises(ValueError,match='generation and size'):e.create(p)
+    assert not store[0].rows
+
 
 @pytest.mark.parametrize('bad',[{'epochs':0},{'epochs':None},{'batch':True},{'seed':-1},{'img_size':10000},{'batch':0},{'img_size':1},{'unknown':True},{'hyperparams':{'epochs':5}}])
 def test_invalid_settings_rejected(bad):

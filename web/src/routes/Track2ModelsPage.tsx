@@ -718,10 +718,17 @@ export function TrainingForm({
   // exposes both start endpoints, so this is a UI decision, not a
   // capability that has gone.
   const experiments=allowVariants&&trainingMode==="experiments";
-  const variantQueueRef=useRef<{start:()=>Promise<void>}>(null);
+  const [variantSubmission,setVariantSubmission]=useState('');
+  const variantQueueRef=useRef<{start:()=>Promise<string>}>(null);
   const [variantQueue,setVariantQueue]=useState({count:0,blocked:true,name:''});
   async function handleAddToQueue() {
-    if(experiments){if(!variantQueue.count||variantQueue.blocked){setError("Select at least one saved variant first.");return;}await variantQueueRef.current?.start();return;}
+    if(experiments){
+      setError(null);setVariantSubmission('');
+      if(!variantQueue.count||variantQueue.blocked||!variantQueueRef.current){setError("Select at least one saved variant first.");return;}
+      try{setVariantSubmission(await variantQueueRef.current.start());onSubmitted();}
+      catch(err){setError(err instanceof ApiError?err.detail:err instanceof Error?err.message:"Could not queue variants.");}
+      return;
+    }
     const parameterErrors = trainingSettingsErrors({epochs,imgSize,batch,seed,patience,hyperparams});
     if (parameterErrors.length) {setError(parameterErrors.join(' ')); return;}
     setBusy(true);
@@ -923,6 +930,7 @@ export function TrainingForm({
 
 
 
+      {experiments&&variantSubmission&&<p role="status" className="mt-3 text-sm">{variantSubmission}</p>}
       {preparationJob && (
         <div className="mt-3 rounded-md border border-black/15 bg-page p-3 text-xs"
           role="status" aria-live="polite">
