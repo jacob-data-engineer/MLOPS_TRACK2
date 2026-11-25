@@ -183,7 +183,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
              leave it empty to write back over the file you are in. */}
         <span className="font-medium text-ink">Save as</span>
         <input
-          className="tabular w-36 rounded border border-black/15 bg-page px-2 py-1"
+          className="tabular min-w-0 w-36 flex-1 rounded border border-black/15 bg-page px-2 py-1"
           placeholder={`name (saved as name${SUFFIX[scope]})`}
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -234,7 +234,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
         {files.length > 0 && (
           <>
             <select
-              className="tabular w-44 rounded border border-black/15 bg-page px-2 py-1"
+              className="tabular min-w-0 w-44 flex-1 lg:ml-8 rounded border border-black/15 bg-page px-2 py-1"
               value={picked}
               onChange={(e) => { setPicked(e.target.value); setConfirmDelete(false); }}
             >
@@ -348,18 +348,18 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
           </div>
           <span className="text-ink-muted">Pulls follow the training schedule.</span>
         </div>
-        {trigger === "clock" && <div className="mt-2 flex flex-wrap items-center gap-4">
-          <label>Every <input type="number" min={1} aria-label="Training interval in days"
+        {trigger === "clock" && <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <label className="flex min-w-0 items-center gap-2">Every <input type="number" min={1} aria-label="Training interval in days"
             value={trainEvery} onChange={e => { setTrainEvery(Number(e.target.value) || 1); setScheduleDirty(true); }}
-            className="mx-2 w-14 rounded border border-hairline bg-page px-2 py-1" /> day(s)</label>
-          <label>At (Singapore time) <input type="time" aria-label="Training time"
+            className="min-w-0 flex-1 rounded border border-hairline bg-page px-2 py-1" /> day(s)</label>
+          <label className="flex min-w-0 items-center gap-2">At (Singapore time) <input type="time" aria-label="Training time"
             value={trainAt} onChange={e => { setTrainAt(e.target.value); setScheduleDirty(true); }}
-            className="ml-2 rounded border border-hairline bg-page px-2 py-1" /></label>
-          <label>Start date (optional) <input type="date" aria-label="Training start date"
+            className="min-w-0 flex-1 rounded border border-hairline bg-page px-2 py-1" /></label>
+          <label className="flex min-w-0 items-center gap-2">Start date (optional) <input type="date" aria-label="Training start date"
             value={trainFrom} onChange={e => { setTrainFrom(e.target.value); setScheduleDirty(true); }}
-            className="ml-2 rounded border border-hairline bg-page px-2 py-1" /></label>
+            className="min-w-0 flex-1 rounded border border-hairline bg-page px-2 py-1" /></label>
         </div>}
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-ink-muted">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-ink-muted">
           <span>{trigger === "clock"
             ? "Pull fresh data, rebuild the decayed dataset, preserve it, then queue and train. Saving after the selected time schedules the next occurrence."
             : "Automatic pulls and training are off."}</span>
