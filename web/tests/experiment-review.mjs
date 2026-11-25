@@ -31,9 +31,11 @@ test('experiment queue and review include every variant, live status, comparison
  assert.equal(await queue.getByRole('progressbar',{name:'Build the combined / decayed dataset'}).getAttribute('aria-valuenow'),'50');
  assert.equal(await queue.getByRole('progressbar',{name:'Build the combined / decayed dataset'}).getAttribute('aria-valuemax'),'100');
  run={...run,dataset_version_id:'shared-data',stage:'Variant 1: Checking saved central-store files',variants:run.variants.map((v,i)=>i===0?{...v,state:'Preparing',run_id:undefined}:v)};
- await page.waitForFunction(()=>document.querySelector('[aria-label="Variant 1: check central-store files"]')?.getAttribute('aria-valuetext')==='In progress');
- assert.equal(await queue.getByRole('progressbar',{name:'Variant 1: check central-store files'}).getAttribute('aria-valuenow'),null);
+ await page.waitForFunction(()=>document.querySelector('[aria-label="Check shared central-store files"]')?.getAttribute('aria-valuetext')==='In progress');
+ assert.equal(await queue.getByRole('progressbar',{name:'Check shared central-store files'}).getAttribute('aria-valuenow'),null);
  assert.equal(await queue.getByRole('progressbar',{name:'Build the combined / decayed dataset'}).getAttribute('aria-valuenow'),'100');
+ assert.equal(await queue.getByRole('progressbar',{name:'Prepare shared training inputs once',exact:true}).count(),1);
+ assert.equal(await queue.getByRole('progressbar',{name:/rebuild training input files/}).count(),0);
  const metrics={'mAP50-95':.3,mAP50:.5,precision:.7,recall:.6,f1:.65,fp:12,fn:20,delta_pp:{'mAP50-95':0,mAP50:0,precision:0,recall:0,f1:0},per_class:[]};
  models=Array.from({length:7},(_,i)=>({model_package_arn:base+(i+1),group_name:'yolo26s-helmet-detector',registry:'helmet',generation:'26',size:'s',version:i+1,status:'Approved',metrics:{'mAP50-95':.3}}));
  run={...run,state:'Completed with failures',variants:variants.map((v,i)=>({...v,state:i===5?'Failed':'Succeeded',run_number:81+i,model_package_arn:i===5?undefined:base+(i+2),error:i===5?'Training failed':undefined})),comparison:{status:'Completed',result:{status:'Completed',rows:models.slice(0,6).map((m,i)=>({...metrics,id:m.model_package_arn,role:i===0?'baseline':'other',label:i===0?'Original base':'Registry model '+i}))}}};
