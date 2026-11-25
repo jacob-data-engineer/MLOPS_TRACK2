@@ -280,7 +280,10 @@
   {
    "id": "components/Track2BaselineChart.tsx",
    "file": "components/Track2BaselineChart.tsx",
-   "pages": [],
+   "pages": [
+    "Track2 Models",
+    "Track2 Multi-Auto Training"
+   ],
    "cards": [],
    "fields": [
     "Baseline comparison bar charts"
@@ -315,6 +318,8 @@
    "id": "components/Track2CatalogMetadata.tsx",
    "file": "components/Track2CatalogMetadata.tsx",
    "pages": [
+    "Track2 Models",
+    "Track2 Multi-Auto Training",
     "Track2 Review & Metrics"
    ],
    "cards": [
@@ -375,6 +380,8 @@
    "id": "components/Track2ComparisonExport.tsx",
    "file": "components/Track2ComparisonExport.tsx",
    "pages": [
+    "Track2 Models",
+    "Track2 Multi-Auto Training",
     "Track2 Review & Metrics"
    ],
    "cards": [],
@@ -500,6 +507,8 @@
    "id": "components/Track2ExportProgress.tsx",
    "file": "components/Track2ExportProgress.tsx",
    "pages": [
+    "Track2 Models",
+    "Track2 Multi-Auto Training",
     "Track2 Review & Metrics"
    ],
    "cards": [],
@@ -579,6 +588,8 @@
    "id": "components/Track2ModelPicker.tsx",
    "file": "components/Track2ModelPicker.tsx",
    "pages": [
+    "Track2 Models",
+    "Track2 Multi-Auto Training",
     "Track2 Review & Metrics"
    ],
    "cards": [],
@@ -748,6 +759,8 @@
    "id": "components/Track2RunSummary.tsx",
    "file": "components/Track2RunSummary.tsx",
    "pages": [
+    "Track2 Models",
+    "Track2 Multi-Auto Training",
     "Track2 Review & Metrics"
    ],
    "cards": [],
@@ -938,6 +951,40 @@
     "Training progress"
    ],
    "text": "Training progress\nEpochs completed\nTraining images processed\nTraining finished before the planned epoch limit.\nProgress updates automatically; metrics can take about a minute to arrive.\nCurrent epoch\nSucceeded\nExecuting\nWaiting for training image counts. Downloaded images are not counted as trained.\nTraining image counts were not recorded for this run."
+  },
+  {
+   "id": "components/Track2TrainingVariants.tsx",
+   "file": "components/Track2TrainingVariants.tsx",
+   "pages": [
+    "Track2 Models",
+    "Track2 Multi-Auto Training"
+   ],
+   "cards": [
+    {
+     "title": "Export variant models",
+     "caption": ""
+    }
+   ],
+   "fields": [
+    "Export variant models",
+    "Saved training variants",
+    "Variant batch name",
+    "Variant name"
+   ],
+   "text": "Export variant models\nSaved training variants\nVariant name\nVariant batch name\n([]),[modelRuns,setModelRuns]=useState\nSave training setups as variants\nPick a model and baseline above, choose one saved SQL dataset, then change the normal training settings and save each setup here. Every variant starts from that same baseline and uses the same train/validation images.\nChoose a registered starting version and use Saved SQL dataset above to save variants.\nRefresh saved variants\nUpdate variant\nCurrent settings to save\nRun?\nVariant\nActions\nEdit\nDuplicate\nRemove\nAll recorded variant settings\nBatch name\nReview selected variants\nRun selected variants\nVariant runs and comparisons\nBatch\nStatus\nCreated\nView results\nRun\nAction\nRetry variant\nResume / retry comparison\nDownload variant report (JSON)\nChoose the original baseline and trained variants, package contents and destination. The report above contains the complete comparison.\nRegistered models will appear when available."
+  },
+  {
+   "id": "components/Track2VariantResults.tsx",
+   "file": "components/Track2VariantResults.tsx",
+   "pages": [
+    "Track2 Models",
+    "Track2 Multi-Auto Training"
+   ],
+   "cards": [],
+   "fields": [
+    "Rank comparison by"
+   ],
+   "text": "Rank comparison by\nCompare training parameters\nHighlighted cells differ from the first selected variant. These are the new variants’ settings, not the baseline’s historical training settings.\nParameter\nFirst selected variant\nDifferences are percentage points from the baseline. All models use the same recorded validation images and evaluation settings.\nModel\nPer-class results"
   },
   {
    "id": "routes/LoginPage.tsx",

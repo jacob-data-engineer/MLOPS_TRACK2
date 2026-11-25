@@ -11,6 +11,21 @@ export const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export interface BaselineSelection { enabled: boolean; baseline_arn?: string; other_arns?: string[] }
+export type VariantSettingsSnapshot = {epochs:number;img_size:number;batch:number;seed:number;patience:number;hyperparams:Record<string,unknown>};
+export type SavedTrainingVariant = {id:string;name:string;settings:VariantSettingsSnapshot;selected:boolean};
+export type TrainingVariantDraft = {id:string;revision:number;detector_slug:string;architecture:string;baseline_arn:string;dataset_version_id:string;variants:SavedTrainingVariant[]};
+export interface VariantRunRecord {
+  id:string; name:string; state:string; stage?:string; error?:string; created_at:string;
+  baseline_arn:string; dataset_version_id:string; shared:Record<string,unknown>;
+  variants:{index:number;name:string;state:string;training_status?:string;run_id?:string;run_number?:number;model_package_arn?:string;error?:string;settings:Record<string,unknown>}[];
+  comparison?:RunComparisonSummary['comparison'];
+}
+export function listTrainingVariantDrafts():Promise<{drafts:TrainingVariantDraft[]}>{return apiGet('/track2/training-variants/drafts');}
+export function saveTrainingVariantDraft(payload:Omit<TrainingVariantDraft,'id'>):Promise<TrainingVariantDraft>{return apiPut('/track2/training-variants/drafts',payload);}
+export function listVariantRuns():Promise<{runs:VariantRunRecord[]}>{return apiGet('/track2/training-variants');}
+export function startVariantRun(payload:unknown):Promise<VariantRunRecord>{return apiPost('/track2/training-variants',payload);}
+export function retryVariantRun(id:string,index?:number):Promise<VariantRunRecord>{return apiPost(`/track2/training-variants/${encodeURIComponent(id)}/retry`,{index});}
+export function getVariantReport(id:string):Promise<VariantRunRecord>{return apiGet(`/track2/training-variants/${encodeURIComponent(id)}/report`);}
 export interface PtInspection {filename:string; size_bytes:number; classes:{id:number;name:string}[]; metadata:Record<string,unknown>; notice:string; registry?:Record<string,unknown>}
 export function inspectPtUpload(file:File):Promise<PtInspection> {const data=new FormData();data.append('file',file);return apiPostForm('/track2/pt-view/upload',data);}
 export function inspectPtRegistered(arn:string):Promise<PtInspection> {return apiPost('/track2/pt-view/registered',{arn});}

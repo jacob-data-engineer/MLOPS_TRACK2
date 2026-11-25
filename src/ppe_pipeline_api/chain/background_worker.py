@@ -10,6 +10,11 @@ async def preparation_loop():
             await asyncio.to_thread(preparation_jobs.tick)
         except Exception as exc:
             print(f'Preparation worker: {exc}', flush=True)
+        try:
+            from . import training_variants
+            await asyncio.to_thread(training_variants.tick)
+        except Exception as exc:
+            print(f'Training variants worker: {exc}', flush=True)
         await asyncio.sleep(3)
 
 

@@ -109,6 +109,7 @@ export function App() {
         <Route path="/track2/lineage" element={<Track2LineagePage />} />
         <Route path="/track2/metrics" element={<Track2MetricsPage />} />
         <Route path="/track2/pt-view" element={<Track2PtViewPage />} />
+        <Route path="/track2/experiments" element={<Navigate to="/track2/multi-auto-training" replace />} />
         <Route path="/track2/deploy" element={<Track2DeployPage />} />
         <Route path="/track2/eval" element={<Track2EvalPage />} />
         {/* Inference folded into Deploy (one endpoint-status banner, one

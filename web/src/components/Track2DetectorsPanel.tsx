@@ -25,6 +25,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { Track2TrainingAdvanced, effectiveHyperparams }
   from "./Track2TrainingAdvanced";
 import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
+import { useCardOpen } from "../lib/cardState";
 
 /** What a detector's model is, when nothing has been chosen. */
 const FALLBACK_GENERATIONS: Track2Generation[] = [
@@ -235,6 +236,23 @@ export function Track2DetectorsPanel({
   // before this existed has no such key, and those runs must go on
   // behaving exactly as they did.
   const [hyperparamsOn, setHyperparamsOn] = useState(false);
+  const [,openModelCard] = useCardOpen('model types and model names',false);
+
+  useEffect(() => {
+    const editVariant = (event: Event) => {
+      const settings = (event as CustomEvent<{epochs:number;img_size:number;batch:number;seed:number;patience:number;hyperparams:ReturnType<typeof effectiveHyperparams>}>).detail;
+      const next = {epochs:settings.epochs,imgSize:settings.img_size,batch:settings.batch,
+        seed:settings.seed,patience:settings.patience,notes:shape.notes};
+      setShape(next);setShapeSaved(false);
+      setHyperparams(Object.fromEntries(Object.entries(settings.hyperparams).map(([key,value])=>[key,Array.isArray(value)?value.join(','):String(value)])));
+      setHyperparamsOn(true);
+      onTraining?.({...next,hyperparams:settings.hyperparams});
+      openModelCard(true);
+      window.setTimeout(()=>document.getElementById('track2-training-parameters')?.scrollIntoView({behavior:'smooth',block:'center'}),100);
+    };
+    window.addEventListener('track2-edit-training-variant',editVariant);
+    return () => window.removeEventListener('track2-edit-training-variant',editVariant);
+  }, [onTraining,shape.notes]);
 
   const [found, setFound] = useState<{ index: number; name: string }[]>([]);
   const [keep, setKeep] = useState<number[]>([]);
@@ -1608,7 +1626,7 @@ export function Track2DetectorsPanel({
           snapshot, and by the scheduled retrain. They used to live in
           the form, which meant the schedule kept its own copy and the
           two could differ without anything saying so. */}
-      <div className="mt-4 rounded-md border border-black/15 p-3">
+      <div id="track2-training-parameters" className="mt-4 rounded-md border border-black/15 p-3">
         <div className="mb-2 flex items-baseline justify-between gap-2">
           <span className="text-xs font-medium text-ink">How every run trains</span>
           <span className="text-[11px] text-ink-muted">

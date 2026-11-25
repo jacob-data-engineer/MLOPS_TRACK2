@@ -1,4 +1,5 @@
 import { Track2TrainingDataFile } from "../components/Track2TrainingDataFile";
+import { Track2TrainingVariants } from "../components/Track2TrainingVariants";
 import { Track2RecordingProgress } from '../components/Track2RecordingProgress';
 import { trainingSettingsErrors } from '../lib/trainingValidation';
 import { Track2TrainingDataChoice, type TrainingDataChoice } from "../components/Track2TrainingDataChoice";
@@ -369,6 +370,7 @@ export function TrainingForm({
   setSelection,
   onSubmitted,
   detectorsVersion,
+  allowVariants = false,
 }: {
   selection: TrainingSelection;
   setSelection: (patch: Partial<TrainingSelection>) => void;
@@ -381,6 +383,7 @@ export function TrainingForm({
   /** Bumped when the Detectors panel saves or deletes one, so the picker
    * below is never offering a list that no longer exists. */
   detectorsVersion: number;
+  allowVariants?: boolean;
 }) {
   const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
@@ -938,6 +941,12 @@ export function TrainingForm({
         </button>
       </div>
       </fieldset>
+
+      {allowVariants && <Track2TrainingVariants
+        key={`${detectorSlug}|${architecture}|${basePackageArn}|${dataChoice.mode}|${dataChoice.id}`}
+        detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
+        dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
+        settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} />}
 
       {/* Automatic queueing uses the prepared dataset too. */}
       <div className="mt-3 rounded-md border border-black/15 p-3">
@@ -1601,6 +1610,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             setSelection={setSelection}
             onSubmitted={handleSubmitted}
             detectorsVersion={detectorsVersion}
+            allowVariants={multi}
           />
 
           {/* The pull queue is on the Data Preparation tab now, with the
