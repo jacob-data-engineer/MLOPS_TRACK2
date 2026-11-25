@@ -60,22 +60,22 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,s
  return <section aria-label="Saved training variants" className="mt-5 space-y-4 rounded border border-hairline p-4">
   <h3 className="font-semibold">Save training setups as variants</h3>
   <p className="text-xs">Pick a model and baseline above, choose one saved SQL dataset, then change the normal training settings and save each setup here. Every variant starts from that same baseline and uses the same train/validation images.</p>
-  {!ready&&<p role="status" className="text-xs">Choose a registered starting version and use Saved SQL dataset above to save variants.</p>}
+  {!ready&&<p role="status" className="text-xs">You can enter names now. To save or run variants, choose a registered starting version and a Saved SQL dataset above.</p>}
   {error&&<p role="alert" className="text-critical">{error}</p>}{notice&&<p role="status" className="text-xs">{notice}</p>}
   <button type="button" disabled={busy} className="underline text-xs" onClick={()=>void refreshDraft()}>Refresh saved variants</button>
-  <fieldset disabled={!ready||!loaded||busy} className="min-w-0 space-y-3">
+  <fieldset disabled={busy} className="min-w-0 space-y-3">
    <p className="break-all text-xs">Baseline: {baseline||'Not selected'}<br/>Dataset: {dataset||'Not selected'}</p>
    <label className="block">Variant name <input aria-label="Variant name" maxLength={100} className="rounded border p-2" value={variantName} onChange={e=>setVariantName(e.target.value)}/></label>
    <div className="flex flex-wrap gap-3">
-    <button type="button" disabled={!variantName.trim()||variants.length>=20} className="rounded border px-3 py-2" onClick={()=>void save(true)}>{editing?'Save as new variant':'Save as variant'}</button>
-    {editing&&variants.some(v=>v.id===editing)&&<button type="button" disabled={!variantName.trim()} className="rounded border px-3 py-2" onClick={()=>void save(false)}>Update variant</button>}
+    <button type="button" disabled={!ready||!loaded||!variantName.trim()||variants.length>=20} className="rounded border px-3 py-2" onClick={()=>void save(true)}>{editing?'Save as new variant':'Save as variant'}</button>
+    {editing&&variants.some(v=>v.id===editing)&&<button type="button" disabled={!ready||!loaded||!variantName.trim()} className="rounded border px-3 py-2" onClick={()=>void save(false)}>Update variant</button>}
    </div>
    <details><summary>Current settings to save</summary><pre className="max-h-72 overflow-auto text-xs">{JSON.stringify(frozen,null,2)}</pre></details>
    <p className="text-xs">{variants.length}/20 saved variants. Highlighted values differ from the first saved variant. All displayed training defaults are captured. Saving does not start training.</p>
    <div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Run?</th><th>Variant</th>{columns.map(k=><th key={k} className="px-2">{k}</th>)}<th>Actions</th></tr></thead><tbody>{variants.map(v=><tr key={v.id} className="border-t"><td><input aria-label={`Run ${v.name}`} type="checkbox" checked={v.selected} onChange={e=>void persist(variants.map(row=>row.id===v.id?{...row,selected:e.target.checked}:row))}/></td><th className="p-2">{v.name}</th>{columns.map(k=><td key={k} className={`p-2 ${show(flatten(v.settings)[k])!==show(first[k])?'bg-amber-100':''}`}>{show(flatten(v.settings)[k])}</td>)}<td className="whitespace-nowrap space-x-3"><button type="button" className="underline" onClick={()=>edit(v)}>Edit</button><button type="button" disabled={variants.length>=20} className="underline" onClick={()=>duplicate(v)}>Duplicate</button><button type="button" className="underline" onClick={()=>void persist(variants.filter(row=>row.id!==v.id))}>Remove</button></td></tr>)}</tbody></table></div>
    <details><summary>All recorded variant settings</summary><pre className="max-h-72 overflow-auto text-xs">{JSON.stringify(variants,null,2)}</pre></details>
    <label>Batch name <input aria-label="Variant batch name" className="rounded border p-2" value={batchName} onChange={e=>{setBatchName(e.target.value);setReview(false);}} placeholder={`${detector} variants`}/></label>
-   <button type="button" disabled={!selected.length} className="ml-3 rounded border px-3 py-2" onClick={()=>setReview(true)}>Review selected variants</button>
+   <button type="button" disabled={!ready||!loaded||!selected.length} className="ml-3 rounded border px-3 py-2" onClick={()=>setReview(true)}>Review selected variants</button>
   </fieldset>
   {review&&<div className="rounded border p-3"><p>{selected.length} training jobs followed by one comparison with the original baseline. AWS charges apply. This uses the saved variants, not unsaved edits in the settings above.</p><ul>{selected.map(v=><li key={v.id}>{v.name}: {v.settings.epochs} epochs</li>)}</ul><button type="button" disabled={busy} className="mt-2 rounded bg-ink px-3 py-2 text-white" onClick={()=>void start()}>Run selected variants</button></div>}
   {!!runs.length&&<div className="space-y-3"><h3 className="font-semibold">Variant runs and comparisons</h3><div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Batch</th><th>Status</th><th>Created</th><th/></tr></thead><tbody>{runs.map(r=><tr key={r.id}><td>{r.name}</td><td>{r.state}</td><td>{r.created_at}</td><td><button type="button" className="underline" onClick={()=>setSelectedRun(r.id)}>View results</button></td></tr>)}</tbody></table></div>

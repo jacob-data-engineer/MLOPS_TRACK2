@@ -177,8 +177,8 @@ function QueueEntryBlock({
     >
       <div className="min-w-0 flex-1">
         <div className="mb-1.5 flex items-center gap-2">
-          <Badge tone={running ? "pending" : "neutral"} label={running ? "Running" : `Queued #${position}`} />
-          <span className="text-xs text-ink-muted">{entry.comparison?.enabled ? 'Comparison after training' : 'No comparisons'}</span>
+          <Badge tone={running ? "pending" : "neutral"} label={entry.experiment_id ? (running ? "Variant running" : `Variant queued #${position}`) : (running ? "Running" : `Queued #${position}`)} />
+          <span className="text-xs text-ink-muted">{entry.experiment_id ? 'Comparison after variant batch' : entry.comparison?.enabled ? 'Comparison after training' : 'No comparisons'}</span>
           {running && runPhase(progress) && (
             <span className="text-xs font-medium text-ink">{runPhase(progress)}</span>
           )}
@@ -920,6 +920,12 @@ export function TrainingForm({
         onChange={comparison => setSelection({comparison})} disabled={busy || preparing || restoringComparison}/>
       {restoringComparison && <p role="status" className="text-xs">Restoring saved comparison selections…</p>}
       {comparisonRestoreError && <p role="alert" className="text-xs text-critical">{comparisonRestoreError}</p>}
+      </fieldset>
+      {allowVariants && <Track2TrainingVariants
+        key={`${detectorSlug}|${architecture}|${basePackageArn}|${dataChoice.mode}|${dataChoice.id}`}
+        detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
+        dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
+        settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} />}
       <div className="mt-3 flex gap-2">
         <button
           type="button"
@@ -940,13 +946,8 @@ export function TrainingForm({
           Start All Over
         </button>
       </div>
-      </fieldset>
 
-      {allowVariants && <Track2TrainingVariants
-        key={`${detectorSlug}|${architecture}|${basePackageArn}|${dataChoice.mode}|${dataChoice.id}`}
-        detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
-        dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
-        settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} />}
+
 
       {/* Automatic queueing uses the prepared dataset too. */}
       <div className="mt-3 rounded-md border border-black/15 p-3">

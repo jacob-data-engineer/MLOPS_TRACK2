@@ -11,7 +11,7 @@ test('normal training controls save isolated variants without launching, restore
  await writeFile(path.join(harness,'index.html'),'<div id="root"></div><script type="module" src="./main.tsx"></script>');
  const arn='arn:aws:sagemaker:ap-southeast-1:123456789012:model-package/yolo26s-helmet-detector/9';
  await writeFile(path.join(harness,'main.tsx'),`import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {Track2DetectorsPanel} from '../src/components/Track2DetectorsPanel';import {Track2TrainingVariants} from '../src/components/Track2TrainingVariants';import '../src/index.css';
- function Harness(){const [s,setS]=useState({epochs:20,img_size:640,batch:16,seed:42,patience:0,hyperparams:{}});const [dataset,setDataset]=useState('saved-data');return <><Track2DetectorsPanel onTraining={t=>setS({epochs:t.epochs,img_size:t.imgSize,batch:t.batch,seed:t.seed,patience:t.patience,hyperparams:t.hyperparams})}/><button onClick={()=>setDataset(dataset==='saved-data'?'other-data':'saved-data')}>Switch dataset</button><Track2TrainingVariants key={dataset} detector="helmet" architecture="yolo26s" baseline="${arn}" dataset={dataset} settings={s}/></>;}createRoot(document.getElementById('root')).render(<Harness/>);`);
+ function Harness(){const [s,setS]=useState({epochs:20,img_size:640,batch:16,seed:42,patience:0,hyperparams:{}});const [dataset,setDataset]=useState('');return <><Track2DetectorsPanel onTraining={t=>setS({epochs:t.epochs,img_size:t.imgSize,batch:t.batch,seed:t.seed,patience:t.patience,hyperparams:t.hyperparams})}/><button onClick={()=>setDataset(dataset==='saved-data'?'other-data':'saved-data')}>Switch dataset</button><Track2TrainingVariants key={dataset} detector="helmet" architecture="yolo26s" baseline="${arn}" dataset={dataset} settings={s}/></>;}createRoot(document.getElementById('root')).render(<Harness/>);`);
  let server,browser,drafts=[],runs=[],launches=[];
  try{
   server=await createServer({root,server:{host:'127.0.0.1',port:0}});await server.listen();
@@ -33,6 +33,11 @@ test('normal training controls save isolated variants without launching, restore
    return route.fulfill({json:body});
   });
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`);
+  await page.getByLabel('Variant name',{exact:true}).fill('Name before dataset');
+  await page.getByLabel('Variant batch name').fill('Batch before dataset');
+  assert.equal(await page.getByRole('button',{name:'Save as variant',exact:true}).isDisabled(),true);
+  assert.equal(await page.getByRole('button',{name:'Review selected variants',exact:true}).isDisabled(),true);
+  await page.getByRole('button',{name:'Switch dataset',exact:true}).click();
   await page.getByLabel('Variant name',{exact:true}).fill('Reference settings');
   await page.getByRole('button',{name:'Save as variant',exact:true}).click();
   await page.getByRole('checkbox',{name:'Run Reference settings',exact:true}).waitFor();
@@ -55,6 +60,7 @@ test('normal training controls save isolated variants without launching, restore
   await first.getByRole('cell',{name:'15',exact:true}).waitFor();
   assert.deepEqual(drafts[0].variants.map(v=>v.settings.epochs),[15,30]);
   await page.reload();
+  await page.getByRole('button',{name:'Switch dataset',exact:true}).click();
   await page.getByRole('checkbox',{name:'Run Longer training',exact:true}).waitFor();
   assert.deepEqual(drafts[0].variants.map(v=>v.settings.epochs),[15,30]);
   await page.getByRole('button',{name:'Switch dataset',exact:true}).click();
@@ -63,11 +69,12 @@ test('normal training controls save isolated variants without launching, restore
   await page.getByRole('checkbox',{name:'Run Longer training',exact:true}).waitFor();
   await page.getByRole('checkbox',{name:'Run Reference settings',exact:true}).click();
   await page.waitForFunction(()=>!document.querySelector('input[aria-label="Run Reference settings"]')?.checked);
+  await page.getByLabel('Variant batch name').fill('Parameter comparison');
   await page.getByRole('button',{name:'Review selected variants',exact:true}).click();
   assert.equal(launches.length,0);
   await page.getByRole('button',{name:'Run selected variants',exact:true}).click();
   await page.getByRole('cell',{name:'Run 74',exact:true}).waitFor();
-  assert.equal(launches.length,1);assert.equal(launches[0].baseline_arn,arn);assert.equal(launches[0].dataset_version_id,'saved-data');
+  assert.equal(launches[0].name,'Parameter comparison');assert.equal(launches.length,1);assert.equal(launches[0].baseline_arn,arn);assert.equal(launches[0].dataset_version_id,'saved-data');
   assert.equal(launches[0].variants.length,1);assert.equal(launches[0].variants[0].overrides.epochs,30);
   assert.deepEqual(errors,[]);
   await page.getByRole('heading',{name:'Save training setups as variants'}).scrollIntoViewIfNeeded();

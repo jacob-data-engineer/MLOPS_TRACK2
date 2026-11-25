@@ -376,6 +376,7 @@ export interface Track2GpuJob {
 }
 
 export interface Track2QueueEntry {
+  experiment_id?: string;
   comparison?: BaselineSelection;
   /** The folders the images actually came from, resolved at queue time.
    * Absent when the dataset was not assembled -- then dataset_folder is
