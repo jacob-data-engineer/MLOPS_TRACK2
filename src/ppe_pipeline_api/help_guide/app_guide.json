@@ -37,6 +37,11 @@
    "file": "routes/Track2MetricsPage.tsx"
   },
   {
+   "path": "/track2/pt-view",
+   "name": "PT View",
+   "file": "routes/Track2PtViewPage.tsx"
+  },
+  {
    "path": "/track2/deploy",
    "name": "Track2 Deploy",
    "file": "routes/Track2DeployPage.tsx"
@@ -184,6 +189,7 @@
    "fields": [
     "Close navigation",
     "Open navigation",
+    "PT View",
     "Track2 Data Preparation",
     "Track2 Help",
     "Track2 Multi-Auto Training",
@@ -192,7 +198,7 @@
     "Track2 SQL Database Query",
     "Track2 Scheduled - prototype"
    ],
-   "text": "Open navigation\nClose navigation\nTrack2 SQL Database Query\nTrack2 Data Preparation\nTrack2 Multi-Auto Training\nTrack2 Review & Metrics\nTrack2 Scheduled - prototype\nTrack2 Notifications\nTrack2 Help\nTraining and Development\nJurong Port · case review\nLog out\nThis page is out of date.\nReload\nIn use\nPrototype -- still changing\nKept in view -- not being worked on\nYou have an unsaved annotation. Leave anyway?"
+   "text": "Open navigation\nClose navigation\nTrack2 SQL Database Query\nTrack2 Data Preparation\nTrack2 Multi-Auto Training\nTrack2 Review & Metrics\nPT View\nTrack2 Scheduled - prototype\nTrack2 Notifications\nTrack2 Help\nTraining and Development\nJurong Port · case review\nLog out\nThis page is out of date.\nReload\nIn use\nPrototype -- still changing\nKept in view -- not being worked on\nYou have an unsaved annotation. Leave anyway?"
   },
   {
    "id": "components/RouteBoundary.tsx",
@@ -1174,6 +1180,28 @@
     "name@example.com"
    ],
    "text": "Add a subscriber\nSubscribers\nname@example.com\nKIV\nKept in view -- not sent yet. It becomes selectable once the evaluation step publishes its metrics.\nTrack2 Notifications\nEmail subscribers, and what each one is told about: training starting, training ending, and errors. Drift review alerts, weights approved and pull summaries still go to everyone.\nSend them\nLoading...\nNo subscribers yet.\nRemove\nexpires on its own in 3 days\nCouldn't load subscribers.\nSubscribe failed.\nCould not save that subscriber's choices.\nRemove failed.\nThey'll receive a confirmation email and must click the link before notifications start.\nCould not read this subscriber's choices.\nTheir choices were set when they were added, and can be changed once they confirm."
+  },
+  {
+   "id": "routes/Track2PtViewPage.tsx",
+   "file": "routes/Track2PtViewPage.tsx",
+   "pages": [
+    "PT View"
+   ],
+   "cards": [
+    {
+     "title": "Choose a checkpoint",
+     "caption": ""
+    },
+    {
+     "title": "Recorded metadata",
+     "caption": ""
+    }
+   ],
+   "fields": [
+    "Choose a checkpoint",
+    "Recorded metadata"
+   ],
+   "text": "Choose a checkpoint\nRecorded metadata\nPT View\nExplore checkpoint classes and recorded metadata. Inspection does not train, register or modify the model. Uploaded files are not saved.\nUploaded .pt file\nRegistered model\nCheckpoint file (.pt, up to 512 MB)\nChoose a model version\nClass ID\nClass name\nNo additional metadata was recorded."
   },
   {
    "id": "routes/Track2ScheduledPage.tsx",

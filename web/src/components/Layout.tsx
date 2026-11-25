@@ -65,6 +65,7 @@ const NAV_ITEMS: NavItem[] = [
   // Every run and dataset version, their files, and exports (2026-10-29).
   { to: "/track2/multi-auto-training", label: "Track2 Multi-Auto Training", icon: Layers, status: "ready" },
   { to: "/track2/metrics", label: "Track2 Review & Metrics", icon: BarChart3, status: "prototype" },
+  { to: "/track2/pt-view", label: "PT View", icon: BarChart3, status: "prototype" },
   // What the clocks will start, and when -- read-only, every control
   // stays on Multi-Auto Training.
   { to: "/track2/scheduled", label: "Track2 Scheduled - prototype", icon: CalendarDays, status: "prototype" },

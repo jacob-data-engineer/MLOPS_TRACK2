@@ -34,6 +34,7 @@ from .routers import (
     track2_lineage,
     track2_metrics,
     track2_comparisons,
+    track2_pt_view,
     track2_assistant,
     track2_models,
     track2_notifications,
@@ -138,6 +139,7 @@ app.include_router(track2_schedule.router, prefix="/track2/schedule", tags=["tra
 app.include_router(track2_lineage.router, prefix="/track2/lineage", tags=["track2-lineage"])
 app.include_router(track2_metrics.router, prefix="/track2/metrics", tags=["track2-metrics"])
 app.include_router(track2_comparisons.router, prefix="/track2/comparisons", tags=["track2-comparisons"])
+app.include_router(track2_pt_view.router, prefix="/track2/pt-view", tags=["track2-pt-view"])
 # The in-app help guide (2026-11-20): read-only, off until HELP_CHAT_ENABLED.
 app.include_router(track2_assistant.router, prefix="/track2/assistant", tags=["track2-assistant"])
 app.include_router(track2_deploy.router, prefix="/track2/deploy", tags=["track2-deploy"])

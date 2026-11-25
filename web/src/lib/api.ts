@@ -11,6 +11,9 @@ export const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export interface BaselineSelection { enabled: boolean; baseline_arn?: string; other_arns?: string[] }
+export interface PtInspection {filename:string; size_bytes:number; classes:{id:number;name:string}[]; metadata:Record<string,unknown>; notice:string; registry?:Record<string,unknown>}
+export function inspectPtUpload(file:File):Promise<PtInspection> {const data=new FormData();data.append('file',file);return apiPostForm('/track2/pt-view/upload',data);}
+export function inspectPtRegistered(arn:string):Promise<PtInspection> {return apiPost('/track2/pt-view/registered',{arn});}
 export interface BaselineVersion { arn: string; version: number; label: string }
 export interface ComparisonMetricRow {
   id: string; role: string; label: string;
