@@ -721,7 +721,7 @@ export function TrainingForm({
   const variantQueueRef=useRef<{start:()=>Promise<void>}>(null);
   const [variantQueue,setVariantQueue]=useState({count:0,blocked:true,name:''});
   async function handleAddToQueue() {
-    if(experiments){if(!variantQueue.count||variantQueue.blocked){setError("Save a batch with at least one selected variant first.");return;}await variantQueueRef.current?.start();return;}
+    if(experiments){if(!variantQueue.count||variantQueue.blocked){setError("Select at least one saved variant first.");return;}await variantQueueRef.current?.start();return;}
     const parameterErrors = trainingSettingsErrors({epochs,imgSize,batch,seed,patience,hyperparams});
     if (parameterErrors.length) {setError(parameterErrors.join(' ')); return;}
     setBusy(true);
@@ -899,7 +899,7 @@ export function TrainingForm({
         dataMode={dataChoice.mode}
         dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
         settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} /></fieldset>}
-      {experiments&&variantQueue.count>0&&<p className="mt-3 text-xs">Add to Queue will run the saved variant batch: {variantQueue.name||"Save a batch name first"}.</p>}
+      {experiments&&variantQueue.count>0&&<p className="mt-3 text-xs">Add to Queue will train the selected variants and then compare them with the chosen base model.</p>}
       <div className="mt-3 flex gap-2">
         <button
           type="button"

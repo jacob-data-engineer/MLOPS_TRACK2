@@ -230,3 +230,27 @@ def test_batch_name_is_saved_without_starting_work(draft_store):
     assert saved['batch_name']=='My batch'
     assert saved['variants'][0]['selected']
     assert draft_store[1].rows=={}
+
+def test_worker_trains_variants_in_order_then_compares_with_original_base(store, monkeypatch):
+    j = job(store)
+    j['baseline'] = {'id': ARN, 'key': 'fixed/base.pt', 'uri': 's3://bucket/fixed/base.pt', 'etag': 'fixed', 'role': 'baseline', 'label': 'Base'}
+    actions = []
+    def prepare(current, variant):
+        actions.append(('train', variant['index'], current['baseline']['id'], current['dataset_version_id']))
+        variant.update(state='Queued', run_id=f"run-{variant['index']}", entry_id=f"entry-{variant['index']}")
+        e.save(current)
+    def compare(current, successful):
+        actions.append(('compare', [v['index'] for v in successful], current['baseline']['id'], current['dataset_version_id']))
+        current['state'] = 'Completed'
+        e.save(current)
+    monkeypatch.setattr(e, 'prepare_variant', prepare)
+    monkeypatch.setattr(e, 'compare', compare)
+    monkeypatch.setattr(e.t2, 'queue_snapshot', lambda: {'running': {'id': 'active'}})
+    e.advance(j)
+    e.advance(e.read(j['id']))  # Still running: no next variant and no comparison.
+    assert len(actions) == 1
+    for index in range(2):
+        store[1].put_item(Item={'id': f'run-{index}', 'status': 'Succeeded', 'model': {'model_package_arn': ARN[:-1] + str(index + 10)}})
+        e.advance(e.read(j['id']))
+    assert actions == [('train', 0, ARN, 'fixed-dataset'), ('train', 1, ARN, 'fixed-dataset'), ('compare', [0, 1], ARN, 'fixed-dataset')]
+    assert e.read(j['id'])['state'] == 'Completed'

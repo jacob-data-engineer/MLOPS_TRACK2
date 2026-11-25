@@ -13,7 +13,7 @@ test('training mode gates editors and queues only the selected workflow with a s
  function Harness(){const [mode,setMode]=useState('single');usePageSnapshot('training-mode',{trainingMode:mode},v=>setMode(v.trainingMode));const [selection,setSelection]=useState({epochs:25,imgSize:640,batch:8,seed:42,patience:10,hyperparams:{},datasetFolder:'',evalFolder:'',detectorSlug:'helmet',architecture:'yolo11s',basePackageArn:'${arn}',notes:''});return <><PageSaveBar/><Track2DetectorsPanel trainingDisabled={mode==='experiments'}><Track2BaseModelPicker detectorSlug="helmet" detectorLabel="Helmet" architecture="yolo11s" generation="11" size="s" groupName="helmet" value={selection.basePackageArn} onChange={a=>setSelection(s=>({...s,basePackageArn:a}))} modeControl={<Track2TrainingMode value={mode} onChange={setMode}/>}/></Track2DetectorsPanel><TrainingForm selection={selection} setSelection={p=>setSelection(s=>({...s,...p}))} onSubmitted={()=>{}} detectorsVersion={0} allowVariants trainingMode={mode}/></>;}createRoot(document.getElementById('root')).render(<Harness/>);`);
  let browser,server,config={default_training:{epochs:25,img_size:640,batch:8,seed:42,patience:10},central_store:{folder:'site'},dataset_assemble:{train_sources:['site'],label_classes:{0:'helmet'}},card_state:{'start the training run':true,'model types and model names':true}},launches=[];
  const settings={epochs:10,img_size:640,batch:8,seed:42,patience:10,hyperparams:{}};
- let draft={id:'draft',revision:1,batch_name:'Study',baseline_arn:arn,data_mode:'prepared',dataset_version_id:'',detector_slug:'helmet',architecture:'yolo11s',variants:[{id:'a',name:'Ten',selected:true,settings},{id:'b',name:'Twenty',selected:true,settings:{...settings,epochs:20}}]};
+ let draft={id:'draft',revision:1,batch_name:'',baseline_arn:arn,data_mode:'prepared',dataset_version_id:'',detector_slug:'helmet',architecture:'yolo11s',variants:[{id:'a',name:'Ten',selected:true,settings},{id:'b',name:'Twenty',selected:true,settings:{...settings,epochs:20}}]};
  try{
   server=await createServer({root,server:{host:'127.0.0.1',port:0}});await server.listen();browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/track2/**',async route=>{const req=route.request(),p=new URL(req.url()).pathname;let body={};
@@ -44,6 +44,7 @@ test('training mode gates editors and queues only the selected workflow with a s
   assert.equal(await page.getByLabel('Variant name',{exact:true}).isEnabled(),true);
   assert.equal(await page.locator('input[name="track2-base-package"]').isEnabled(),true);
   await page.getByRole('button',{name:'Add to Queue',exact:true}).click();
+  assert.match(launches[1].payload.name,/^helmet variants [a-f0-9]{8}$/);
   assert.equal(launches[1].kind,'experiments');assert.equal(launches[1].payload.baseline_arn,arn);assert.equal(launches[1].payload.variants.length,2);
   await page.getByRole('checkbox',{name:'Run Ten',exact:true}).uncheck();await page.getByRole('checkbox',{name:'Run Twenty',exact:true}).uncheck();
   assert.equal(await page.getByRole('button',{name:'Add to Queue',exact:true}).isDisabled(),true);

@@ -17,21 +17,20 @@ const copyJson=<T,>(value:T):T=>JSON.parse(JSON.stringify(value));
 const show=(v:unknown)=>v===undefined?'—':JSON.stringify(v);
 
 export function Track2TrainingVariants({active=true,detector,architecture,baseline,dataset,dataMode='saved',settings,queueRef,onQueueState}:{active?:boolean;detector:string;architecture:string;baseline:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot;queueRef?:Ref<{start:()=>Promise<void>}>;onQueueState?:(state:{count:number;blocked:boolean;name:string})=>void}){
- const [batchDirty,setBatchDirty]=useState(false);
  const [draft,setDraft]=useState<TrainingVariantDraft|null>(null),[loaded,setLoaded]=useState(false);
  const [variantName,setVariantName]=useState(''),[editing,setEditing]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
- const [runId,setRunId]=useState(uuid),[batchName,setBatchName]=useState('');
+ const [runId,setRunId]=useState(uuid);
  const [runs,setRuns]=useState<VariantRunRecord[]>([]),[selectedRun,setSelectedRun]=useState('');
  const [models,setModels]=useState<Track2MetricsRow[]>([]),[modelRuns,setModelRuns]=useState<Record<string,Track2RunForModel>>({});
  const [exportSettings,setExportSettings]=useState<Track2ExportSettings>({registry:'',generation:'',size:'',group_name:'',criterion:'mAP50',destination:'s3',bucket:'',prefix:'',retention:'keep_all',include_metadata:true,metadata_groups:[]});
  const [localSettings,setLocalSettings]=useState(()=>copyJson(settings));
  useEffect(()=>setLocalSettings(copyJson(settings)),[JSON.stringify(settings)]);
-  usePageSnapshot(`variant-editor/${detector}/${architecture}/${baseline}/${dataMode}/${dataset}`,{variantName,editing,batchName,localSettings,selectedRun,exportSettings,variants:draft?.variants??[]},v=>{setVariantName(v.variantName);setEditing(v.editing);setBatchName(v.batchName);setLocalSettings(v.localSettings);setSelectedRun(v.selectedRun);setExportSettings(v.exportSettings);setDraft(current=>({...context,...current,variants:v.variants??[],revision:current?.revision??0,batch_name:v.batchName,id:current?.id??""}));setBatchDirty(true);},loaded);
+  usePageSnapshot(`variant-editor/${detector}/${architecture}/${baseline}/${dataMode}/${dataset}`,{variantName,editing,localSettings,selectedRun,exportSettings,variants:draft?.variants??[]},v=>{setVariantName(v.variantName);setEditing(v.editing);setLocalSettings(v.localSettings);setSelectedRun(v.selectedRun);setExportSettings(v.exportSettings);setDraft(current=>({...context,...current,variants:v.variants??[],revision:current?.revision??0,batch_name:current?.batch_name??"",id:current?.id??""}));},loaded);
  const ready=Boolean(detector&&architecture&&baseline&&(dataMode==='prepared'||dataset));
  const context={detector_slug:detector,architecture,baseline_arn:baseline,dataset_version_id:dataset,data_mode:dataMode};
  const matches=(row:{baseline_arn:string;dataset_version_id:string;data_mode?:string})=>row.baseline_arn===baseline&&(row.data_mode??'saved')===dataMode&&(dataMode==='prepared'||row.dataset_version_id===dataset);
- async function refreshDraft(){setLoaded(false);try{const result=await listTrainingVariantDrafts();const found=result.drafts.find(matches)??null;setDraft(found);setBatchName(found?.batch_name??'');setLoaded(true);setError('');}catch(e){setError(message(e));}}
+ async function refreshDraft(){setLoaded(false);try{const result=await listTrainingVariantDrafts();const found=result.drafts.find(matches)??null;setDraft(found);setLoaded(true);setError('');}catch(e){setError(message(e));}}
  async function refreshRuns(){try{setRuns((await listVariantRuns()).runs.filter(matches));}catch(e){setError(message(e));}}
  useEffect(()=>{void refreshDraft();void refreshRuns();const timer=setInterval(()=>void refreshRuns(),8000);return()=>clearInterval(timer);},[]);
  const variants=draft?.variants??[], selected=variants.filter(v=>v.selected);
@@ -41,7 +40,7 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
  const frozen:VariantSettingsSnapshot={...localSettings,hyperparams:{...effectiveHyperparams({},true),...localSettings.hyperparams}};
  async function persist(rows:SavedTrainingVariant[],name=draft?.batch_name??''){
   setBusy(true);setError('');setNotice('');
-  try{const saved=await saveTrainingVariantDraft({...context,revision:draft?.revision??0,batch_name:name,variants:rows});setDraft(saved);setBatchDirty(false);setNotice('Variants saved in SQL. No training has started.');return true;}catch(e){setError(message(e));return false;}finally{setBusy(false);}
+  try{const saved=await saveTrainingVariantDraft({...context,revision:draft?.revision??0,batch_name:name,variants:rows});setDraft(saved);setNotice('Variants saved in SQL. No training has started.');return true;}catch(e){setError(message(e));return false;}finally{setBusy(false);}
  }
  async function save(asNew:boolean){
   if(saveBlocked){setError(saveBlocked);return;}
@@ -59,21 +58,22 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
   let name=v.name+' copy',n=2;while(variants.some(row=>row.name===name))name=v.name+' copy '+n++;
   changeRows([...variants,{...copyJson(v),id:uuid(),name}]);
  }
- function changeRows(rows:SavedTrainingVariant[]){setDraft(current=>({...context,...current,variants:rows,revision:current?.revision??0,batch_name:current?.batch_name??'',id:current?.id??''}));setBatchDirty(true);}
+ function changeRows(rows:SavedTrainingVariant[]){setDraft(current=>({...context,...current,variants:rows,revision:current?.revision??0,batch_name:current?.batch_name??'',id:current?.id??''}));}
  usePageSave('Variant batch',async()=>{
   if(!active)return;
   if(!loaded)throw new Error('Saved variants have not loaded.');
-  if(!variants.length&&!batchName.trim())return;
+  if(!variants.length)return;
   if(!ready)throw new Error('Choose a starting model and dataset before saving variants.');
-  if(!(await persist(variants,batchName.trim())))throw new Error('Could not save the variant batch. See the variants card.');
+  if(!(await persist(variants)))throw new Error('Could not save the variant batch. See the variants card.');
  });
- const payload={id:runId,name:draft?.batch_name||`${detector} variants`,...context,shared:selected[0]?.settings??frozen,
+ const runName=`${detector} variants ${runId.slice(0,8)}`;
+ const payload={id:runId,name:runName,...context,shared:selected[0]?.settings??frozen,
   evaluation:{imgsz:selected[0]?.settings.img_size??640,confidence:.25,ap_conf:.001,nms_iou:.7,max_det:300},
   variants:selected.map(v=>({name:v.name,overrides:v.settings}))};
- const batchBlocked=batchDirty||!ready||!loaded||busy||!selected.length||!draft?.batch_name||batchName.trim()!==draft.batch_name;
+ const batchBlocked=!ready||!loaded||busy||!selected.length;
  useImperativeHandle(queueRef,()=>({start}));
- useEffect(()=>{onQueueState?.({count:variants.length,blocked:batchBlocked,name:draft?.batch_name??''});},[variants.length,batchBlocked,draft?.batch_name,onQueueState]);
- async function start(){if(!active||batchBlocked){setError('Save the batch name and select at least one variant first.');return;}setBusy(true);setError('');try{const result=await startVariantRun(payload);setSelectedRun(result.id);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
+ useEffect(()=>{onQueueState?.({count:variants.length,blocked:batchBlocked,name:runName});},[variants.length,batchBlocked,runName,onQueueState]);
+ async function start(){if(!active||batchBlocked){setError('Select at least one saved variant and a base model first.');return;}setBusy(true);setError('');try{const result=await startVariantRun(payload);setSelectedRun(result.id);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
  async function retry(index?:number){if(!run)return;setBusy(true);try{await retryVariantRun(run.id,index);await refreshRuns();}catch(e){setError(message(e));}finally{setBusy(false);}}
  async function report(){if(!run)return;try{const doc=await getVariantReport(run.id);const url=URL.createObjectURL(new Blob([JSON.stringify(doc,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`training-variants-${run.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError(message(e));}}
  const first:Record<string,unknown>=variants[0]?flatten(variants[0].settings):{}, keys=[...new Set(variants.flatMap(v=>Object.keys(flatten(v.settings))))];
@@ -109,11 +109,9 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
    <p className="text-xs">{variants.length}/20 saved variants. Highlighted values differ from the first saved variant. All displayed training defaults are captured. Saving does not start training.</p>
    <div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Run?</th><th>Variant</th>{columns.map(k=><th key={k} className="px-2">{k}</th>)}<th>Actions</th></tr></thead><tbody>{variants.map(v=><tr key={v.id} className="border-t"><td><input aria-label={`Run ${v.name}`} type="checkbox" checked={v.selected} onChange={e=>changeRows(variants.map(row=>row.id===v.id?{...row,selected:e.target.checked}:row))}/></td><th className="p-2">{v.name}</th>{columns.map(k=><td key={k} className={`p-2 ${show(flatten(v.settings)[k])!==show(first[k])?'bg-amber-100':''}`}>{show(flatten(v.settings)[k])}</td>)}<td className="whitespace-nowrap space-x-3"><button type="button" className="underline" onClick={()=>edit(v)}>Edit</button><button type="button" disabled={variants.length>=20} className="underline" onClick={()=>duplicate(v)}>Duplicate</button><button type="button" className="underline" onClick={()=>changeRows(variants.filter(row=>row.id!==v.id))}>Remove</button></td></tr>)}</tbody></table></div>
    <details><summary>All recorded variant settings</summary><pre className="max-h-72 overflow-auto text-xs">{JSON.stringify(variants,null,2)}</pre></details>
-   <label>Batch name <input aria-label="Variant batch name" className="rounded border p-2" value={batchName} onChange={e=>{setBatchName(e.target.value);}} placeholder={`${detector} variants`}/></label>
-   <button type="button" disabled={!ready||!loaded||!selected.length||!batchName.trim()} className="ml-3 rounded border px-3 py-2 disabled:opacity-40" onClick={()=>void persist(variants,batchName.trim())}>Save batch</button>
-   <p className="text-xs">Save batch stores its name and selected variants without starting training. Add to Queue below starts all selected saved variants, followed by their baseline comparison. Unsaved edits in the settings form are not included.</p>
+   <p className="text-xs">Add to Queue automatically trains the selected variants, then compares the trained models with the chosen base model on the same validation images. The background worker continues when this page is closed. Save or update each variant before queueing; unsaved edits in the settings form are not included.</p>
    {selected.length>0&&<p className="text-xs">{selected.length} selected: {selected.map(v=>`${v.name} (${v.settings.epochs} epochs)`).join(', ')}</p>}
-   {variants.length>0&&batchBlocked&&<p className="text-xs">Save the batch name and select at least one variant before adding it to the queue.</p>}
+   {variants.length>0&&batchBlocked&&<p className="text-xs">Choose a base model and select at least one saved variant before adding to the queue.</p>}
   </fieldset>
   {!!runs.length&&<div className="space-y-3"><h3 className="font-semibold">Variant runs and comparisons</h3><div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Batch</th><th>Status</th><th>Created</th><th/></tr></thead><tbody>{runs.map(r=><tr key={r.id}><td>{r.name}</td><td>{r.state}</td><td>{r.created_at}</td><td><button type="button" className="underline" onClick={()=>setSelectedRun(r.id)}>View results</button></td></tr>)}</tbody></table></div>
    {run&&<><p role="status">{run.name}: {run.state} — {run.stage}</p>{run.error&&<p role="alert">{run.error}</p>}<div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th>Variant</th><th>Run</th><th>Status</th><th>Action</th></tr></thead><tbody>{run.variants.map(v=><tr key={v.index}><td>{v.name}</td><td>{v.run_number?`Run ${v.run_number}`:v.run_id??'Not submitted'}</td><td>{v.state==='Queued'?(v.training_status??v.state):v.state}{v.error&&<p>{v.error}</p>}</td><td>{!['Succeeded','Queued'].includes(v.state)&&!['Pending','Preparing','Training','Comparing'].includes(run.state)&&<button type="button" disabled={busy} onClick={()=>void retry(v.index)}>Retry variant</button>}</td></tr>)}</tbody></table></div>
