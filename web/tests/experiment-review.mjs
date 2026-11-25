@@ -14,7 +14,7 @@ test('experiment queue and review include every variant, live status, comparison
  let run={id:'experiment-a',name:'Helmet experiment',created_at:'2026-11-25T11:00:00Z',state:'Training',baseline_arn:base+'1',dataset_version_id:'shared-data',shared:variants[0].settings,variants},models=[],browser,server;
  try{
  server=await createServer({root,server:{host:'127.0.0.1',port:0}});await server.listen();browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/track2/**',route=>{const p=new URL(route.request().url()).pathname;let body={};if(p.endsWith('/training-variants'))body={runs:[run]};else if(p.endsWith('/metrics'))body={rows:models};else if(p.endsWith('/runs-by-model'))body={runs:{}};else if(p.endsWith('/buckets'))body={buckets:[]};return route.fulfill({json:body});});
+ await page.route('**/track2/**',route=>{const p=new URL(route.request().url()).pathname;let body={};if(route.request().method()==='DELETE'){run={...run,state:'Cancelled',variants:run.variants.map(v=>({...v,state:'Cancelled'}))};body=run;}else if(p.endsWith('/training-variants'))body={runs:[run]};else if(p.endsWith('/metrics'))body={rows:models};else if(p.endsWith('/runs-by-model'))body={runs:{}};else if(p.endsWith('/buckets'))body={buckets:[]};return route.fulfill({json:body});});
  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(dir)}/index.html`);
  const queue=page.getByLabel('Queued experiments'),review=page.getByLabel('Experiment review');
  await queue.getByText('Waiting for resources',{exact:true}).waitFor();assert.equal(await queue.getByRole('table',{name:'Experiment variants'}).getByRole('row').count(),7);
@@ -38,6 +38,12 @@ test('experiment queue and review include every variant, live status, comparison
  await review.getByText('Compare training parameters',{exact:true}).click();assert.ok(await review.locator('td.bg-amber-100').count()>0);
  assert.equal(await queue.getByRole('progressbar').getAttribute('aria-valuenow'),'6');
  assert.equal(await review.getByRole('progressbar').count(),0);
+ run={...run,id:'pending-experiment',name:'Waiting experiment',state:'Pending',variants:variants.map(v=>({...v,state:'Pending',run_number:undefined})),comparison:undefined};
+ await queue.getByRole('button',{name:'Remove from queue',exact:true}).waitFor({timeout:12000});
+ await queue.getByRole('button',{name:'Remove from queue',exact:true}).click();
+ await queue.getByText('No active experiments.',{exact:true}).waitFor();
+ assert.equal(run.state,'Cancelled');
+ assert.equal(await queue.getByRole('button',{name:'Remove from queue',exact:true}).count(),0);
  assert.deepEqual(errors,[]);
  }finally{await browser?.close();await server?.close();await rm(dir,{recursive:true,force:true});}
 });

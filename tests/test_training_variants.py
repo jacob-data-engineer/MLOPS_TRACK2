@@ -264,3 +264,21 @@ def test_worker_trains_variants_in_order_then_compares_with_original_base(store,
         e.advance(e.read(j['id']))
     assert actions == [('train', 0, ARN, 'fixed-dataset'), ('train', 1, ARN, 'fixed-dataset'), ('compare', [0, 1], ARN, 'fixed-dataset')]
     assert e.read(j['id'])['state'] == 'Completed'
+
+
+def test_remove_pending_preserves_history_and_prevents_execution(store,monkeypatch):
+    j=job(store)
+    removed=e.remove_pending(j['id'])
+    assert removed['state']=='Cancelled'
+    assert all(v['state']=='Cancelled' for v in removed['variants'])
+    assert e.remove_pending(j['id'])['state']=='Cancelled'
+    with pytest.raises(ValueError,match='removed'):e.retry(j['id'])
+    monkeypatch.setattr(e.record_store,'enabled',lambda:True)
+    monkeypatch.setattr(e,'advance',lambda j:pytest.fail('Cancelled experiment executed'))
+    e.tick.__wrapped__()
+
+@pytest.mark.parametrize('state',['Preparing','Training','Comparing','Completed','Needs attention'])
+def test_remove_rejects_started_experiments(store,state):
+    j=job(store);j['state']=state;e.save(j)
+    with pytest.raises(ValueError,match='not started'):e.remove_pending(j['id'])
+    assert e.read(j['id'])['state']==state

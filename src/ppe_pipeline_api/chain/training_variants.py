@@ -283,6 +283,8 @@ def tick():
 @record_store.exclusive('training_variants')
 def retry(ident, index=None):
     job=read(ident)
+    if job['state']=='Cancelled':
+        raise ValueError('This experiment was removed. Submit a new experiment to run these variants.')
     if job['state'] in ('Pending','Preparing','Training','Comparing'):
         raise ValueError('Wait until the current variant batch work finishes before retrying.')
     if index is not None:
@@ -297,4 +299,19 @@ def retry(ident, index=None):
         job.setdefault('comparison_history',[]).append(job.pop('comparison'))
         job['comparison_attempt']+=1
     job.update(state='Pending',error='');save(job)
+    return public(job)
+
+
+@record_store.exclusive('training_variants')
+def remove_pending(ident):
+    """Remove an unstarted experiment under the same ownership lock as tick."""
+    job=read(ident)
+    if job['state']=='Cancelled':
+        return public(job)
+    if job['state']!='Pending' or any(v['state']!='Pending' or v.get('run_id') for v in job['variants']):
+        raise ValueError('Only experiments that have not started can be removed. Preparing and running experiments cannot be removed.')
+    job.update(state='Cancelled',stage='Removed from queue',cancelled_at=now())
+    for variant in job['variants']:
+        variant['state']='Cancelled'
+    save(job)
     return public(job)

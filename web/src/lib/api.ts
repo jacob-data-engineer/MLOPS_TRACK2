@@ -24,6 +24,7 @@ export function listTrainingVariantDrafts():Promise<{drafts:TrainingVariantDraft
 export function saveTrainingVariantDraft(payload:Omit<TrainingVariantDraft,'id'>):Promise<TrainingVariantDraft>{return apiPut('/track2/training-variants/drafts',payload);}
 export function listVariantRuns():Promise<{runs:VariantRunRecord[]}>{return apiGet('/track2/training-variants');}
 export function startVariantRun(payload:unknown):Promise<VariantRunRecord>{return apiPost('/track2/training-variants',payload);}
+export function removePendingVariantRun(id:string):Promise<VariantRunRecord>{return apiDelete(`/track2/training-variants/${encodeURIComponent(id)}`);}
 export function retryVariantRun(id:string,index?:number):Promise<VariantRunRecord>{return apiPost(`/track2/training-variants/${encodeURIComponent(id)}/retry`,{index});}
 export function getVariantReport(id:string):Promise<VariantRunRecord>{return apiGet(`/track2/training-variants/${encodeURIComponent(id)}/report`);}
 export interface PtInspection {filename:string; size_bytes:number; classes:{id:number;name:string}[]; metadata:Record<string,unknown>; notice:string; registry?:Record<string,unknown>}

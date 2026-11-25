@@ -73,3 +73,11 @@ def retry(ident:str,payload:Retry,session=Depends(require_session)):
 @router.get('/{ident}/report')
 def report(ident:str,session=Depends(require_session)):
     return call(lambda:e.public(e.read(ident)))
+
+
+@router.delete('/{ident}')
+def remove_pending(ident:str,session=Depends(require_session)):
+    result=call(lambda:e.remove_pending(ident))
+    if result.get('started') is False:
+        raise HTTPException(409,'The worker is updating the queue. Nothing was removed; retry after the current preparation step finishes.')
+    return result

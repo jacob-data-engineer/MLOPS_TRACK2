@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react';
 import {usePageSnapshot} from '../lib/pageSnapshot';
-import {ApiError,retryVariantRun,listVariantRuns,getTrack2Metrics,getTrack2RunsByModel,type VariantRunRecord,type Track2MetricsRow,type Track2RunForModel,type Track2ExportSettings} from '../lib/api';
+import {ApiError,removePendingVariantRun,retryVariantRun,listVariantRuns,getTrack2Metrics,getTrack2RunsByModel,type VariantRunRecord,type Track2MetricsRow,type Track2RunForModel,type Track2ExportSettings} from '../lib/api';
 import {VariantSettings,VariantResults} from './Track2VariantResults';
 import {Track2ComparisonExport} from './Track2ComparisonExport';
 import {formatDayTime} from '../lib/format';
@@ -8,16 +8,18 @@ import {formatDayTime} from '../lib/format';
 const activeStates=['Pending','Preparing','Training','Comparing'];
 const terminalStates=['Succeeded','Failed','Stopped'];
 const status=(v:VariantRunRecord['variants'][number])=>v.state==='Queued'?(v.training_status??'Queued'):v.state;
-export function ExperimentSummary({run}:{run:VariantRunRecord}){
+export function ExperimentSummary({run,onRemoved}:{run:VariantRunRecord;onRemoved?:(run:VariantRunRecord)=>void}){
  const [retryError,setRetryError]=useState(''),[retrying,setRetrying]=useState(false);
  async function retry(index?:number){setRetrying(true);setRetryError('');try{await retryVariantRun(run.id,index);}catch(e){setRetryError(e instanceof ApiError?e.detail:'Could not retry experiment.');}finally{setRetrying(false);}}
+ async function remove(){setRetrying(true);setRetryError('');try{onRemoved?.(await removePendingVariantRun(run.id));}catch(e){setRetryError(e instanceof ApiError?e.detail:'Could not remove experiment.');}finally{setRetrying(false);}}
+ const removable=run.state==='Pending'&&run.variants.every(v=>v.state==='Pending'&&!v.run_id);
  const finished=run.variants.filter(v=>terminalStates.includes(v.state)).length;
  const counts=/\((\d+)\s*\/\s*(\d+)\)/.exec(run.stage??'');
  const preparing=run.state==='Preparing'&&counts&&Number(counts[2])>0;
  const completed=preparing?Number(counts[1]):finished,total=preparing?Number(counts[2]):run.variants.length;
  const percent=total?Math.min(100,Math.round(completed/total*100)):0;
  return <section aria-label={`Experiment ${run.name}`} className="my-3 space-y-2 rounded border border-hairline p-3">
-  <h3 className="font-semibold">{run.name}</h3>
+  <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{run.name}</h3>{removable&&<button type="button" disabled={retrying} className="rounded border px-3 py-1 text-sm" onClick={()=>void remove()}>Remove from queue</button>}</div>
   <p role="status" className="text-sm">{run.state}  /  {finished} / {run.variants.length} variants finished  /  {run.variants.filter(v=>v.state==='Succeeded').length} models trained</p>
   {run.stage&&<p className="text-xs">{run.stage}</p>}
   <div role="progressbar" aria-label={preparing?'Dataset preparation progress':'Variant training progress'} aria-valuemin={0} aria-valuemax={total||1} aria-valuenow={completed} className="h-2 overflow-hidden rounded bg-black/10"><div className="h-full bg-accent" style={{width:`${percent}%`}}/></div>
@@ -27,7 +29,7 @@ export function ExperimentSummary({run}:{run:VariantRunRecord}){
   <div className="overflow-x-auto"><table aria-label="Experiment variants" className="w-full text-left text-xs"><thead><tr>{['Order','Variant','Run','Epochs','Batch','Status','Registered model'].map(h=><th className="p-2" key={h}>{h}</th>)}</tr></thead><tbody>{run.variants.map(v=><tr key={v.index} className="border-t border-hairline"><td className="p-2">{v.index+1}</td><th className="p-2">{v.name}</th><td>{v.run_number!=null?`Run ${v.run_number}`:v.run_id?'Run number pending':'Not started'}</td><td>{String(v.settings.epochs??'--')}</td><td>{String(v.settings.batch??'--')}</td><td>{status(v)}{v.error&&<p className="text-critical">{v.error}</p>}</td><td>{v.model_package_arn?.split('/').slice(-2).join(' / ')||'Not available yet'}</td></tr>)}</tbody></table></div>
   <p className="text-xs">Final baseline comparison: {run.comparison?.status??'Waiting for variant training to finish'}. Each variant has its own run number; all belong to this experiment and share the same dataset.</p>
   {run.comparison?.error&&<p role="alert" className="text-critical">{run.comparison.error}</p>}
-  {!activeStates.includes(run.state)&&<div className="flex flex-wrap gap-3">{run.variants.filter(v=>!['Succeeded','Queued'].includes(v.state)).map(v=><button type="button" className="underline text-xs" key={v.index} disabled={retrying} onClick={()=>void retry(v.index)}>Retry {v.name}</button>)}{['Needs attention','Comparison failed'].includes(run.state)&&<button type="button" disabled={retrying} onClick={()=>void retry()}>Resume / retry comparison</button>}</div>}
+  {run.state!=='Cancelled'&&!activeStates.includes(run.state)&&<div className="flex flex-wrap gap-3">{run.variants.filter(v=>!['Succeeded','Queued'].includes(v.state)).map(v=><button type="button" className="underline text-xs" key={v.index} disabled={retrying} onClick={()=>void retry(v.index)}>Retry {v.name}</button>)}{['Needs attention','Comparison failed'].includes(run.state)&&<button type="button" disabled={retrying} onClick={()=>void retry()}>Resume / retry comparison</button>}</div>}
   {retryError&&<p role="alert">{retryError}</p>}
  </section>;
 }
@@ -45,6 +47,6 @@ export function Track2ExperimentRuns({queue=false}:{queue?:boolean}){
  const arns=new Set(run?[run.baseline_arn,...run.variants.map(v=>v.model_package_arn)]:[]);
  const exportRows=models.filter(m=>arns.has(m.model_package_arn));
  const resultRows=run?.comparison?.result?.rows?.map(r=>({...r,label:run.variants.find(v=>v.model_package_arn===r.id)?.name??r.label}));
- if(queue)return <div aria-label="Queued experiments"><h3 className="font-semibold">Experiment queue</h3><p className="text-xs">{active.length} active experiments  /  {active.reduce((n,r)=>n+r.variants.filter(v=>!terminalStates.includes(v.state)).length,0)} variants remaining. Variants train sequentially, followed by one baseline comparison.</p>{error&&<p role="alert">{error}</p>}{active.map(r=><ExperimentSummary key={r.id} run={r}/>)}{!active.length&&!error&&<p className="text-xs">No active experiments.</p>}{runs.filter(r=>!activeStates.includes(r.state)).length>0&&<details><summary>Finished experiments / needs attention</summary>{runs.filter(r=>!activeStates.includes(r.state)).map(r=><ExperimentSummary key={r.id} run={r}/>)}</details>}</div>;
+ if(queue)return <div aria-label="Queued experiments"><h3 className="font-semibold">Experiment queue</h3><p className="text-xs">{active.length} active experiments  /  {active.reduce((n,r)=>n+r.variants.filter(v=>!terminalStates.includes(v.state)).length,0)} variants remaining. Variants train sequentially, followed by one baseline comparison.</p>{error&&<p role="alert">{error}</p>}{active.map(r=><ExperimentSummary key={r.id} run={r} onRemoved={updated=>setRuns(current=>current.map(item=>item.id===updated.id?updated:item))}/>)}{!active.length&&!error&&<p className="text-xs">No active experiments.</p>}{runs.filter(r=>!activeStates.includes(r.state)).length>0&&<details><summary>Finished experiments / needs attention</summary>{runs.filter(r=>!activeStates.includes(r.state)).map(r=><ExperimentSummary key={r.id} run={r} onRemoved={updated=>setRuns(current=>current.map(item=>item.id===updated.id?updated:item))}/>)}</details>}</div>;
  return <section aria-label="Experiment review" className="space-y-3 rounded border border-hairline p-4"><h2 className="font-semibold">Experiment baseline comparisons</h2><p className="text-xs">Review every variant from one submission against its original base model on the shared validation images. All experiment models are included; the manual four-model limit does not apply.</p><label>Experiment<select aria-label="Choose experiment" className="my-2 block w-full border bg-page p-2" value={run?.id??''} onChange={e=>setSelected(e.target.value)}><option value="">Choose an experiment</option>{runs.map(r=><option key={r.id} value={r.id}>{r.name}  /  {formatDayTime(r.created_at)}  /  {r.variants.length} variants  /  {r.state}</option>)}</select></label>{error&&<p role="alert">{error}</p>}{!runs.length&&!error&&<p>No experiments have been submitted yet.</p>}{run&&<><VariantSettings experiment={run}/>{resultRows?.length?<VariantResults rows={resultRows}/>:<p>Comparison results will appear after training and baseline evaluation finish.</p>}<h3 className="font-semibold">Export experiment models</h3><p className="text-xs">Select any or all available variants and the original baseline. Include model weights, images, labels and metadata in the export package.</p>{modelError&&<p role="alert">{modelError}</p>}{exportRows.length?<Track2ComparisonExport key={run.id} stateKey={`experiment-review/${run.id}`} rows={exportRows} runs={modelRuns} settings={settings} onChange={setSettings} autoSelect/>:<p>No registered models are available for export yet.</p>}</>}</section>;
 }
