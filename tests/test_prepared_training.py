@@ -288,7 +288,9 @@ def test_cleanup_only_deletes_the_original_working_copy(prepared, monkeypatch, r
         s3.files['home', 'combined_decay/_decay.json'] = b'{"status":"built","built_at":"new"}'
     def rows(sql, params=()):
         assert "r.status IN ('Succeeded','Failed','Stopped')" in sql
-        assert "delete_decay_after_run}' = 'true'" in sql
+        assert 'delete_decay_after_run' not in sql
+        assert "v.record ? 'prepared_decay'" in sql
+        assert "v.record ? 'central_recipe'" in sql
         assert "r.execution_arn IS NOT NULL" in sql
         return [{'id': version['version_id']}]
     monkeypatch.setattr(catalog_view, '_rows', rows)

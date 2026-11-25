@@ -73,13 +73,12 @@ test('training supports prepared data and checked saved SQL data', async () => {
       await route.fulfill({json:response});
     });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${path.basename(harness)}/index.html`);
-    await page.getByText(/Training uses the already-prepared decayed dataset/).waitFor();
+    await page.getByText(/Training rebuilds a fresh decay dataset/).waitFor();
     assert.equal(await page.getByRole('radio').count(), 2);
     assert.equal(await page.getByRole('radio',{name:'Repeat a previous run',exact:true}).count(),0);
     assert.equal(await page.getByText('Pick a snapshot', {exact:true}).count(), 0);
     const cleanup = page.getByRole('checkbox', {name: /Delete the decayed dataset after this run/});
-    assert.equal(await cleanup.isChecked(), false);
-    await cleanup.check();
+    assert.equal(await cleanup.count(), 0);
     await page.getByRole('button',{name:'Add to Queue',exact:true}).click();
     await page.getByRole('progressbar', {name:'Dataset preparation'}).waitFor();
     assert.equal(await page.getByRole('progressbar').getAttribute('aria-valuenow'),'47');
@@ -92,7 +91,7 @@ test('training supports prepared data and checked saved SQL data', async () => {
     assert.equal(queued.length,1);
     assert.deepEqual(queued[0], {submit:'enqueue',prepared_only:true,training:{epochs:25,img_size:640,batch:8,
       seed:42,patience:10,hyperparams:{lr0:0.001},detector_slug:'helmet',architecture:'yolo11s',notes:'repeatable test',
-      base_version:'arn:aws:sagemaker:test:model-package/helmet/2',delete_decay_after_run:true,comparison:{enabled:false}}});
+      base_version:'arn:aws:sagemaker:test:model-package/helmet/2',comparison:{enabled:false}}});
     await page.getByRole('radio',{name:'Use a saved dataset',exact:true}).check();
     const loading = page.getByRole('status').filter({hasText:'Loading datasets…'});
     await loading.waitFor();
@@ -124,7 +123,7 @@ test('training supports prepared data and checked saved SQL data', async () => {
     await page.waitForFunction(()=>document.querySelector('[aria-label="Dataset preparation"]')?.getAttribute('aria-valuenow')==='47');
     assert.equal(queued[1].training.dataset_version_id,'dv-saved');
     assert.equal(queued[1].training.epochs,25);
-    assert.equal(queued[1].training.delete_decay_after_run,false);
+    assert.equal('delete_decay_after_run' in queued[1].training,false);
     job = {...job,state:'completed',percent:100};
     await page.getByRole('button',{name:'Add to Queue',exact:true}).waitFor();
 

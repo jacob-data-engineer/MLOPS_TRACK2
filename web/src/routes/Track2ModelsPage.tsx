@@ -384,7 +384,6 @@ export function TrainingForm({
 }) {
   const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
-  const [deleteDecayAfterRun, setDeleteDecayAfterRun] = useState(false);
   const [dataChoice, setDataChoice] = useState<TrainingDataChoice>({mode: 'prepared', id: '', checked: false});
   const [restoringComparison, setRestoringComparison] = useState(false);
   const [comparisonRestoreError, setComparisonRestoreError] = useState('');
@@ -647,7 +646,7 @@ export function TrainingForm({
       return {lines, blocking};
     }
 
-    lines.push({ tone: "ok", text: "Training uses the already-prepared decayed dataset. Its exact files and settings are preserved before queueing." });
+    lines.push({ tone: "ok", text: "Training rebuilds a fresh decay dataset from the selected sources. Its exact files and settings are preserved before queueing." });
 
     if (!chosenDetector) {
       lines.push({
@@ -741,8 +740,7 @@ export function TrainingForm({
         detector_slug: detectorSlug, architecture, notes,
         base_version: basePackageArn,
         comparison: selection.comparison || {enabled: false},
-        delete_decay_after_run: deleteDecayAfterRun,
-        ...(dataChoice.mode === 'saved' ? {dataset_version_id: dataChoice.id, delete_decay_after_run: false} : {}),
+        ...(dataChoice.mode === 'saved' ? {dataset_version_id: dataChoice.id} : {}),
       });
       const failed = got.steps.find((step) => !step.ok);
       if (!got.ok || failed) {
@@ -774,7 +772,7 @@ export function TrainingForm({
             step 1 settings.
           </p>
           <p className="mt-2">
-            Newly prepared data uses the decayed dataset already produced in Data Preparation.
+            New data rebuilds the decayed dataset from your Data Preparation settings before each run.
             A saved dataset uses its recorded central store, even if today’s store has changed.
             Check saved dataset verifies the files and class names. Matching names in a
             different order are remapped automatically; selecting a subset is not supported here.
@@ -893,17 +891,11 @@ export function TrainingForm({
         )}
       </div>
 
-      {dataChoice.mode === 'prepared' && <label className="mt-3 flex items-start gap-2 text-xs text-ink">
-        <input type="checkbox" checked={deleteDecayAfterRun} disabled={busy || preparing}
-          onChange={(event) => setDeleteDecayAfterRun(event.target.checked)} />
-        <span>Delete the decayed dataset after this run
-          <span className="mt-1 block text-ink-muted">
-            Removes the working decay copy once training finishes and the queue is clear.
-            Preserved run data stays available for repeat runs and exports.
-            Prepare a new decayed dataset before adding another new run.
-          </span>
-        </span>
-      </label>}
+      <p className="mt-3 text-xs text-ink-muted">
+        Working datasets are automatically deleted after training finishes and the queue is clear.
+        Each new-data run rebuilds a fresh decay dataset. Saved-data runs recreate their recorded selection.
+        Central-store files and SQL records remain available for comparisons, repeat runs and exports.
+      </p>
       {preparationJob && (
         <div className="mt-3 rounded-md border border-black/15 bg-page p-3 text-xs"
           role="status" aria-live="polite">
@@ -966,8 +958,7 @@ export function TrainingForm({
             Switched on and off by <strong>TRAINING SCHEDULE</strong> at
             the top. The background worker pulls fresh data, rebuilds and preserves the
             decayed dataset, then queues the run and starts it, even when this page is closed.
-            The cleanup option above applies
-            to runs you add here with Add to Queue.
+            Working datasets are cleaned up automatically after both manual and scheduled runs.
           </span>
           {/* When the training clock is in charge -- Pull Control is not
               a source, so no sweep runs -- its next slot, from the same

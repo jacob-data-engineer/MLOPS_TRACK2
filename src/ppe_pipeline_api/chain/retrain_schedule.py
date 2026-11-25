@@ -1653,7 +1653,7 @@ def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None,
         weeks_bucket=pc.destination_bucket(config), week_prefix=week_prefix,
         golden_folder=golden["target_folder"] if golden else "",
         golden_bucket=golden["target_bucket"] if golden else "",
-        folders=folders, stop=stop, progress=progress)
+        folders=folders, stop=stop, progress=progress, config=config)
     if combined["failed"]:
         raise ValueError(f"{combined['failed']} file(s) could not be copied into the central "
                          "store: " + "; ".join(combined["errors"][:3]))
@@ -1662,7 +1662,7 @@ def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None,
     decayed = data.rebuild_decayed(
         retention=retention, use_weeks=use_weeks, use_golden=golden is not None,
         golden_split=bool(golden["split"]) if golden else True,
-        slugs=combined["slugs"], for_run=for_run, stop=stop, progress=progress)
+        slugs=combined["slugs"], for_run=for_run, stop=stop, progress=progress, config=config)
     return {"combined": combined, "decayed": decayed}
 
 
@@ -1896,8 +1896,8 @@ def cleanup_decayed() -> str:
 
     from .. import data, training
 
-    # SQL runs preserve their input files before queueing; cleanup follows
-    # the recorded per-run choice and terminal execution status.
+    # SQL runs preserve their input files before queueing; every finished
+    # run's working copy is eligible for cleanup, independent of old options.
     from .. import record_store
     if record_store.enabled():
         if training.current_training_reason():

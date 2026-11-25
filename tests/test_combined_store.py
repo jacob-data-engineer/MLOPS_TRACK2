@@ -69,6 +69,7 @@ class _S3:
     def delete_objects(self, Bucket, Delete):
         for o in Delete["Objects"]:
             self.objects.pop((Bucket, o["Key"]), None)
+        return {}
 
 
 def _week(n, names, split="train"):
@@ -168,17 +169,40 @@ def test_a_rebuild_starts_from_empty(s3):
     assert (B, "central_decay/weeks/week_9/images/train/stale.jpg") not in s3.objects
 
 
-def test_a_rebuild_copies_only_what_is_missing_and_removes_only_what_is_dropped(s3):
+def test_a_rebuild_always_clears_and_recopies_the_working_dataset(s3):
     out = _combine()
     cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
     s3.copies.clear()
     again = cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out["slugs"])
-    assert s3.copies == [] and again["copied"] == 0 and again["removed"] == 0, "nothing changed"
+    assert len(s3.copies) == again['files'] == again['copied'] == again['removed']
     assert again["files"] > 0
-    # golden unticked: its files go, nothing is recopied
+    # Golden unticked: every old working file goes, selected files are recopied.
+    s3.copies.clear()
     gone = cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=False, slugs=out["slugs"])
-    assert s3.copies == [] and gone["removed"] > 0
+    assert len(s3.copies) == gone['copied'] == gone['files']
+    assert gone['removed'] == again['files']
     assert not any(k.startswith("central_decay/golden/") for (b, k) in s3.objects)
+
+
+def test_rebuild_refuses_to_copy_when_old_files_cannot_be_deleted(s3, monkeypatch):
+    out = _combine()
+    cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out['slugs'])
+    s3.copies.clear()
+    monkeypatch.setattr(s3, 'delete_objects', lambda **kw: {'Errors': [{'Code': 'AccessDenied'}]})
+    with pytest.raises(ValueError, match='Could not clear'):
+        cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=True, slugs=out['slugs'])
+    assert not s3.copies
+
+
+def test_rebuild_uses_saved_destination_when_current_settings_change(s3, monkeypatch):
+    saved = {'central_store': {'folder': 'saved'}}
+    monkeypatch.setattr(central_store, 'location', lambda config=None: (B, 'saved' if config == saved else 'current'))
+    s3.objects[B, 'current_decay/keep.txt'] = b'unrelated preparation'
+    cs.combine(weeks_root='retraining', weeks_bucket=B, config=saved)
+    result = cs.rebuild_decayed(retention=POLICY, use_weeks=True, use_golden=False, config=saved)
+    assert result['folder'] == 'saved_decay'
+    assert s3.objects[B, 'current_decay/keep.txt'] == b'unrelated preparation'
+    assert any(key.startswith('saved_decay/weeks/') for bucket, key in s3.objects)
 
 
 def test_deleting_the_decayed_copy_never_touches_the_store(s3):

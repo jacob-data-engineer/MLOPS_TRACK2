@@ -123,11 +123,13 @@ def tick():
                         return
                 job['pull_done'] = True
                 table().put_item(Item=job)
-            if not job.get('decay_rebuilt'):
-                progress('Rebuilding the decayed dataset', 0, 0)
-                rs.combine_and_decay(job['config'], for_run=True, progress=progress)
-                job['decay_rebuilt'] = True
-                table().put_item(Item=job)
+        if not (job.get('overrides') or {}).get('dataset_version_id'):
+            from . import retrain_schedule as rs
+            # Every new-data job (manual or scheduled) gets a fresh working
+            # copy, including a worker restart during preservation. Saved-data
+            # replay rebuilds its exact recorded selection separately.
+            progress('Rebuilding the decayed dataset', 0, 0)
+            rs.combine_and_decay(job['config'], for_run=True, progress=progress)
         queue_prepared(job['config'], trigger=job['trigger'], submit=job['submit'],
                        overrides=job['overrides'], progress=progress, entry_id=job['id'],
                        publish=lambda entry: publish(job, entry))

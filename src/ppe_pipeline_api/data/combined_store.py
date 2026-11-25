@@ -206,13 +206,13 @@ def _copy(pairs: list, dest_bucket: str, *, skip_existing: set, stop=None,
 
 def combine(*, weeks_root: str = "", weeks_bucket: str = "", week_prefix: str = "week_",
             golden_folder: str = "", golden_bucket: str = "",
-            folders: list | None = None, stop=None, progress=None) -> dict:
+            folders: list | None = None, stop=None, progress=None, config=None) -> dict:
     """Copy every file of every ticked source into the store. Adds only.
 
     `folders` are the Assemble card's entries, each `{"images", "labels",
     "split"}`. Returns per-source counts and the slugs the folders went to.
     """
-    bucket, store, _ = location()
+    bucket, store, _ = location(config)
     _report(progress, "listing", 0, 0)
     existing = set(_keys(bucket, store))
     pairs: list = []
@@ -292,9 +292,9 @@ def _write_marker(bucket: str, decayed: str, **fields) -> None:
                           ContentType="application/json")
 
 
-def delete_decayed() -> int:
+def delete_decayed(config=None) -> int:
     """Remove the decayed copy, every key of it. The store is not touched."""
-    bucket, store, decayed = location()
+    bucket, store, decayed = location(config)
     assert decayed != store and decayed.endswith(DECAY_SUFFIX)
     keys = _keys(bucket, decayed)
     for i in range(0, len(keys), 1000):
@@ -306,20 +306,17 @@ def delete_decayed() -> int:
 @decay_locked
 def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
                     golden_split: bool = True, slugs: dict | None = None,
-                    for_run: bool = False, stop=None, progress=None) -> dict:
+                    for_run: bool = False, stop=None, progress=None, config=None) -> dict:
     """Bring `<store>_decay` to exactly what a run trains on.
 
-    In place, not from empty (2026-11-13): files the decay no longer keeps
-    are removed, files it now keeps and the copy lacks are copied, and the
-    rest -- most of it, run to run -- is left where it is. Same result as
-    emptying and recopying, because a store file never changes once
-    written; a fraction of the copies.
+    Every rebuild clears the working files and copies the selected data
+    afresh. The central store and preserved run files are never removed.
 
     Weeks through the retention policy (`retained_lists.select`, the same
     selection the card's bars and the old path-list used); the golden set
     and the Assemble folders whole. Returns the yaml entries that name it.
     """
-    bucket, store, decayed = location()
+    bucket, store, decayed = location(config)
     now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
     _report(progress, "listing", 0, 0)
     assert decayed != store and decayed.endswith(DECAY_SUFFIX)
@@ -330,7 +327,7 @@ def rebuild_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
         bucket, store, decayed, retention=retention, use_weeks=use_weeks,
         use_golden=use_golden, golden_split=golden_split, slugs=slugs)
     return _apply_decay_plan(bucket, decayed, there, pairs, train, val, weeks_report,
-                             now=now, for_run=for_run, stop=stop, progress=progress)
+                             now=now, for_run=for_run, stop=stop, progress=progress, config=config)
 
 
 def plan_decayed(*, retention: dict, use_weeks: bool, use_golden: bool,
@@ -403,24 +400,26 @@ def _decay_plan(bucket: str, store: str, decayed: str, *, retention: dict, use_w
 
 
 def _apply_decay_plan(bucket, decayed, there, pairs, train, val, weeks_report, *,
-                      now, for_run, stop, progress) -> dict:
-    # What the decay no longer keeps -- an older week thinned further, a
-    # source unticked -- goes first, so nothing stale is trained on.
+                      now, for_run, stop, progress, config=None) -> dict:
+    # Clear all working files, including names selected again. Never reuse
+    # a previous run's decay copy. The build marker stays until completion.
     wanted = {dest for (_, _, dest) in pairs}
-    stale = sorted(there - wanted)
+    stale = sorted(there)
     _report(progress, "clearing", 0, len(stale))
     for i in range(0, len(stale), 1000):
         _check(stop)
-        storage.s3.delete_objects(Bucket=bucket, Delete={
+        deleted = storage.s3.delete_objects(Bucket=bucket, Delete={
             "Objects": [{"Key": k} for k in stale[i:i + 1000]], "Quiet": True})
+        if deleted.get('Errors'):
+            raise ValueError('Could not clear the previous decay dataset; rebuild stopped. Retry after resolving the S3 error.')
         _report(progress, "clearing", min(i + 1000, len(stale)), len(stale))
     try:
         _check(stop)
-        result = _copy(pairs, bucket, skip_existing=there, stop=stop,
+        result = _copy(pairs, bucket, skip_existing=set(), stop=stop,
                        progress=progress, phase="decay")
     except Stopped:
         # A half-built decayed copy is a dataset nobody chose. Remove it.
-        delete_decayed()
+        delete_decayed(config=config)
         raise
     _write_marker(bucket, decayed, status="built", started_at=now,
                   built_at=_dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),

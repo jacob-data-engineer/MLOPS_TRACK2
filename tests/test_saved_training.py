@@ -62,7 +62,8 @@ def test_bad_saved_inputs_do_not_create_a_new_version(source, problem):
     assert len(table.rows) == count
 
 
-def test_saved_queue_uses_current_model_settings_and_no_decay_cleanup(monkeypatch):
+@pytest.mark.parametrize('old_delete_option', [False, True])
+def test_saved_queue_ignores_removed_cleanup_option(monkeypatch, old_delete_option):
     from ppe_pipeline_api.chain import retrain_schedule as rs
     monkeypatch.setattr(rs, 'settings', lambda config: {})
     monkeypatch.setattr(data, 'require_training_sql', lambda: None)
@@ -85,11 +86,11 @@ def test_saved_queue_uses_current_model_settings_and_no_decay_cleanup(monkeypatc
     monkeypatch.setattr(t,'pin_comparison_selection',lambda value:pinned if value == comparison else pytest.fail('comparison selection lost'))
     chain.queue_prepared({}, overrides={'dataset_version_id':'old','detector_slug':'helmet',
         'architecture':'yolo11s','base_version':'scratch','epochs':7,'img_size':640,'batch':2,
-        'seed':12,'patience':4,'hyperparams':{'lr0':0.002},'delete_decay_after_run':True,
+        'seed':12,'patience':4,'hyperparams':{'lr0':0.002},'delete_decay_after_run':old_delete_option,
         'comparison':comparison}, publish=entries.append)
     assert calls[0][0] == 'old'
     entry = entries[0]
     assert entry['comparison'] == pinned
     assert entry['epochs'] == 7 and entry['hyperparams']['lr0'] == .002
     assert entry['base_model_key'] == 'current.pt' and entry['dataset_version_id'] == 'new'
-    assert entry['delete_decay_after_run'] is False and 'pipeline' not in entry
+    assert 'delete_decay_after_run' not in entry and 'pipeline' not in entry

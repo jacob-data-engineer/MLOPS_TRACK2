@@ -224,14 +224,15 @@ def repeat_entry(run_id: str) -> dict:
 
 @cs.decay_locked
 def cleanup_finished():
-    """Delete only the opted-in run's unchanged working copy, never its snapshot."""
+    """Always delete a finished run's unchanged working copy, never preserved data."""
     from botocore.exceptions import ClientError
     from .catalog_view import _rows
     if not record_store.enabled():
         return ''
     rows = _rows("SELECT DISTINCT v.id FROM training_runs r JOIN dataset_versions v ON v.id=r.version_id "
                  "WHERE r.status IN ('Succeeded','Failed','Stopped') AND r.execution_arn IS NOT NULL "
-                 "AND r.record #>> '{reproducibility,entry,delete_decay_after_run}' = 'true' "
+                 "AND v.record ? 'prepared_decay' AND v.record ? 'preparation' "
+                 "AND v.record ? 'central_recipe' "
                  "AND NOT (v.record ? 'decay_cleanup') LIMIT 50")
     central_cleanup = central_recipe.cleanup_finished()
     messages = [central_cleanup] if central_cleanup else []
@@ -256,6 +257,7 @@ def cleanup_finished():
                 state = 'skipped: preparation has changed'
             else:
                 verify_members(version)
+                central_recipe.verify_central(version)
                 keys = [k for k in _objects(bucket, decay) if k != marker_key]
                 for start in range(0, len(keys), 1000):
                     result = storage.s3.delete_objects(Bucket=bucket, Delete={

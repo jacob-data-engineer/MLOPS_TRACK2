@@ -26,6 +26,7 @@ def world(monkeypatch):
     monkeypatch.setattr(jobs, 'table', lambda: table)
     monkeypatch.setattr(jobs.data, 'require_training_sql', lambda: None)
     monkeypatch.setattr(jobs.pc, 'read_config', lambda: {'central_store': {'folder': 'saved'}})
+    monkeypatch.setattr(retrain_schedule, 'combine_and_decay', lambda *a, **kw: {})
     return table
 
 
@@ -124,9 +125,9 @@ def test_schedule_pulls_then_rebuilds_before_preserving(world, monkeypatch, pull
     if pull_error:
         assert jobs.latest()['state'] == 'failed'
     else:
-        # Restart after completed pull/rebuild: resume preservation without pulling again.
+        # Restart re-creates the working copy, but never pulls again.
         jobs.tick.__wrapped__()
-        assert calls == ['pull','rebuild','preserve','preserve']
+        assert calls == ['pull','rebuild','preserve','rebuild','preserve']
 
 
 def test_schedule_waits_for_existing_pull(world, monkeypatch):
@@ -136,3 +137,14 @@ def test_schedule_waits_for_existing_pull(world, monkeypatch):
     monkeypatch.setattr(prepared_training,'queue_prepared',lambda *a,**kw:pytest.fail('training before pull finished'))
     jobs.tick.__wrapped__()
     assert jobs.latest()['stage'] == 'Waiting for the current data pull to finish'
+
+
+@pytest.mark.parametrize('saved', [False, True])
+def test_manual_jobs_rebuild_fresh_but_saved_replay_keeps_recorded_selection(world, monkeypatch, saved):
+    jobs.submit(trigger='manual', overrides={'dataset_version_id': 'saved-version'} if saved else {})
+    calls = []
+    monkeypatch.setattr(retrain_schedule, 'combine_and_decay', lambda *a, **kw: calls.append('rebuild'))
+    monkeypatch.setattr(prepared_training, 'queue_prepared', lambda *a, **kw: calls.append('preserve'))
+    monkeypatch.setattr(jobs.pc, 'route_pending', lambda **kw: pytest.fail('Manual training must not pull new SQL data'))
+    jobs.tick.__wrapped__()
+    assert calls == (['preserve'] if saved else ['rebuild', 'preserve'])

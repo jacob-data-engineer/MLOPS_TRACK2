@@ -16,8 +16,9 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
         if set(overrides) - allowed:
             raise ValueError('Unsupported training setting.')
         plan.update(overrides)
-    if not isinstance(plan.get('delete_decay_after_run', False), bool):
-        raise ValueError('Delete decayed dataset must be on or off.')
+    # Old saved files/API clients may still send the removed option. It no
+    # longer controls cleanup; all working datasets are disposable.
+    plan.pop('delete_decay_after_run', None)
     if submit not in ('enqueue', 'queue', 'start'):
         raise ValueError('Choose enqueue, queue or start.')
     plan['hyperparams'] = training.normalize_hyperparams(plan.get('hyperparams'))
@@ -57,7 +58,6 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
     saved_id = str(plan.get('dataset_version_id') or '').strip()
     if saved_id:
         version = data.prepare_saved_training(saved_id, trigger=trigger, target_classes=detector['classes'], progress=progress)
-        plan['delete_decay_after_run'] = False
     else:
         version = data.freeze_prepared_training(config, trigger=trigger, target_classes=detector['classes'], progress=progress)
     generation, size = training.split_architecture(architecture)
@@ -73,7 +73,6 @@ def queue_prepared(config=None, *, trigger='manual', submit='enqueue', overrides
         'added_at': dt.datetime.now(dt.timezone.utc).isoformat(),
         'reproducible': True, 'detector_definition': detector,
         'comparison': comparison,
-        'delete_decay_after_run': plan.get('delete_decay_after_run', False),
         'base_provenance': {**base, 'package_arn': source_arn, 'source': source},
         'drop_undeclared_classes': False}
     # The full recipe is committed to SQL before making the entry runnable.
