@@ -146,6 +146,12 @@ def cleanup_finished():
     cleaned = []
     for row in rows:
         version = dv.get(row['id'])
+        owner = version.get('experiment_owner')
+        if owner:
+            from ..chain import training_variants
+            experiment = training_variants.read(owner)
+            if experiment['state'] not in ('Completed', 'Completed with failures', 'Failed', 'Cancelled', 'Comparison failed'):
+                continue
         recipe = version.get('central_recipe')
         if not recipe:
             continue

@@ -9,7 +9,7 @@ import uuid
 from botocore.exceptions import ClientError
 from .. import data, pull_control as pc, record_store
 from ..training import track2_shared as t2, comparison as cmp
-from ..data import catalog_view
+from ..data import catalog_view, dataset_versions
 
 KIND = 'training_variant_run'
 DRAFT_KIND = 'training_variant_draft'
@@ -208,8 +208,19 @@ def prepare_variant(job, variant):
             target_classes=job['detector']['classes'],progress=progress)
         job['dataset_version_id']=shared['version_id']
         job['dataset']=shared
+        job['working_dataset_version_id']=shared['version_id']
         save(job)  # Persist shared SQL recipe before any variant is queued.
-    version=data.prepare_saved_training(job['dataset_version_id'],target_classes=job['detector']['classes'],trigger='experiment',progress=progress)
+    working_id=job.get('working_dataset_version_id')
+    if working_id:
+        version=dataset_versions.get(working_id)
+        progress('Reusing shared training input files',0,0)
+    else:
+        version=data.prepare_saved_training(job['dataset_version_id'],target_classes=job['detector']['classes'],trigger='experiment',progress=progress)
+        job['working_dataset_version_id']=version['version_id']
+        save(job)  # Survives worker restart before queue publication.
+    # Keep the working folder between variants and through final comparison.
+    # Queue preparation still verifies/restores missing files from the pinned recipe.
+    data.mark_version(version['version_id'],strict=True,experiment_owner=job['id'])
     generation,size=t2.split_architecture(job['architecture'])
     entry={**data.version_run_fields(version),**variant['settings'], 'id':entry_id(job,variant),
            'generation':generation,'size':size,'architecture':job['architecture'],

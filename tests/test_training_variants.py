@@ -28,6 +28,7 @@ def store(monkeypatch):
     monkeypatch.setattr(e.t2.sm,'describe_model_package',lambda **kw:{'ModelPackageStatus':'Completed'})
     monkeypatch.setattr(e.catalog_view,'run_numbers',lambda ids:{i:n+1 for n,i in enumerate(ids)})
     monkeypatch.setattr(e.record_store,'enabled',lambda:False)
+    monkeypatch.setattr(e.dataset_versions,'get',lambda ident:{'version_id':ident})
     return table,audits
 
 def payload(count=2):
@@ -74,7 +75,8 @@ def test_preparation_uses_same_pinned_inputs_and_unique_entries(store,monkeypatc
     monkeypatch.setattr(e.data,'mark_version',lambda *a,**kw:None)
     monkeypatch.setattr(e,'publish',lambda j,v,entry:entries.append(entry))
     for v in j['variants']:e.prepare_variant(j,v)
-    assert used==[('fixed-dataset',{'0':'helmet'})]*2
+    assert used==[('fixed-dataset',{'0':'helmet'})]
+    assert {x['dataset_version_id'] for x in entries}=={'replayed'}
     assert {x['base_model_key'] for x in entries}=={'pinned/best.pt'}
     assert len({x['id'] for x in entries})==2
     assert entries[0]['id']==e.entry_id(j,j['variants'][0])
@@ -230,7 +232,8 @@ def test_fresh_batch_prepares_once_and_replays_after_restart(store,monkeypatch):
     j=e.read(p['id'])
     e.prepare_variant(j,j['variants'][1])
     assert [x[0] for x in calls]==['prepare','freeze']
-    assert used==['fresh-shared','fresh-shared']
+    assert used==[]
+    assert j['working_dataset_version_id']=='fresh-shared'
     assert j['dataset_version_id']=='fresh-shared'
 
 
@@ -363,7 +366,7 @@ def test_scheduled_variants_pull_once_then_share_dataset(store,monkeypatch):
     monkeypatch.setattr(e,'publish',lambda j,v,entry:e.save(j))
     e.prepare_variant(j,j['variants'][0])
     restored=e.read(p['id']);e.prepare_variant(restored,restored['variants'][1])
-    assert calls==['pull','prepare','freeze',('replay','shared'),('replay','shared')]
+    assert calls==['pull','prepare','freeze']
     assert e.create(p,preparation_config=config,trigger='schedule')['id']==p['id']
     assert len(store[0].rows)==1
 

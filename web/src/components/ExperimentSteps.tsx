@@ -16,10 +16,11 @@ export function experimentSteps(run:VariantRunRecord):Step[]{
   const current=/Saving dataset records/i.test(stage)?3:/Preserving|Reading prepared/i.test(stage)?2:/decay/i.test(stage)?1:0;
   phase(['List source images and labels','Build the combined / decayed dataset','Preserve the selected images and labels','Save the shared dataset in SQL'],current,'shared',!!run.dataset_version_id,['Preparing','Needs attention'].includes(run.state)&&!run.dataset_version_id&&!/pull/i.test(stage),run.state==='Needs attention');
  }
+ if(run.working_dataset_version_id)steps.push({id:'shared-inputs',label:'Shared training input files (reused by all variants)',state:'Complete',percent:100});
  for(const variant of run.variants){
   const ownsStage=stage.startsWith(variant.name+':');
   const current=/Saving dataset records/i.test(stage)?2:/Rebuilding saved dataset/i.test(stage)?1:0;
-  phase([`${variant.name}: check central-store files`,`${variant.name}: rebuild training input files`,`${variant.name}: save run dataset records`],current,`variant-${variant.index}`,!!variant.run_id||variant.state==='Succeeded',!!run.dataset_version_id&&ownsStage&&['Preparing','Failed'].includes(variant.state),variant.state==='Failed'||run.state==='Needs attention');
+  if(!run.working_dataset_version_id)phase([`${variant.name}: check central-store files`,`${variant.name}: rebuild training input files`,`${variant.name}: save run dataset records`],current,`variant-${variant.index}`,!!variant.run_id||variant.state==='Succeeded',!!run.dataset_version_id&&ownsStage&&['Preparing','Failed'].includes(variant.state),variant.state==='Failed'||run.state==='Needs attention');
   const state:Step['state']=variant.state==='Succeeded'?'Complete':variant.state==='Failed'?'Failed':variant.state==='Stopped'?'Stopped':variant.state==='Queued'&&variant.training_status&&!['Queued','Pending'].includes(variant.training_status)?'In progress':'Waiting';
   steps.push({id:`train-${variant.index}`,label:`${variant.name}: train model (${String(variant.settings.epochs??'?')} epochs)`,state,percent:state==='Complete'?100:undefined,detail:variant.state==='Queued'?variant.training_status??'Queued':undefined});
  }

@@ -80,3 +80,22 @@ def test_export_reads_recorded_central_files_after_temporary_dataset_is_deleted(
     s3.files[dv._uri(member['central_label'])] = b'changed label'
     body, note = catalog_view._frozen(member['central_label'], member['stored_label'], member['central_label_etag'])
     assert body is None and 'changed' in note
+
+
+@pytest.mark.parametrize('state', ['Pending', 'Preparing', 'Training', 'Comparing', 'Needs attention'])
+def test_experiment_working_files_retained_until_terminal(prepared, monkeypatch, state):
+    from ppe_pipeline_api.chain import training_variants
+    config, s3, _ = prepared
+    version = pt.freeze(config)
+    dv.mark(version['version_id'], experiment_owner='experiment-1')
+    monkeypatch.setattr(catalog_view, '_rows', lambda *a: [{'id': version['version_id']}])
+    monkeypatch.setattr(training_variants, 'read', lambda ident: {'state': state})
+    before = dict(s3.files)
+    cr.cleanup_finished()
+    assert s3.files == before
+    monkeypatch.setattr(training_variants, 'read', lambda ident: {'state': 'Completed'})
+    cr.cleanup_finished()
+    assert dv.get(version['version_id'])['temporary_cleaned']
+    # Retrying after cleanup reconstructs exactly the same shared working folder.
+    cr.prepare_entry({'dataset_version_id': version['version_id']})
+    assert all(dv._uri(m['stored_image']) in s3.files for m in version['file_provenance'])
