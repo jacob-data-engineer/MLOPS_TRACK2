@@ -15,6 +15,7 @@ export type VariantSettingsSnapshot = {notes?:string;epochs:number;img_size:numb
 export type SavedTrainingVariant = {id:string;name:string;settings:VariantSettingsSnapshot;selected:boolean};
 export type TrainingVariantDraft = {batch_name?:string;id:string;revision:number;detector_slug:string;architecture:string;baseline_arn:string;dataset_version_id:string;data_mode?:"saved"|"prepared";variants:SavedTrainingVariant[]};
 export interface VariantRunRecord {
+  trigger?:string; pull_done?:boolean;
   id:string; name:string; state:string; stage?:string; error?:string; created_at:string;
   baseline_arn:string; dataset_version_id:string; data_mode?:"saved"|"prepared"; shared:Record<string,unknown>;
   variants:{index:number;name:string;state:string;training_status?:string;run_id?:string;run_number?:number;model_package_arn?:string;error?:string;settings:Record<string,unknown>}[];

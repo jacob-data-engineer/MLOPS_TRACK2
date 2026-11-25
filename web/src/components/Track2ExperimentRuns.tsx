@@ -1,3 +1,4 @@
+import {ExperimentSteps} from "./ExperimentSteps";
 import {StopTrainingButton} from "./StopTrainingButton";
 import {useEffect,useState} from 'react';
 import {usePageSnapshot} from '../lib/pageSnapshot';
@@ -15,16 +16,11 @@ export function ExperimentSummary({run,onRemoved}:{run:VariantRunRecord;onRemove
  async function remove(){setRetrying(true);setRetryError('');try{onRemoved?.(await removePendingVariantRun(run.id));}catch(e){setRetryError(e instanceof ApiError?e.detail:'Could not remove experiment.');}finally{setRetrying(false);}}
  const removable=run.state==='Pending'&&run.variants.every(v=>v.state==='Pending'&&!v.run_id);
  const finished=run.variants.filter(v=>terminalStates.includes(v.state)).length;
- const counts=/\((\d+)\s*\/\s*(\d+)\)/.exec(run.stage??'');
- const preparing=run.state==='Preparing'&&counts&&Number(counts[2])>0;
- const completed=preparing?Number(counts[1]):finished,total=preparing?Number(counts[2]):run.variants.length;
- const percent=total?Math.min(100,Math.round(completed/total*100)):0;
  return <section aria-label={`Experiment ${run.name}`} className="my-3 space-y-2 rounded border border-hairline p-3">
   <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{run.name}</h3>{removable&&<button type="button" disabled={retrying} className="rounded border px-3 py-1 text-sm" onClick={()=>void remove()}>Remove from queue</button>}</div>
   <p role="status" className="text-sm">{run.state}  /  {finished} / {run.variants.length} variants finished  /  {run.variants.filter(v=>v.state==='Succeeded').length} models trained</p>
   {run.stage&&<p className="text-xs">{run.stage}</p>}
-  <div role="progressbar" aria-label={preparing?'Dataset preparation progress':'Variant training progress'} aria-valuemin={0} aria-valuemax={total||1} aria-valuenow={completed} className="h-2 overflow-hidden rounded bg-black/10"><div className="h-full bg-accent" style={{width:`${percent}%`}}/></div>
-  <p className="text-xs">{completed.toLocaleString()} / {total.toLocaleString()} {preparing?'preparation items processed':'variants finished'} ({percent}%). {run.state==='Comparing'?'Baseline comparison is running.':''}</p>
+  <ExperimentSteps run={run}/>
   <p className="break-all text-xs">Base model: {run.baseline_arn.split('/').slice(-2).join(' / ')}  /  Dataset: {run.dataset_version_id||'Shared dataset will be prepared once'}</p>
   {run.error&&<p role="alert" className="text-critical">{run.error}</p>}
   <div className="overflow-x-auto"><table aria-label="Experiment variants" className="w-full text-left text-xs"><thead><tr>{['Order','Variant','Run','Epochs','Batch','Status','Registered model'].map(h=><th className="p-2" key={h}>{h}</th>)}</tr></thead><tbody>{run.variants.map(v=><tr key={v.index} className="border-t border-hairline"><td className="p-2">{v.index+1}</td><th className="p-2">{v.name}</th><td>{v.run_number!=null?`Run ${v.run_number}`:v.run_id?'Run number pending':'Not started'}</td><td>{String(v.settings.epochs??'--')}</td><td>{String(v.settings.batch??'--')}</td><td>{status(v)}{v.run_id&&v.state==='Queued'&&['Executing','Running','InProgress','Training'].includes(v.training_status??'')&&<StopTrainingButton runId={v.run_id} label={v.name}/ >}{v.error&&<p className="text-critical">{v.error}</p>}</td><td>{v.model_package_arn?.split('/').slice(-2).join(' / ')||'Not available yet'}</td></tr>)}</tbody></table></div>
