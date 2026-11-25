@@ -1,5 +1,6 @@
 """Authenticated baseline registry and same-validation comparisons."""
-from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Path
+from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field
 
 from ..auth import require_session
@@ -37,6 +38,16 @@ def register(payload: BaselineRequest, session=Depends(require_session)):
         return c.register_baseline(payload.source_arn, payload.label)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+
+
+@router.delete('/baselines/{version}')
+def delete_baseline(version: int = Path(ge=1), session=Depends(require_session)):
+    try:
+        return c.delete_baseline(version)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except ClientError as exc:
+        raise HTTPException(409, 'AWS could not delete this baseline version: ' + exc.response['Error'].get('Message', exc.response['Error']['Code'])) from exc
 
 
 @router.get('/saved-selection/{version_id}')

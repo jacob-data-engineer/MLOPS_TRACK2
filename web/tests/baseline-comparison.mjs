@@ -21,7 +21,8 @@ test('baseline registry, optional selection, saved-run results and retry', async
     const page = await browser.newPage({viewport:{width:1280,height:900}});
     const errors = [], requests = [];
     page.on('pageerror', e => errors.push(e.message));
-    let registered = false, uploaded = false;
+    let registered = false, uploaded = false, failDelete = true;
+    const deletions=[];
     const row = (role, score) => ({id:role,role,label:role, 'mAP50-95':score,mAP50:score,
       precision:score,recall:score,f1:score,fp:2,fn:3,
       delta_pp:Object.fromEntries(['mAP50-95','mAP50','precision','recall','f1'].map(k=>[k,role==='baseline'?0:5])),
@@ -30,7 +31,12 @@ test('baseline registry, optional selection, saved-run results and retry', async
     await page.route('**/track2/**', async route => {
       const req = route.request(), url = new URL(req.url());
       let response;
-      if (url.pathname.endsWith('/metrics')) response={rows:[{model_package_arn:'source-v1',group_name:'helmet',version:1}]};
+      if (url.pathname.endsWith('/baselines/2') && req.method()==='DELETE') {
+        deletions.push(2);
+        if(failDelete)return route.fulfill({status:409,json:{detail:'Baseline is currently in use.'}});
+        uploaded=false;response={deleted:true,version:2};
+      }
+      else if (url.pathname.endsWith('/metrics')) response={rows:[{model_package_arn:'source-v1',group_name:'helmet',version:1}]};
       else if (url.pathname.endsWith('/baselines/upload')) {
         assert.match(req.headers()['content-type'], /multipart\/form-data/);
         assert.match(req.postData(), /filename="direct.pt"/);
@@ -91,6 +97,23 @@ test('baseline registry, optional selection, saved-run results and retry', async
     await page.getByRole('status').filter({hasText:'Registered in the separate Baseline Model registry'}).waitFor();
     assert.equal(await page.getByLabel('Baseline Model version').inputValue(),'baseline-v2');
     assert.equal(uploaded,true);
+    await page.getByRole('button',{name:'Delete baseline model',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'Delete baseline model?',exact:true});
+    await dialog.getByText(/Delete v2: Direct baseline/).waitFor();
+    await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+    assert.deepEqual(deletions,[]);
+    await page.getByRole('button',{name:'Delete baseline model',exact:true}).click();
+    await dialog.getByRole('button',{name:'Delete baseline version',exact:true}).click();
+    await dialog.getByRole('alert').filter({hasText:'Baseline is currently in use.'}).waitFor();
+    assert.equal(await page.getByLabel('Baseline Model version').inputValue(),'baseline-v2');
+    failDelete=false;
+    await dialog.getByRole('button',{name:'Delete baseline version',exact:true}).click();
+    await dialog.waitFor({state:'detached'});
+    assert.deepEqual(deletions,[2,2]);
+    assert.equal(await page.getByLabel('Baseline Model version').inputValue(),'');
+    assert.equal(await page.locator('option[value="baseline-v2"]').count(),0);
+    assert.equal(await page.getByRole('button',{name:'Delete baseline model',exact:true}).isDisabled(),true);
+    assert.equal(await page.getByRole('status').filter({hasText:'Completed'}).count(),1);
     await page.screenshot({path:path.join(root,'../tmp/baseline-direct-upload.png'),fullPage:true});
     assert.deepEqual(errors,[]);
   } finally {

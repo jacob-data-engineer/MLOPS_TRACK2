@@ -126,6 +126,28 @@ def register_baseline(source_arn, label):
     return {'arn': created['ModelPackageArn']}
 
 
+def delete_baseline(version):
+    """Delete only this environment's baseline registration, retaining replay files."""
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError('Choose a valid baseline version.')
+    target = next((row for row in baseline_versions() if row['version'] == version), None)
+    if not target:
+        return {'deleted': True, 'version': version, 'already_absent': True}
+    arn = _arn(target['arn'])
+    if arn.split('/')[-2] != group_name():
+        raise ValueError('Only versions in this environment\'s Baseline Model registry can be deleted.')
+    try:
+        t2.sm.delete_model_package(ModelPackageName=arn)
+    except ClientError as exc:
+        code = exc.response['Error']['Code']
+        if code == 'ResourceNotFound' or (code == 'ValidationException' and 'does not exist' in str(exc).lower()):
+            return {'deleted': True, 'version': version, 'already_absent': True}
+        raise
+    # Pinned comparison files and recorded results remain valid. Do not reuse
+    # the training-model deletion helper: it detaches unrelated audit records.
+    return {'deleted': True, 'version': version, 'arn': arn}
+
+
 def _arn(value):
     if not isinstance(value, str) or not re.fullmatch(r'arn:aws:sagemaker:[a-z0-9-]+:\d{12}:model-package/[A-Za-z0-9-]+/\d+', value):
         raise ValueError('Select an exact registered model version.')

@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
-import {ApiError, getTrack2Metrics, listBaselineModels, registerBaselineModel, uploadBaselineModel,
+import {ApiError, getTrack2Metrics, listBaselineModels, registerBaselineModel, uploadBaselineModel, deleteBaselineModel,
   type BaselineSelection, type BaselineVersion, type Track2MetricsRow} from '../lib/api';
+import {ConfirmDialog} from './ConfirmDialog';
 
 export function Track2BaselineComparison({value, onChange, disabled = false, completed = false}: {
   value: BaselineSelection; onChange: (value: BaselineSelection) => void; disabled?: boolean; completed?: boolean;
@@ -16,6 +17,22 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
   const [notice, setNotice] = useState('');
   const [label, setLabel] = useState('');
   const [reload, setReload] = useState(0);
+  const [deleteTarget,setDeleteTarget] = useState<BaselineVersion|null>(null);
+  const [deleteError,setDeleteError] = useState('');
+  async function removeBaseline() {
+    if (!deleteTarget) return;
+    setBusy(true);setDeleteError('');setNotice('');
+    try {
+      await deleteBaselineModel(deleteTarget.version);
+      setVersions(rows=>rows.filter(row=>row.arn!==deleteTarget.arn));
+      setModels(rows=>rows.filter(row=>row.model_package_arn!==deleteTarget.arn));
+      onChange({...value,baseline_arn:value.baseline_arn===deleteTarget.arn?'':value.baseline_arn,
+        other_arns:(value.other_arns||[]).filter(arn=>arn!==deleteTarget.arn)});
+      setNotice(`Deleted baseline v${deleteTarget.version}: ${deleteTarget.label}. Choose another baseline before comparing.`);
+      setDeleteTarget(null);setReload(n=>n+1);
+    } catch(e) {setDeleteError(e instanceof ApiError?e.detail:'Could not delete this baseline.');}
+    finally {setBusy(false);}
+  }
   useEffect(() => {
     let active = true;
     setError('');
@@ -59,7 +76,6 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
       </select></label>}
       <label className="block">Baseline name<input className="my-1 block w-full rounded border border-hairline bg-page p-2" value={label} maxLength={200} onChange={e => setLabel(e.target.value)}/></label>
       <button type="button" disabled={(sourceKind === 'upload' ? !file : !source) || !label.trim() || busy} onClick={register} className="rounded border border-hairline px-3 py-2 disabled:opacity-40">{busy ? (sourceKind === 'upload' ? 'Uploading and registering…' : 'Registering…') : (sourceKind === 'upload' ? 'Upload and register baseline' : 'Register baseline version')}</button>
-      {notice && <p role="status" className="mt-2 text-xs">{notice}</p>}
       <ul className="mt-2 text-xs">{versions.map(v => <li key={v.arn}>v{v.version} · {v.label}</li>)}</ul>
     </details>
     {!value.enabled && <p className="text-xs text-ink-muted">No comparisons. Training will run normally.</p>}
@@ -73,6 +89,9 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
           {versions.map(v => <option key={v.arn} value={v.arn}>v{v.version} · {v.label}</option>)}
         </select>
       </label>
+      <button type="button" className="rounded border border-critical/40 px-3 py-2 text-critical disabled:opacity-40"
+        disabled={!versions.some(v=>v.arn===value.baseline_arn)}
+        onClick={()=>{setDeleteError('');setDeleteTarget(versions.find(v=>v.arn===value.baseline_arn)??null);}}>Delete baseline model</button>
       <label className="block">Other trained models (optional, up to four)
         <select multiple size={4} aria-label="Other comparison models" className="mt-1 block w-full rounded border border-hairline bg-page p-2"
           value={value.other_arns || []} onChange={e => onChange({...value,
@@ -86,6 +105,12 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
     </>}
 
     {error && <p role="alert" className="text-xs text-critical">{error}</p>}
+    {notice && <p role="status" className="text-xs">{notice}</p>}
+    <ConfirmDialog open={!!deleteTarget} title="Delete baseline model?" destructive busy={busy}
+      confirmLabel="Delete baseline version" onConfirm={()=>void removeBaseline()} onCancel={()=>setDeleteTarget(null)}
+      body={<><p>Delete v{deleteTarget?.version}: {deleteTarget?.label} from the Baseline Model registry?</p>
+        <p className="mt-2">Stored checkpoint files and existing comparison results are retained. Saved configurations using this version must select another baseline before starting a new comparison.</p>
+        {deleteError&&<p role="alert" className="mt-2 text-critical">{deleteError}</p>}</>}/>
     <button type="button" className="text-xs underline" onClick={() => setReload(n => n + 1)}>Refresh model lists</button>
   </fieldset>;
 }

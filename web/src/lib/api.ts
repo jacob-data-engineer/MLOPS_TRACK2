@@ -49,6 +49,9 @@ export interface RunComparisonSummary {
 export function listBaselineModels(): Promise<{versions: BaselineVersion[]}> {
   return apiGet('/track2/comparisons/baselines');
 }
+export function deleteBaselineModel(version:number):Promise<{deleted:boolean;version:number}> {
+  return apiDelete(`/track2/comparisons/baselines/${version}`);
+}
 export function registerBaselineModel(source_arn: string, label: string): Promise<{arn: string}> {
   return apiPost('/track2/comparisons/baselines', {source_arn, label});
 }

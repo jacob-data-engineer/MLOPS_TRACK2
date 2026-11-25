@@ -299,9 +299,10 @@
    ],
    "cards": [],
    "fields": [
+    "Delete baseline model?",
     "Other comparison models"
    ],
-   "text": "Other comparison models\nBaseline Comparison\nCompare this training run\nUpload a .pt checkpoint directly to the separate Baseline Model registry, or copy an existing registered version. Uploaded baselines are stored separately from training models.\nUpload .pt file\nExisting registered model\nBaseline checkpoint (.pt)\nObject detection checkpoint, up to 512 MB. Its class names are checked before registration.\nSource model version\nChoose a registered model\nBaseline name\nNo comparisons. Training will run normally.\nBaseline Model version\nSelect a baseline version\nOther trained models (optional, up to four)\nRefresh model lists"
+   "text": "Other comparison models\nDelete baseline model?\nBaseline Comparison\nCompare this training run\nUpload a .pt checkpoint directly to the separate Baseline Model registry, or copy an existing registered version. Uploaded baselines are stored separately from training models.\nUpload .pt file\nExisting registered model\nBaseline checkpoint (.pt)\nObject detection checkpoint, up to 512 MB. Its class names are checked before registration.\nSource model version\nChoose a registered model\nBaseline name\nNo comparisons. Training will run normally.\nBaseline Model version\nSelect a baseline version\nDelete baseline model\nOther trained models (optional, up to four)\nStored checkpoint files and existing comparison results are retained. Saved configurations using this version must select another baseline before starting a new comparison.\nRefresh model lists\nDelete baseline version"
   },
   {
    "id": "components/Track2BaseModelPicker.tsx",
