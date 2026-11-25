@@ -9,6 +9,8 @@ import {ApiError,listTrainingVariantDrafts,saveTrainingVariantDraft,listVariantR
 const uuid=()=>globalThis.crypto?.randomUUID?.()??'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return(c==='x'?r:(r&3)|8).toString(16);});
 const message=(e:unknown)=>e instanceof ApiError?e.detail:e instanceof Error?e.message:'Request failed.';
 const flatten=(s:VariantSettingsSnapshot):Record<string,unknown>=>{const {hyperparams,...base}=s;return {...base,...hyperparams};};
+// Settings and drafts are JSON API values; do not require secure-context structuredClone.
+const copyJson=<T,>(value:T):T=>JSON.parse(JSON.stringify(value));
 const show=(v:unknown)=>v===undefined?'—':JSON.stringify(v);
 
 export function Track2TrainingVariants({detector,architecture,baseline,dataset,settings}:{detector:string;architecture:string;baseline:string;dataset:string;settings:VariantSettingsSnapshot}){
@@ -26,16 +28,20 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,s
  async function refreshRuns(){try{setRuns((await listVariantRuns()).runs.filter(matches));}catch(e){setError(message(e));}}
  useEffect(()=>{void refreshDraft();void refreshRuns();const timer=setInterval(()=>void refreshRuns(),8000);return()=>clearInterval(timer);},[]);
  const variants=draft?.variants??[], selected=variants.filter(v=>v.selected);
+ const saveBlocked=!detector||!architecture?'Choose a model name and model type above.':!baseline?'Choose a registered starting model version above.':!dataset?'Choose Saved SQL dataset above and select a dataset before saving a variant.':!loaded?'Saved variants have not loaded. Use Refresh saved variants to retry.':!variantName.trim()?'Enter a variant name.':'';
  const run=runs.find(r=>r.id===selectedRun)??runs[0];
  useEffect(()=>{if(!run)return;let alive=true;Promise.all([getTrack2Metrics(),getTrack2RunsByModel()]).then(([m,r])=>{if(alive){setModels(m.rows);setModelRuns(r.runs);}}).catch(e=>{if(alive)setError(message(e));});return()=>{alive=false;};},[run?.id,run?.state]);
  const frozen:VariantSettingsSnapshot={...settings,hyperparams:{...effectiveHyperparams({},true),...settings.hyperparams}};
  async function persist(rows:SavedTrainingVariant[]){
-  setBusy(true);setError('');setReview(false);
+  setBusy(true);setError('');setNotice('');setReview(false);
   try{const saved=await saveTrainingVariantDraft({...context,revision:draft?.revision??0,variants:rows});setDraft(saved);setNotice('Variants saved in SQL. No training has started.');return true;}catch(e){setError(message(e));return false;}finally{setBusy(false);}
  }
  async function save(asNew:boolean){
-  const row={id:asNew?uuid():editing,name:variantName.trim(),settings:structuredClone(frozen),selected:true};
+  if(saveBlocked){setError(saveBlocked);return;}
+  try{
+  const row={id:asNew?uuid():editing,name:variantName.trim(),settings:copyJson(frozen),selected:true};
   if(await persist(asNew?[...variants,row]:variants.map(v=>v.id===editing?{...row,selected:v.selected}:v))){setEditing(row.id);setVariantName(row.name);}
+  }catch(e){setError(message(e));}
  }
  function edit(v:SavedTrainingVariant){
   setEditing(v.id);setVariantName(v.name);setReview(false);
@@ -44,7 +50,7 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,s
  }
  function duplicate(v:SavedTrainingVariant){
   let name=v.name+' copy',n=2;while(variants.some(row=>row.name===name))name=v.name+' copy '+n++;
-  void persist([...variants,{...structuredClone(v),id:uuid(),name}]);
+  void persist([...variants,{...copyJson(v),id:uuid(),name}]);
  }
  const payload={id:runId,name:batchName.trim()||`${detector} variants`,...context,shared:selected[0]?.settings??frozen,
   evaluation:{imgsz:selected[0]?.settings.img_size??640,confidence:.25,ap_conf:.001,nms_iou:.7,max_det:300},
@@ -61,15 +67,17 @@ export function Track2TrainingVariants({detector,architecture,baseline,dataset,s
   <h3 className="font-semibold">Save training setups as variants</h3>
   <p className="text-xs">Pick a model and baseline above, choose one saved SQL dataset, then change the normal training settings and save each setup here. Every variant starts from that same baseline and uses the same train/validation images.</p>
   {!ready&&<p role="status" className="text-xs">You can enter names now. To save or run variants, choose a registered starting version and a Saved SQL dataset above.</p>}
-  {error&&<p role="alert" className="text-critical">{error}</p>}{notice&&<p role="status" className="text-xs">{notice}</p>}
   <button type="button" disabled={busy} className="underline text-xs" onClick={()=>void refreshDraft()}>Refresh saved variants</button>
   <fieldset disabled={busy} className="min-w-0 space-y-3">
    <p className="break-all text-xs">Baseline: {baseline||'Not selected'}<br/>Dataset: {dataset||'Not selected'}</p>
    <label className="block">Variant name <input aria-label="Variant name" maxLength={100} className="rounded border p-2" value={variantName} onChange={e=>setVariantName(e.target.value)}/></label>
    <div className="flex flex-wrap gap-3">
-    <button type="button" disabled={!ready||!loaded||!variantName.trim()||variants.length>=20} className="rounded border px-3 py-2" onClick={()=>void save(true)}>{editing?'Save as new variant':'Save as variant'}</button>
+    <button type="button" disabled={!ready||!loaded||!variantName.trim()||variants.length>=20} className="rounded border px-3 py-2 disabled:opacity-40 disabled:cursor-not-allowed" onClick={()=>void save(true)}>{busy?'Saving...':editing?'Save as new variant':'Save as variant'}</button>
     {editing&&variants.some(v=>v.id===editing)&&<button type="button" disabled={!ready||!loaded||!variantName.trim()} className="rounded border px-3 py-2" onClick={()=>void save(false)}>Update variant</button>}
    </div>
+   {saveBlocked&&<p role="status" className="text-xs">{saveBlocked}</p>}
+   {error&&<p role="alert" className="text-critical">{error}</p>}
+   {notice&&<p role="status" className="text-xs">{notice}</p>}
    <details><summary>Current settings to save</summary><pre className="max-h-72 overflow-auto text-xs">{JSON.stringify(frozen,null,2)}</pre></details>
    <p className="text-xs">{variants.length}/20 saved variants. Highlighted values differ from the first saved variant. All displayed training defaults are captured. Saving does not start training.</p>
    <div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Run?</th><th>Variant</th>{columns.map(k=><th key={k} className="px-2">{k}</th>)}<th>Actions</th></tr></thead><tbody>{variants.map(v=><tr key={v.id} className="border-t"><td><input aria-label={`Run ${v.name}`} type="checkbox" checked={v.selected} onChange={e=>void persist(variants.map(row=>row.id===v.id?{...row,selected:e.target.checked}:row))}/></td><th className="p-2">{v.name}</th>{columns.map(k=><td key={k} className={`p-2 ${show(flatten(v.settings)[k])!==show(first[k])?'bg-amber-100':''}`}>{show(flatten(v.settings)[k])}</td>)}<td className="whitespace-nowrap space-x-3"><button type="button" className="underline" onClick={()=>edit(v)}>Edit</button><button type="button" disabled={variants.length>=20} className="underline" onClick={()=>duplicate(v)}>Duplicate</button><button type="button" className="underline" onClick={()=>void persist(variants.filter(row=>row.id!==v.id))}>Remove</button></td></tr>)}</tbody></table></div>

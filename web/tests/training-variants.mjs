@@ -12,10 +12,11 @@ test('normal training controls save isolated variants without launching, restore
  const arn='arn:aws:sagemaker:ap-southeast-1:123456789012:model-package/yolo26s-helmet-detector/9';
  await writeFile(path.join(harness,'main.tsx'),`import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {Track2DetectorsPanel} from '../src/components/Track2DetectorsPanel';import {Track2TrainingVariants} from '../src/components/Track2TrainingVariants';import '../src/index.css';
  function Harness(){const [s,setS]=useState({epochs:20,img_size:640,batch:16,seed:42,patience:0,hyperparams:{}});const [dataset,setDataset]=useState('');return <><Track2DetectorsPanel onTraining={t=>setS({epochs:t.epochs,img_size:t.imgSize,batch:t.batch,seed:t.seed,patience:t.patience,hyperparams:t.hyperparams})}/><button onClick={()=>setDataset(dataset==='saved-data'?'other-data':'saved-data')}>Switch dataset</button><Track2TrainingVariants key={dataset} detector="helmet" architecture="yolo26s" baseline="${arn}" dataset={dataset} settings={s}/></>;}createRoot(document.getElementById('root')).render(<Harness/>);`);
- let server,browser,drafts=[],runs=[],launches=[];
+ let server,browser,drafts=[],runs=[],launches=[],failSave=true;
  try{
   server=await createServer({root,server:{host:'127.0.0.1',port:0}});await server.listen();
   browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});const page=await browser.newPage({viewport:{width:1500,height:1000}});
+  await page.addInitScript(()=>{window.structuredClone=undefined;});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/track2/**',route=>{
    const req=route.request(),p=new URL(req.url()).pathname;let body={};
@@ -23,7 +24,7 @@ test('normal training controls save isolated variants without launching, restore
    else if(p.endsWith('/detectors'))body={detectors:[{slug:'helmet',label:'Helmet',classes:{0:'helmet'},groups:{s:'yolo26s-helmet-detector'},groups_by_generation:{'26':{s:'yolo26s-helmet-detector'}}}],sizes:['s'],generations:[{generation:'26',label:'YOLO26',sizes:['s'],size_labels:{s:'Small'}}]};
    else if(p.endsWith('/buckets'))body={buckets:[]};
    else if(p==='/track2/training-variants/drafts'){
-    if(req.method()==='PUT'){const incoming=req.postDataJSON();body={...incoming,id:incoming.dataset_version_id,revision:incoming.revision+1};drafts=[...drafts.filter(d=>d.dataset_version_id!==incoming.dataset_version_id),structuredClone(body)];}
+    if(req.method()==='PUT'){if(failSave){failSave=false;return route.fulfill({status:422,json:{detail:'Save rejected for test; retry.'}});}const incoming=req.postDataJSON();body={...incoming,id:incoming.dataset_version_id,revision:incoming.revision+1};drafts=[...drafts.filter(d=>d.dataset_version_id!==incoming.dataset_version_id),structuredClone(body)];}
     else body={drafts};
    }else if(p==='/track2/training-variants'){
     if(req.method()==='POST'){const incoming=req.postDataJSON();launches.push(incoming);body={...incoming,state:'Training',created_at:'2026-11-25',variants:incoming.variants.map((v,i)=>({index:i,name:v.name,settings:v.overrides,state:'Queued',run_number:74+i}))};runs=[body];}
@@ -39,6 +40,9 @@ test('normal training controls save isolated variants without launching, restore
   assert.equal(await page.getByRole('button',{name:'Review selected variants',exact:true}).isDisabled(),true);
   await page.getByRole('button',{name:'Switch dataset',exact:true}).click();
   await page.getByLabel('Variant name',{exact:true}).fill('Reference settings');
+  await page.getByRole('button',{name:'Save as variant',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'Save rejected for test; retry.'}).waitFor();
+  assert.equal(await page.getByLabel('Variant name',{exact:true}).inputValue(),'Reference settings');
   await page.getByRole('button',{name:'Save as variant',exact:true}).click();
   await page.getByRole('checkbox',{name:'Run Reference settings',exact:true}).waitFor();
   assert.equal(launches.length,0);
