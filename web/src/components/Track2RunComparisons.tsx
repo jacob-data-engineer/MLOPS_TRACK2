@@ -3,6 +3,7 @@ import {ApiError, listRunComparisons, runBaselineComparison, type BaselineSelect
   type RunComparisonSummary} from '../lib/api';
 import {Track2BaselineComparison} from './Track2BaselineComparison';
 import {formatDayTime} from '../lib/format';
+import {Track2BaselineChart} from './Track2BaselineChart';
 
 const metrics = ['mAP50-95', 'mAP50', 'precision', 'recall', 'f1'] as const;
 export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun?: string; onRunChange?: (id: string) => void} = {}) {
@@ -49,6 +50,7 @@ export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun
         {['Failed','Unavailable'].includes(run.status) && <button type="button" disabled={busy} onClick={() => start(true)} className="ml-2 rounded border border-hairline px-3 py-2 text-sm">Retry saved comparison</button>}
       </details>}
       {result?.status === 'Completed' && <>
+        <Track2BaselineChart rows={result.rows ?? []} />
         <p className="my-2 break-all text-xs">{result.validation_images} validation images · Dataset {result.dataset_version_id}<br/>Snapshot: {result.snapshot_id}</p>
         <p className="my-2 text-xs">Overall precision, recall and F1 are calculated from total detections across classes, at confidence {result.settings?.confidence}. AP uses confidence {result.settings?.ap_conf}; image size {result.settings?.imgsz}. Evaluator: Ultralytics {result.ultralytics_version}. Differences are percentage points from baseline.</p>
         <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr>

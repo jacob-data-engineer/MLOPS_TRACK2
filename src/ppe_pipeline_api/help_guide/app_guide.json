@@ -278,6 +278,16 @@
    "text": "Selection weeks\nShow the images and labels folders inside\n-- not present\nShows what is actually in the week folders the pull filled: how many images each week holds on the train and val sides, and which ones are empty. Tick a week out to leave it behind.\nEvery week is included unless you tick it out, so the week created next month is picked up with no action at all. That is the point of the card -- a retrain that quietly misses the newest data because somebody forgot to add a folder is the failure it removes.\ndata.yaml\nin the Retention section below, which names these folders where they already are.\n(holds the week folders; images/ and labels/ come from the pull control)\nFollow the pull control again\nChoose the folder that CONTAINS the week folders\nCancel\n, with no train/val split inside, so say which side each one feeds\nfolder\ntrain\nval\nimages\npaired\neverything in the root\nOne root of week folders, and what each one holds. The dataset itself is built from the data.yaml below.\nChoose the root folder...\nLooking...\nReload"
   },
   {
+   "id": "components/Track2BaselineChart.tsx",
+   "file": "components/Track2BaselineChart.tsx",
+   "pages": [],
+   "cards": [],
+   "fields": [
+    "Baseline comparison bar charts"
+   ],
+   "text": "Baseline comparison bar charts\nScores: higher is better. All score bars use the same 0–100% scale.\nError counts: lower is better. Bars share a scale within each chart."
+  },
+  {
    "id": "components/Track2BaselineComparison.tsx",
    "file": "components/Track2BaselineComparison.tsx",
    "pages": [

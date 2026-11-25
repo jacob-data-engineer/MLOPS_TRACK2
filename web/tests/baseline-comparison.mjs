@@ -65,6 +65,11 @@ test('baseline registry, optional selection, saved-run results and retry', async
     await page.getByRole('status').filter({hasText:'Completed'}).waitFor();
     assert.deepEqual(requests[0], {selection:{enabled:true,baseline_arn:'baseline-v1',other_arns:['source-v1']}});
     assert.equal(await page.getByText('+5.00 pp',{exact:false}).count(),5);
+    const charts=page.getByLabel('Baseline comparison bar charts',{exact:true});
+    assert.equal(await charts.getByRole('img').count(),14);
+    const scoreBars=charts.getByRole('region',{name:'mAP50 comparison',exact:true}).getByRole('img');
+    assert.equal(await scoreBars.count(),2);
+    assert.match(await scoreBars.first().getAttribute('aria-label'),/Baseline/);
     await page.getByText('Per-class results',{exact:true}).click();
     assert.equal(await page.getByRole('cell',{name:'helmet',exact:true}).count(),2);
     await page.screenshot({path:path.join(root,'../tmp/baseline-comparison-results.png'),fullPage:true});
