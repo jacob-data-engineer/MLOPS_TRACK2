@@ -11,16 +11,6 @@ export const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export interface BaselineSelection { enabled: boolean; baseline_arn?: string; other_arns?: string[] }
-export interface ExperimentRecord {
-  id:string; name:string; state:string; stage?:string; error?:string; created_at:string;
-  baseline_arn:string; dataset_version_id:string; shared:Record<string,unknown>;
-  variants:{index:number;name:string;state:string;training_status?:string;run_id?:string;run_number?:number;model_package_arn?:string;error?:string;settings:Record<string,unknown>}[];
-  comparison?:RunComparisonSummary['comparison'];
-}
-export function listExperiments():Promise<{experiments:ExperimentRecord[]}>{return apiGet('/track2/experiments');}
-export function startExperiment(payload:unknown):Promise<ExperimentRecord>{return apiPost('/track2/experiments',payload);}
-export function retryExperiment(id:string,index?:number):Promise<ExperimentRecord>{return apiPost(`/track2/experiments/${encodeURIComponent(id)}/retry`,{index});}
-export function getExperimentReport(id:string):Promise<ExperimentRecord>{return apiGet(`/track2/experiments/${encodeURIComponent(id)}/report`);}
 export interface PtInspection {filename:string; size_bytes:number; classes:{id:number;name:string}[]; metadata:Record<string,unknown>; notice:string; registry?:Record<string,unknown>}
 export function inspectPtUpload(file:File):Promise<PtInspection> {const data=new FormData();data.append('file',file);return apiPostForm('/track2/pt-view/upload',data);}
 export function inspectPtRegistered(arn:string):Promise<PtInspection> {return apiPost('/track2/pt-view/registered',{arn});}

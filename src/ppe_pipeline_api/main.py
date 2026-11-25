@@ -35,7 +35,6 @@ from .routers import (
     track2_metrics,
     track2_comparisons,
     track2_pt_view,
-    track2_experiments,
     track2_assistant,
     track2_models,
     track2_notifications,
@@ -83,8 +82,6 @@ async def lifespan(app: FastAPI):
     # single-process only, same as session_store.py.
     poll_task = (asyncio.create_task(ticker.queue_poll_loop())
                  if background_enabled() and os.environ.get('APP_EXTERNAL_WORKER') != 'true' else None)
-    from .chain.background_worker import preparation_loop
-    preparation_task = asyncio.create_task(preparation_loop()) if poll_task is not None else None
     # Fill the registry cache before anybody asks for it.
     #
     # Review & Metrics lists every model package group and describes every
@@ -106,8 +103,6 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        if preparation_task is not None:
-            preparation_task.cancel()
         if poll_task is not None:
             poll_task.cancel()
         warm_task.cancel()
@@ -145,7 +140,6 @@ app.include_router(track2_lineage.router, prefix="/track2/lineage", tags=["track
 app.include_router(track2_metrics.router, prefix="/track2/metrics", tags=["track2-metrics"])
 app.include_router(track2_comparisons.router, prefix="/track2/comparisons", tags=["track2-comparisons"])
 app.include_router(track2_pt_view.router, prefix="/track2/pt-view", tags=["track2-pt-view"])
-app.include_router(track2_experiments.router, prefix="/track2/experiments", tags=["track2-experiments"])
 # The in-app help guide (2026-11-20): read-only, off until HELP_CHAT_ENABLED.
 app.include_router(track2_assistant.router, prefix="/track2/assistant", tags=["track2-assistant"])
 app.include_router(track2_deploy.router, prefix="/track2/deploy", tags=["track2-deploy"])

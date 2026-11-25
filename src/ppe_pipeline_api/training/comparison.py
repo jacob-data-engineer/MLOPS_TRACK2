@@ -234,8 +234,6 @@ def _start(audit, state):
         'role': 'trained', 'label': 'Selected run: ' + candidate.split('model-package/')[-1]}
     settings = {'imgsz': int((audit.get('parameters') or {}).get('img_size') or 640),
                 'ap_conf': 0.001, 'confidence': 0.25, 'nms_iou': 0.7, 'max_det': 300}
-    if state.get('experiment_id'):
-        settings.update(state.get('evaluation') or {})
     manifest = {'validation': validation, 'models': [candidate_model, *state['selection']['models']],
                 'settings': settings, 'image': image}
     prefix = f'comparisons/{os.getenv("CATALOG_SCHEMA", "production")}/{state["id"]}'
