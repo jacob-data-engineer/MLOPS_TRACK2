@@ -10,6 +10,8 @@ from botocore.exceptions import ClientError
 
 from .. import data, pull_control as pc, record_store
 
+from . import training_control as control
+
 KIND = 'prepared_training_job'
 
 
@@ -41,6 +43,7 @@ def latest():
 
 def submit(config=None, *, trigger='manual', submit='enqueue', overrides=None, schedule_slot=None):
     data.require_training_sql()
+    control.checkpoint()
     if submit not in ('enqueue', 'queue', 'start'):
         raise ValueError('Choose enqueue, queue or start.')
     stamp = schedule_slot or now()
@@ -70,6 +73,7 @@ def submit(config=None, *, trigger='manual', submit='enqueue', overrides=None, s
 
 def publish(job, entry):
     """Commit queue entry, queue switch and finished job in ONE transaction."""
+    control.checkpoint(job.get('_stop_generation'))
     queue = record_store.Table(os.getenv('TRAINING_AUDIT_TABLE', 'track2-yolo-training-audit'))
     job.update(state='completed', stage='Added to training queue', percent=100,
                entry_id=entry['id'], dataset_version_id=entry['dataset_version_id'], updated_at=now())
@@ -89,13 +93,16 @@ def publish(job, entry):
 @record_store.exclusive('prepared_training_jobs')
 def tick():
     from .prepared_training import queue_prepared
+    if control.state().get('halted'): return
     active = jobs(active=True)
     if not active:
         return
     job = active[0]
+    job['_stop_generation'] = control.checkpoint()
     last_progress = 0
     def progress(stage, completed, total):
         nonlocal last_progress
+        control.checkpoint(job['_stop_generation'])
         if stage == job.get('stage') and completed != total and time.monotonic() - last_progress < 2:
             return
         last_progress = time.monotonic()
@@ -144,6 +151,9 @@ def tick():
         queue_prepared(job['config'], trigger=job['trigger'], submit=job['submit'],
                        overrides=job['overrides'], progress=progress, entry_id=job['id'],
                        publish=lambda entry: publish(job, entry))
+    except control.Stopped as exc:
+        job.update(state='cancelled',stage=str(exc),updated_at=now())
+        table().put_item(Item=job)
     except Exception as exc:
         # A killed process leaves 'running', which the replacement worker resumes.
         job.update(state='failed', stage='Preparation failed', error=str(exc), updated_at=now())

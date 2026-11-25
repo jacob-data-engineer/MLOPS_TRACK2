@@ -28,6 +28,7 @@ def store(monkeypatch):
     monkeypatch.setattr(e.t2.sm,'describe_model_package',lambda **kw:{'ModelPackageStatus':'Completed'})
     monkeypatch.setattr(e.catalog_view,'run_numbers',lambda ids:{i:n+1 for n,i in enumerate(ids)})
     monkeypatch.setattr(e.record_store,'enabled',lambda:False)
+    monkeypatch.setattr(e.control,'state',lambda:{'halted':False,'generation':''})
     monkeypatch.setattr(e.dataset_versions,'get',lambda ident:{'version_id':ident})
     return table,audits
 

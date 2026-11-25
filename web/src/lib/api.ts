@@ -4447,3 +4447,8 @@ export function deleteTrack2AssistantDoc(name: string): Promise<{ name: string; 
 }
 
 export function stopSelectedTraining(runId:string):Promise<{message:string}>{return apiPost("/track2/models/train/stop-selected",{run_id:runId});}
+
+export type TrainingControl = {halted:boolean;message?:string;problems?:string[];pending?:boolean};
+export function getTrainingControl():Promise<TrainingControl>{return apiGet('/track2/models/train/control');}
+export function stopAllTraining():Promise<TrainingControl>{return apiPost('/track2/models/train/stop-all',{});}
+export function enableTrainingAutomation():Promise<TrainingControl>{return apiPost('/track2/models/train/enable-automation',{});}

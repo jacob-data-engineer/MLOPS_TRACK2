@@ -1257,3 +1257,25 @@ def stop_selected_training(payload: StopSelectedRunRequest, session=Depends(requ
     except Exception as exc:
         raise HTTPException(502,f'Could not stop the selected training run: {exc}') from exc
     return {'message':'Stop requested for this training run. Remaining queued variants will continue.'}
+
+
+@router.get('/train/control')
+def training_control_status(session=Depends(require_session)):
+    from ..chain import training_control
+    return training_control.state()
+
+@router.post('/train/stop-all')
+def stop_all_training(session=Depends(require_session)):
+    from ..chain import training_control
+    try: return training_control.stop()
+    except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
+@router.post('/train/enable-automation')
+def enable_training_automation(session=Depends(require_session)):
+    from ..chain import training_control
+    try:
+        result=training_control.resume()
+        if 'halted' not in result:
+            raise ValueError('Preparation or submission is still stopping. Try again shortly.')
+        return result
+    except ValueError as exc: raise HTTPException(409,str(exc)) from exc

@@ -276,6 +276,8 @@ def _start(audit, state):
     for name, key, path in [('manifest', manifest_key, 'input'), ('code', script_key, 'code')]:
         inputs.append({'InputName': name, 'S3Input': {'S3Uri': f's3://{t2.BUCKET}/{key}',
             'LocalPath': '/opt/ml/processing/' + path, 'S3DataType': 'S3Prefix', 'S3InputMode': 'File'}})
+    from ..chain import training_control
+    training_control.checkpoint()
     t2.sm.create_processing_job(ProcessingJobName=job, RoleArn=role,
         AppSpecification={'ImageUri': image, 'ContainerEntrypoint': ['python3', '/opt/ml/processing/code/comparison_runner.py']},
         ProcessingResources={'ClusterConfig': {'InstanceCount': 1, 'InstanceType': 'ml.m5.xlarge', 'VolumeSizeInGB': 50}},
@@ -288,6 +290,8 @@ def _start(audit, state):
 
 
 def advance(audit):
+    from ..chain import training_control
+    if training_control.state().get('halted'): return
     state = record_store.native_numbers(audit.get('comparison') or {})
     if not state:
         selected = selection_for(audit)

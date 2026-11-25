@@ -26,7 +26,7 @@ def check(version_id, target_classes):
     target = _classes(target_classes)
     if set(source.values()) != set(target.values()):
         raise ValueError('Saved dataset and model must have the same class names. Subset training is not supported here.')
-    cr.verify_central(version)
+    cr.verify_central(version, check_cancel=True)
     verify_members(version)
     return {'version_id': version_id, 'created_at': version.get('created_at', ''),
             'run_id': version.get('run_id', ''), 'train_images': version['train_images'],
@@ -48,6 +48,8 @@ def prepare(version_id, *, target_classes, trigger='manual', progress=None):
     recipe = {'schema': 1, 'store_uri': source['central_recipe']['store_uri'], 'bucket': bucket, 'folder': folder}
 
     def one(item):
+        from ..chain import training_control
+        training_control.checkpoint_fast()
         index, member = item
         side = member['split']
         if side not in ('train', 'val'):

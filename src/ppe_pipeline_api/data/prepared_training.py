@@ -99,6 +99,8 @@ def freeze(config: dict, *, trigger='manual', target_classes=None, progress=None
     completed, last_report = 0, 0.0
 
     def preserve(item):
+        from ..chain import training_control
+        training_control.checkpoint_fast()
         nonlocal completed, last_report
         key, relative, side, obj = item
         target = f'{folder}/{relative}'

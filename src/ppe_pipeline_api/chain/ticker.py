@@ -33,6 +33,14 @@ async def queue_poll_loop() -> None:
     while True:
         await asyncio.sleep(25)
         try:
+            from . import training_control
+            if await asyncio.to_thread(lambda: training_control.state().get('halted')):
+                await asyncio.to_thread(training_control.sweep)
+                continue
+        except Exception as exc:
+            print(f'Training stop control unavailable: {exc}')
+            continue
+        try:
             from ..data import sql_sensor
             from . import queue_after_pull
             # The sensor lives on the data side and may not import the

@@ -154,9 +154,16 @@ resource "aws_iam_role_policy_attachment" "training_audit" {
 #   matches what is in the registry.
 data "aws_iam_policy_document" "training_control" {
   statement {
+    sid       = "StopRecordedTrainingBuilds"
+    effect    = "Allow"
+    actions   = ["codebuild:StopBuild"]
+    resources = ["arn:aws:codebuild:${var.region}:${local.account_id}:project/track2-yolo-run-pipeline"]
+  }
+
+  statement {
     sid       = "RunBaselineComparisons"
     effect    = "Allow"
-    actions   = ["sagemaker:CreateProcessingJob", "sagemaker:DescribeProcessingJob"]
+    actions   = ["sagemaker:CreateProcessingJob", "sagemaker:DescribeProcessingJob", "sagemaker:StopProcessingJob"]
     resources = ["arn:aws:sagemaker:${var.region}:${local.account_id}:processing-job/track2-compare-*"]
   }
   statement {

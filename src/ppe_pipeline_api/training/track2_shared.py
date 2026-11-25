@@ -4703,6 +4703,8 @@ def start_training_run(generation, size, epochs, dataset_folder, base_model_fold
             {"name": "TRACK2_RECORD_BACKEND", "value": "postgres", "type": "PLAINTEXT"},
             {"name": "CATALOG_SCHEMA", "value": os.environ["CATALOG_SCHEMA"], "type": "PLAINTEXT"},
         ])
+    from ..chain import training_control
+    training_control.checkpoint()
     response = codebuild.start_build(
         projectName=RUN_PIPELINE_CODEBUILD_PROJECT,
         environmentVariablesOverride=env_overrides,
@@ -5175,6 +5177,8 @@ def start_custom_training_run(
         },
     )
     try:
+        from ..chain import training_control
+        training_control.checkpoint()
         response = sm.start_pipeline_execution(
             PipelineName=pipeline_name,
             **({"PipelineVersionId": pipeline_version} if pipeline_version else {}),
@@ -5529,6 +5533,8 @@ def try_advance_queue() -> None:
     entry, pops it and starts it."""
     global _queue_running, _queue_started, _queue_completed_count
     global _queue_last_error, _queue_starting
+    from ..chain import training_control
+    if training_control.state().get('halted'): return
     if record_store.enabled():
         restore_queue(refresh=True)
     with _queue_lock:

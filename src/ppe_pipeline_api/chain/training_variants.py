@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError
 from .. import data, pull_control as pc, record_store
 from ..training import track2_shared as t2, comparison as cmp
 from ..data import catalog_view, dataset_versions
+from . import training_control as control
 
 KIND = 'training_variant_run'
 DRAFT_KIND = 'training_variant_draft'
@@ -91,6 +92,7 @@ def settings(raw):
 
 def create(payload, *, preparation_config=None, trigger="manual"):
     data.require_training_sql()
+    control.checkpoint()
     ident = str(uuid.UUID(payload['id']))
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     existing = table().get_item(Key={'kind':KIND,'sort':ident}).get('Item')
@@ -165,6 +167,7 @@ def pin(arn, role, label):
 
 def publish(job, variant, entry):
     """Queue switch, entry and experiment state commit together, or not at all."""
+    control.checkpoint(job.get('_stop_generation'))
     queue=record_store.Table(os.getenv('TRAINING_AUDIT_TABLE','track2-yolo-training-audit'))
     variant.update(state='Queued',run_id='run-'+entry['id'],entry_id=entry['id'],dataset_version_id=entry['dataset_version_id'])
     job.update(state='Training',stage=f"Queued {variant['name']}",updated_at=now())
@@ -178,11 +181,13 @@ def publish(job, variant, entry):
 
 @record_store.exclusive('prepared_training_jobs')
 def prepare_variant(job, variant):
+    job['_stop_generation']=control.checkpoint()
     snapshot=t2.queue_snapshot()
     if snapshot.get('pending') or snapshot.get('running'):
         job['stage']='Waiting for the training queue';save(job);return
     variant['state']='Preparing';job['state']='Preparing';save(job)
     def progress(stage, completed, total):
+        control.checkpoint(job['_stop_generation'])
         job['stage']=f"{variant['name']}: {stage}" + (f' ({completed}/{total})' if total else '')
         save(job)
     if job.get('trigger')=='schedule' and not job.get('pull_done'):
@@ -236,6 +241,7 @@ def prepare_variant(job, variant):
     publish(job,variant,entry)
 
 def compare(job, successful):
+    control.checkpoint()
     audit_table=t2.training_audit_table()
     ident='experiment-comparison-'+job['id']+'-'+str(job['comparison_attempt'])
     audit=audit_table.get_item(Key={'id':ident}).get('Item')
@@ -299,12 +305,15 @@ def advance_current(ident):
         if job['state'] in ('Pending','Preparing','Training','Comparing'):
             try:
                 advance(job)
+            except control.Stopped as exc:
+                job.update(state='Cancelled',stage=str(exc));save(job)
             except Exception as exc:
                 job.update(state='Needs attention',error=str(exc)[:1500]);save(job)
     return record_store.exclusive('training_variant:'+ident)(owned)()
 
 @record_store.exclusive('training_variants')
 def tick():
+    if control.state().get('halted'): return
     if not record_store.enabled():
         return
     for job in reversed(all_records()):

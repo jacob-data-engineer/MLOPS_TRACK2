@@ -1,3 +1,4 @@
+import {TrainingStopAll} from '../components/TrainingStopAll';
 import {StopTrainingButton} from "../components/StopTrainingButton";
 import {Track2ExperimentRuns} from "../components/Track2ExperimentRuns";
 import {Track2TrainingMode,type TrainingMode} from "../components/Track2TrainingMode";
@@ -1535,6 +1536,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             }
           >
             {!stoppableOwnRun && foreignGpuJobs.length === 0 && <p className="mb-2 text-xs text-ink-muted">Stop Training becomes available when a training job starts. It does not cancel dataset preparation.</p>}
+            <TrainingStopAll />
             {/* The answer, where the question was asked. The buttons are
                 in this card's header; the page's own banners are nearly
                 three hundred lines above, off the top of the screen. */}

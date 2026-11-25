@@ -73,7 +73,7 @@ def _uri(uri):
     return uri[5:].split('/', 1)
 
 
-def verify_central(version):
+def verify_central(version, *, check_cancel=False):
     """Never discard the temporary copy if its permanent inputs were lost."""
     recipe = version['central_recipe']
     bucket, folder = _target(recipe)
@@ -82,6 +82,8 @@ def verify_central(version):
     if len(members) != version['train_images'] + version['val_images']:
         raise ValueError('The saved central-store file recipe is incomplete.')
     def one(member):
+        from ..chain import training_control
+        if check_cancel: training_control.checkpoint_fast()
         for kind in ('image', 'label'):
             uri = member[f'central_{kind}']
             if not uri.startswith(prefix) or uri.startswith(f's3://{bucket}/{folder}/'):
@@ -109,6 +111,8 @@ def restore(version):
     dv.mark(version['version_id'], strict=True, temporary_cleaned=False)
 
     def one(member):
+        from ..chain import training_control
+        training_control.checkpoint_fast()
         for kind in ('image', 'label'):
             source_bucket, source_key = _uri(member[f'central_{kind}'])
             expected = member[f'central_{kind}_etag']

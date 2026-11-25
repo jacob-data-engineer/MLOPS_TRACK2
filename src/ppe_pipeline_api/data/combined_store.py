@@ -86,6 +86,8 @@ def _report(progress, phase: str, done: int, total: int) -> None:
 
 
 def _check(stop) -> None:
+    from ..chain import training_control
+    training_control.checkpoint_fast()
     if stop is not None and stop():
         raise Stopped("Stopped by hand.")
 
