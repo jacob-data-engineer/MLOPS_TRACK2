@@ -16,7 +16,7 @@ test('PT View reads uploads and registered models and clears stale classes',asyn
   let calls=[];
   await page.route('**/track2/**',route=>{
    const p=new URL(route.request().url()).pathname;
-   if(p.endsWith('/metrics'))return route.fulfill({json:{rows:[{model_package_arn:'arn:test',registry:'helmet',generation:'26',size:'s',version:'12'}]}});
+   if(p.endsWith('/registered')&&route.request().method()==='GET')return route.fulfill({json:{models:[{arn:'arn:test',label:'helmet · YOLO26-s · v12',status:'Completed'}]}});
    if(!p.includes('/pt-view/'))return route.fulfill({json:{}});
    calls.push(p);
    if(p.endsWith('/registered'))assert.equal(route.request().postDataJSON().arn,'arn:test');

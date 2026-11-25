@@ -1,15 +1,23 @@
 ﻿import {useEffect, useState} from 'react';
 import {Card} from '../components/Card';
-import {ApiError, getTrack2Metrics, inspectPtUpload, inspectPtRegistered, type PtInspection, type Track2MetricsRow} from '../lib/api';
+import {ApiError, listPtRegistered, inspectPtUpload, inspectPtRegistered, type PtInspection} from '../lib/api';
 export function Track2PtViewPage() {
   const [mode,setMode]=useState<'upload'|'registered'>('upload');
-  const [rows,setRows]=useState<Track2MetricsRow[]>([]);
+  const [rows,setRows]=useState<{arn:string;label:string;status:string}[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [listError,setListError]=useState('');
   const [arn,setArn]=useState('');
   const [file,setFile]=useState<File|null>(null);
   const [result,setResult]=useState<PtInspection|null>(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
-  useEffect(()=>{getTrack2Metrics().then(r=>setRows(r.rows)).catch(()=>setError('Could not load registered models. Refresh to retry.'));},[]);
+  async function loadModels() {
+    setLoading(true);setListError('');
+    try {setRows((await listPtRegistered()).models);}
+    catch(e){setListError(e instanceof ApiError?e.detail:'Could not load registered models. Use Refresh models to retry.');}
+    finally{setLoading(false);}
+  }
+  useEffect(()=>{void loadModels();},[]);
   async function inspect() {
     setBusy(true);setError('');setResult(null);
     try {setResult(mode==='upload' ? await inspectPtUpload(file!) : await inspectPtRegistered(arn));}
@@ -26,9 +34,12 @@ export function Track2PtViewPage() {
           <label><input type="radio" name="pt-source" checked={mode==='registered'} onChange={()=>{setMode('registered');setResult(null);setError('');}}/> Registered model</label>
         </div>
         {mode==='upload' ? <label className="block">Checkpoint file (.pt, up to 512 MB)<input type="file" accept=".pt" className="mt-2 block" onChange={e=>{setFile(e.target.files?.[0]??null);setResult(null);}}/></label> :
-          <label className="block">Registered model<select className="mt-2 block w-full rounded border border-hairline bg-page p-2" value={arn} onChange={e=>{setArn(e.target.value);setResult(null);}}>
-            <option value="">Choose a model version</option>{rows.map(r=><option key={r.model_package_arn} value={r.model_package_arn}>{r.registry} · YOLO{r.generation}-{r.size.toUpperCase()} · v{r.version}</option>)}
-          </select></label>}
+          <div><label className="block">Registered model<select disabled={loading} className="mt-2 block w-full rounded border border-hairline bg-page p-2" value={arn} onChange={e=>{setArn(e.target.value);setResult(null);}}>
+            <option value="">{loading?'Loading registered models…':'Choose a model version'}</option>{rows.map(r=><option key={r.arn} value={r.arn}>{r.label} · {r.status}</option>)}
+          </select></label>
+          <button type="button" className="mt-2 rounded border border-hairline px-2 py-1 text-xs" disabled={loading} onClick={()=>void loadModels()}>Refresh models</button>
+          <p role="status" className="mt-2 text-xs">{loading?'Reading the model registry…':listError?'Model list unavailable.':rows.length?`${rows.length} registered model versions`:'No registered model versions found in this AWS region.'}</p>
+          {listError&&<p role="alert" className="text-critical">{listError}</p>}</div>}
         <button className="rounded border border-hairline px-3 py-2 disabled:opacity-40" disabled={mode==='upload'?!file:!arn} onClick={()=>void inspect()}>{busy?'Inspecting...':'Inspect checkpoint'}</button>
       </fieldset>
       {error&&<p role="alert" className="mt-3 text-critical">{error}</p>}

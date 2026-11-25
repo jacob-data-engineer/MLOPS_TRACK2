@@ -51,3 +51,17 @@ def test_registered_archive_is_read_without_extracting(monkeypatch):
     got=route.registered(route.Registered(arn='arn:model'))
     assert len(got['classes'])==2
     assert got['registry']['arn']=='arn:model'
+
+
+def test_registry_listing_reads_every_page_without_metrics(monkeypatch):
+    from ppe_pipeline_api.routers import track2_pt_view as route
+    calls=[]
+    def listing(**kwargs):
+        calls.append(kwargs)
+        if not kwargs.get('NextToken'):
+            return {'ModelPackageSummaryList':[{'ModelPackageArn':'arn:model/group/12'}], 'NextToken':'next'}
+        return {'ModelPackageSummaryList':[{'ModelPackageArn':'arn:model/baseline/1'}]}
+    monkeypatch.setattr(route.t2.sm,'list_model_packages',listing)
+    got=route.list_registered()
+    assert [r['label'] for r in got['models']]==['group · v12','baseline · v1']
+    assert calls[1]['NextToken']=='next'

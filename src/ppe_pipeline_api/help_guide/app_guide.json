@@ -1211,7 +1211,7 @@
     "Choose a checkpoint",
     "Recorded metadata"
    ],
-   "text": "Choose a checkpoint\nRecorded metadata\nPT View\nExplore checkpoint classes and recorded metadata. Inspection does not train, register or modify the model. Uploaded files are not saved.\nUploaded .pt file\nRegistered model\nCheckpoint file (.pt, up to 512 MB)\nChoose a model version\nClass ID\nClass name\nNo additional metadata was recorded."
+   "text": "Choose a checkpoint\nRecorded metadata\nPT View\nExplore checkpoint classes and recorded metadata. Inspection does not train, register or modify the model. Uploaded files are not saved.\nUploaded .pt file\nRegistered model\nCheckpoint file (.pt, up to 512 MB)\nRefresh models\nClass ID\nClass name\nNo additional metadata was recorded."
   },
   {
    "id": "routes/Track2ScheduledPage.tsx",
