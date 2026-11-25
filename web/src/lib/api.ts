@@ -11,7 +11,7 @@ export const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export interface BaselineSelection { enabled: boolean; baseline_arn?: string; other_arns?: string[] }
-export type VariantSettingsSnapshot = {epochs:number;img_size:number;batch:number;seed:number;patience:number;hyperparams:Record<string,unknown>};
+export type VariantSettingsSnapshot = {notes?:string;epochs:number;img_size:number;batch:number;seed:number;patience:number;hyperparams:Record<string,unknown>};
 export type SavedTrainingVariant = {id:string;name:string;settings:VariantSettingsSnapshot;selected:boolean};
 export type TrainingVariantDraft = {id:string;revision:number;detector_slug:string;architecture:string;baseline_arn:string;dataset_version_id:string;data_mode?:"saved"|"prepared";variants:SavedTrainingVariant[]};
 export interface VariantRunRecord {

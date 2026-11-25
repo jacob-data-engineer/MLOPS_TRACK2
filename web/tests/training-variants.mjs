@@ -46,7 +46,9 @@ test('normal training controls save isolated variants without launching, restore
   await page.getByRole('button',{name:'Save as variant',exact:true}).click();
   await page.getByRole('checkbox',{name:'Run Reference settings',exact:true}).waitFor();
   assert.equal(launches.length,0);
-  await page.getByLabel('Epochs',{exact:true}).fill('30');
+  await page.getByLabel('Variant Epochs',{exact:true}).fill('30');
+  await page.getByLabel('Variant notes').fill('Local variant notes');
+  assert.equal(await page.getByLabel('Epochs',{exact:true}).inputValue(),'20');
   await page.getByLabel('Variant name',{exact:true}).fill('Longer training');
   await page.getByRole('button',{name:'Save as new variant',exact:true}).click();
   await page.getByRole('checkbox',{name:'Run Longer training',exact:true}).waitFor();
@@ -58,8 +60,8 @@ test('normal training controls save isolated variants without launching, restore
   await page.getByRole('row').filter({has:page.getByRole('rowheader',{name:'Reference settings copy',exact:true})}).getByRole('button',{name:'Remove',exact:true}).click();
   await page.getByRole('checkbox',{name:'Run Reference settings copy',exact:true}).waitFor({state:'detached'});
   await first.getByRole('button',{name:'Edit',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('input[aria-label="Epochs"]')?.value==='20');
-  await page.getByLabel('Epochs',{exact:true}).fill('15');
+  await page.waitForFunction(()=>document.querySelector('input[aria-label="Variant Epochs"]')?.value==='20');
+  await page.getByLabel('Variant Epochs',{exact:true}).fill('15');
   await page.getByRole('button',{name:'Update variant',exact:true}).click();
   await first.getByRole('cell',{name:'15',exact:true}).waitFor();
   assert.deepEqual(drafts[0].variants.map(v=>v.settings.epochs),[15,30]);
@@ -79,7 +81,7 @@ test('normal training controls save isolated variants without launching, restore
   await page.getByRole('button',{name:'Run selected variants',exact:true}).click();
   await page.getByRole('cell',{name:'Run 74',exact:true}).waitFor();
   assert.equal(launches[0].name,'Parameter comparison');assert.equal(launches.length,1);assert.equal(launches[0].baseline_arn,arn);assert.equal(launches[0].dataset_version_id,'saved-data');
-  assert.equal(launches[0].variants.length,1);assert.equal(launches[0].variants[0].overrides.epochs,30);
+  assert.equal(launches[0].variants[0].overrides.notes,'Local variant notes');assert.equal(launches[0].variants.length,1);assert.equal(launches[0].variants[0].overrides.epochs,30);
   await page.getByRole('button',{name:'Use fresh data',exact:true}).click();
   await page.getByLabel('Variant name',{exact:true}).fill('Fresh variant');
   await page.getByRole('button',{name:'Save as variant',exact:true}).click();

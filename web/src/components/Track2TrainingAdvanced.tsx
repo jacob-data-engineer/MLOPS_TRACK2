@@ -189,6 +189,7 @@ export function Track2TrainingAdvanced({
   onCommit,
   enabled,
   onEnabledChange,
+  pinned = false,
 }: {
   /** Overrides only -- a key is absent unless it was changed. */
   value: Record<string, string>;
@@ -198,6 +199,7 @@ export function Track2TrainingAdvanced({
   /** Whether these are sent at all. Off means the run is untouched by
    * any of it; on means every field is sent, defaults included. */
   enabled: boolean;
+  pinned?: boolean;
   onEnabledChange: (on: boolean) => void;
 }) {
   const [open, setOpen] = useCardOpen("training_advanced", false);
@@ -233,7 +235,7 @@ export function Track2TrainingAdvanced({
       {/* The switch that decides whether any of this reaches the run.
           Outside the fold, because it changes what a run does and a
           control that does that should not be behind a Show link. */}
-      <label className="mt-2 flex items-start gap-2 text-xs text-ink-secondary">
+      {pinned ? <p className="mt-2 text-xs text-ink-muted">All parameters, including displayed defaults, are saved with each variant for repeatable comparisons.</p> : <label className="mt-2 flex items-start gap-2 text-xs text-ink-secondary">
         <input
           type="checkbox"
           className="mt-0.5 shrink-0"
@@ -251,7 +253,7 @@ export function Track2TrainingAdvanced({
             default in between.
           </span>
         </span>
-      </label>
+      </label>}
 
       {!open && changed > 0 && (
         <p className="tabular mt-1 text-xs text-ink-secondary">

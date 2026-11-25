@@ -198,7 +198,7 @@ def prepare_variant(job, variant):
            'base_model_key':job['baseline']['key'],'base_model_package_arn':'',
            'base_model_scratch':False,'base_model_folder':'','detector_definition':job['detector'],
            'base_provenance':{**job['baseline'],'package_arn':job['baseline_arn']},
-           'notes':f"Variant batch {job['name']} / {variant['name']}", 'queued_by':'experiment',
+           'notes':f"Variant batch {job['name']} / {variant['name']}" + (' — '+str(variant['settings']['notes']) if variant['settings'].get('notes') else ''), 'queued_by':'experiment',
            'added_at':now(),'reproducible':True,'drop_undeclared_classes':False,
            'comparison':{'enabled':False},'experiment_id':job['id']}
     data.mark_version(version['version_id'],strict=True,state='queued',entry_id=entry['id'],
