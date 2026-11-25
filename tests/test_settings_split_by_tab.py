@@ -317,3 +317,18 @@ def test_a_delete_never_clears_a_file_loaded_while_it_ran(live, monkeypatch):
     out = pc.delete_settings_file(name="old_DP")
     assert state["interleaved"] and out["cleared"] == []
     assert pc.read_config()["settings_file_dp"] == "new_DP"
+
+def test_page_choices_and_variant_editor_roundtrip_without_job_state(live):
+    training_key = "/track2/multi-auto-training/variant-editor/helmet"
+    data_key = "/track2/data-preparation/source-picks"
+    metrics_key = "/track2/metrics/comparison-view"
+    editor = {"batchName": "Parameter study", "variants": [{"name": "20 epochs", "settings": {"epochs": 20}}], "localSettings": {"epochs": 30}}
+    pc.write_config({"page_state": {training_key: editor, data_key: {"folder": "original"}, metrics_key: {"comparisonView": "models"}}})
+    pc.save_settings_file(name="whole", scope="at")
+    assert _file("whole_AT")["config"]["page_state"] == {training_key: editor}
+    pc.write_config({"page_state": {training_key: {}, data_key: {"folder": "new"}, metrics_key: {"comparisonView": "baseline"}}})
+    pc.load_settings_file(name="whole_AT", scope="at")
+    restored = pc.read_config()["page_state"]
+    assert restored[training_key] == editor
+    assert restored[data_key] == {"folder": "new"}
+    assert restored[metrics_key] == {"comparisonView": "baseline"}

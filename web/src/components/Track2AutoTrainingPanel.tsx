@@ -1,3 +1,4 @@
+import {usePageSave} from "../lib/pageSave";
 import { post } from "../lib/bus";
 import { formatDayTime } from "../lib/format";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -143,18 +144,16 @@ export function Track2AutoTrainingPanel() {
   // Kept server-side so it rides along in the settings file. Debounced,
   // because ticking three weeks out is three changes and the first two
   // are not worth a write.
-  useEffect(() => {
-    if (!loadedSelection) return;
-    const timer = window.setTimeout(() => {
-      saveTrack2PullConfig({
+  usePageSave("Track2AutoTrainingPanel", async () => {
+    if (!loadedSelection) throw new Error("Settings are still loading.");
+      await saveTrack2PullConfig({
         auto_training: { root, excluded, follow_pull: followPull },
       })
         // Which weeks are ticked is what a run trains on.
         .then(() => post("data-sources-changed", { from: "weeks" }))
-        .catch(() => undefined);
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [loadedSelection, root, excluded, followPull]);
+        ;
+
+  });
 
   // Out-of-order responses: changing the root twice quickly used to leave
   // the first root's weeks on screen under the second root's name.

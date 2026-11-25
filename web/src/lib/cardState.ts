@@ -1,3 +1,4 @@
+import {registerPageSave} from "./pageSave";
 import { useEffect, useState } from "react";
 import { getTrack2PullControl, saveTrack2PullConfig } from "./api";
 
@@ -8,7 +9,7 @@ import { getTrack2PullControl, saveTrack2PullConfig } from "./api";
  * TOP level, so `card_state` is replaced wholesale on every write --
  * seven cards each writing their own key would mean six of them being
  * dropped by whichever wrote last. So every card reads and writes this
- * one object, and it is sent once, debounced.
+ * one object, and it is sent once, only by Save.
  *
  * This is not a setting in the sense the others are: it changes nothing
  * about what a run does. It is here because restoring a settings file
@@ -17,9 +18,8 @@ import { getTrack2PullControl, saveTrack2PullConfig } from "./api";
  * read.
  */
 let state: Record<string, boolean> = {};
-let ready = false;
 let inFlight: Promise<void> | null = null;
-let timer: ReturnType<typeof setTimeout> | undefined;
+
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -31,23 +31,18 @@ export function ensureCardState(): Promise<void> {
   if (!inFlight) {
     inFlight = getTrack2PullControl()
       .then((status) => {
-        state = { ...(status.config.card_state || {}) };
+        state = { ...(status.config.card_state || {}), ...state };
       })
-      .catch(() => undefined)
+      .catch(error => { inFlight = null; throw error; })
       .finally(() => {
-        ready = true;
         notify();
       });
   }
   return inFlight;
 }
 
-function scheduleSave() {
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => {
-    void saveTrack2PullConfig({ card_state: state }).catch(() => undefined);
-  }, 600);
-}
+registerPageSave('Card layout',async()=>{await ensureCardState();await saveTrack2PullConfig({card_state:state});});
+function scheduleSave() { /* Saved only by the page Save action. */ }
 
 /**
  * A card's open/closed state, restored from the settings and saved back.
@@ -76,7 +71,7 @@ export function useCardOpen(
   useEffect(() => {
     const listener = () => bump((n) => n + 1);
     listeners.add(listener);
-    void ensureCardState();
+    void ensureCardState().catch(() => undefined);
     return () => {
       listeners.delete(listener);
     };
@@ -84,12 +79,12 @@ export function useCardOpen(
 
   if (!key) return [local, setLocal];
 
-  const open = ready && key in state ? state[key] : fallback;
+  const open = key in state ? state[key] : fallback;
 
   function setOpen(next: boolean | ((previous: boolean) => boolean)) {
     // Resolved against what is on screen now, which is the saved value
     // when there is one and the fallback before the read lands.
-    const current = ready && key in state ? state[key] : fallback;
+    const current = key in state ? state[key] : fallback;
     const value = typeof next === "function" ? next(current) : next;
     state = { ...state, [key]: value };
     notify();
@@ -98,3 +93,6 @@ export function useCardOpen(
 
   return [open, setOpen];
 }
+
+export function captureCardLayout(){return {...state};}
+export function restoreCardLayout(value:Record<string,boolean>){state={...state,...value};notify();}

@@ -32,6 +32,8 @@ class SqlSchedule(BaseModel):
 
 
 class SqlSettings(BaseModel):
+    page_state: dict = {}
+    sql: str = ""
     schedule: SqlSchedule | None = None
     settings_open: bool = True
     class_ids: dict[str, int] = Field(default_factory=lambda: {"helmet": 0, "person": 2})

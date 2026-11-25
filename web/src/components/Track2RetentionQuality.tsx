@@ -1,3 +1,4 @@
+import {usePageSave} from "../lib/pageSave";
 import { useEffect, useRef, useState } from "react";
 import {
   ApiError, getTrack2PullControl, getTrack2Retention, inspectTrack2Retention, saveTrack2Retention,
@@ -38,13 +39,11 @@ export function Track2CoverageCard() {
     })();
   }, []);
 
-  useEffect(() => {
+  usePageSave("Track2RetentionQuality", async () => {
     if (!loaded || !touched.current) return;
-    const timer = window.setTimeout(() => {
-      void saveTrack2Retention({ min_class_images: minClassImages }).catch(() => undefined);
-    }, 600);
-    return () => window.clearTimeout(timer);
-  }, [loaded, minClassImages]);
+      await saveTrack2Retention({ min_class_images: minClassImages });
+
+  });
 
   return <Card title="Class coverage before and after decay"
       caption="Whether each class still has enough training images once the retention policy has thinned the older weeks.">

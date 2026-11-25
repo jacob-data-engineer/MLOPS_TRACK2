@@ -1345,6 +1345,7 @@ export function getTrack2Metrics(): Promise<{ rows: Track2MetricsRow[] }> {
  * is its own call, so loading a preset named after something else cannot
  * quietly start writing to a shared bucket on a watch. */
 export interface Track2ExportSettings {
+  page_state?: Record<string,unknown>;
   package_options?: ModelPackageOptions | null;
   auto_scope?: "comparison" | "model_name";
   auto_model_name?: string;
@@ -2212,6 +2213,7 @@ export interface Track2PullConfig {
    * level: each card writing its own key would mean the rest being
    * dropped by whichever wrote last. See lib/cardState.ts. */
   card_state?: Record<string, boolean>;
+  page_state?: Record<string, unknown>;
   /** The Assemble card's own choices: the folders it merges, the
    * detector it writes classes for, whether it may replace a data.yaml
    * it did not write, and whether it is the ONLY source of training

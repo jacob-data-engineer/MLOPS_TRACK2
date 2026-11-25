@@ -1,3 +1,5 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
+import {usePageSave} from "../lib/pageSave";
 import { TrainingParameterInput } from "./TrainingParameterInput";
 import { trainingSettingsErrors } from "../lib/trainingValidation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -254,8 +256,11 @@ export function Track2DetectorsPanel({
     return () => window.removeEventListener('track2-edit-training-variant',editVariant);
   }, [onTraining,shape.notes]);
 
+  const [settingsLoaded,setSettingsLoaded]=useState(false);
   const [found, setFound] = useState<{ index: number; name: string }[]>([]);
   const [keep, setKeep] = useState<number[]>([]);
+
+  usePageSnapshot("model-definition",{editingSlug,label,classText,prefix,yamlSource,yamlBucket,picked,found,keep},v=>{setEditingSlug(v.editingSlug);setLabel(v.label);setClassText(v.classText);setPrefix(v.prefix);setYamlSource(v.yamlSource);setYamlBucket(v.yamlBucket);setPicked(v.picked);setFound(v.found);setKeep(v.keep);});
 
   useEffect(() => {
     getTrack2PullControl()
@@ -282,20 +287,6 @@ export function Track2DetectorsPanel({
               (training.hyperparams as Record<string, string> | undefined) ?? {},
               Boolean(training.hyperparams_enabled)),
           });
-        } else {
-          // Nothing recorded yet. The shape was only ever written on
-          // BLUR, so a run whose numbers were left at their defaults
-          // saved `default_training: {}` -- and a settings file holding
-          // an empty object does not restore 50/640/16, it leaves
-          // whatever the page happens to be showing. Writing what is on
-          // screen once makes the saved file a complete answer rather
-          // than a partial one. Runs once: after this the key exists.
-          void saveTrack2PullConfig({
-            default_training: {
-              epochs: 50, img_size: 640, batch: 16,
-              seed: 42, patience: 0, notes: "",
-            },
-          }).catch(() => undefined);
         }
         const picked = status.config.default_detector || {};
         if (picked.slug) setChosenSlug(picked.slug);
@@ -317,6 +308,7 @@ export function Track2DetectorsPanel({
           }
         }
       })
+      .then(()=>setSettingsLoaded(true))
       .catch(() => undefined);
   }, []);
 
@@ -358,19 +350,11 @@ export function Track2DetectorsPanel({
       architecture: `yolo${generation}${size}`,
       group: `yolo${generation}${size}-${slug}-detector`,
     });
-    try {
-      await saveTrack2PullConfig({
-        default_detector: { slug, architecture: `yolo${generation}${size}` },
-      });
-    } catch {
-      // The card still reads correctly; the next save will carry it.
-    }
+
   }
 
   /** Change one field of the run's shape. Announced immediately so the
-   * form below follows as you type; SAVED on blur, because writing the
-   * config on every keystroke turns "120" into three saves, one of which
-   * persists "1". */
+   * form below follows as you type. Persisted only by the top Save. */
   function editShape(patch: Partial<typeof shape>) {
     const next = { ...shape, ...patch };
     setShape(next);
@@ -378,29 +362,14 @@ export function Track2DetectorsPanel({
     onTraining?.({ ...next, hyperparams: effectiveHyperparams(hyperparams, hyperparamsOn) });
   }
 
-  async function saveShape() {
-    if (shapeSaved || trainingSettingsErrors({...shape, hyperparams: effectiveHyperparams(hyperparams, hyperparamsOn)}).length) return;
-    try {
-      await saveTrack2PullConfig({
-        default_training: {
-          epochs: shape.epochs, img_size: shape.imgSize, batch: shape.batch,
-          seed: shape.seed, patience: shape.patience, notes: shape.notes,
-          // Saved with the rest, so the form, "Train on this" and the
-          // scheduled retrain read ONE set of numbers rather than keeping
-          // copies that can differ without anything saying so.
-          // The sparse overrides, plus whether they are in play. Saved
-          // sparse deliberately: the file then reads as the decisions
-          // somebody made, not thirty-seven restatements of a default.
-          hyperparams,
-          hyperparams_enabled: hyperparamsOn,
-        },
-      });
-      setShapeSaved(true);
-    } catch {
-      // Left unsaved rather than silently marked saved -- the caption
-      // says so, and the next blur tries again.
-    }
-  }
+  async function saveShape() { /* Explicit page Save owns persistence. */ }
+  usePageSave("Training Settings",async()=>{
+    if(!settingsLoaded)throw new Error("Training settings have not loaded.");
+    const errors=trainingSettingsErrors({...shape,hyperparams:effectiveHyperparams(hyperparams,hyperparamsOn)});
+    if(errors.length)throw new Error(errors.join(' '));
+    await saveTrack2PullConfig({default_detector:{slug:chosenSlug,architecture:`yolo${chosenGeneration}${chosenSize}`},default_training:{epochs:shape.epochs,img_size:shape.imgSize,batch:shape.batch,seed:shape.seed,patience:shape.patience,notes:shape.notes,hyperparams,hyperparams_enabled:hyperparamsOn}});
+    setShapeSaved(true);
+  });
 
   /** The sizes this generation actually offers. */
   const generationSizes =
@@ -1630,7 +1599,7 @@ export function Track2DetectorsPanel({
         <div className="mb-2 flex items-baseline justify-between gap-2">
           <span className="text-xs font-medium text-ink">Training Settings</span>
           <span className="text-[11px] text-ink-muted">
-            {shapeSaved ? "saved" : "unsaved -- click away to save"}
+            {shapeSaved ? "saved" : "unsaved -- use Save at the top"}
           </span>
         </div>
         <p className="mb-2 text-xs text-ink-muted">

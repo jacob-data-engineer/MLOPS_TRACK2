@@ -1,3 +1,4 @@
+import {usePageSave} from "../lib/pageSave";
 import { useCallback, useEffect, useState } from "react";
 import { post } from "../lib/bus";
 import { useCardOpen } from "../lib/cardState";
@@ -137,15 +138,13 @@ export function Track2RetentionPanel() {
    */
   const [loadedPolicy, setLoadedPolicy] = useState(false);
   const policyJson = JSON.stringify(currentConfig());
-  useEffect(() => {
-    if (!loadedPolicy) return;
-    const timer = window.setTimeout(() => {
-      saveTrack2Retention(JSON.parse(policyJson))
+  usePageSave("Track2RetentionPanel", async () => {
+    if (!loadedPolicy) throw new Error("Retention settings have not loaded.");
+      await saveTrack2Retention(JSON.parse(policyJson))
         .then(() => post("data-sources-changed", { from: "retention" }))
-        .catch(() => undefined);
-    }, 800);
-    return () => window.clearTimeout(timer);
-  }, [loadedPolicy, policyJson]);
+        ;
+
+  });
 
   const load = useCallback(async () => {
     try {
@@ -187,7 +186,7 @@ export function Track2RetentionPanel() {
   // the policy is on, and it is visible while the card is shut -- so an
   // unticked box has to mean OFF and never "not read yet". Loading only
   // on open made every shut card claim the policy was off.
-  useEffect(() => { void load(); }, [open, load]);
+  useEffect(() => { void load(); }, [load]);
 
   // Re-read whenever the policy changes, and after the auto-save has had
   // time to land: the server selects with the SAVED policy, which is the

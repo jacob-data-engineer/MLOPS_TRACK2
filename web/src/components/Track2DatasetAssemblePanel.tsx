@@ -1,3 +1,4 @@
+import {usePageSave} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCardOpen } from "../lib/cardState";
@@ -455,15 +456,15 @@ export function Track2DatasetAssemblePanel({
   // each setter -- a setter added later cannot forget to call it.
   // Debounced, because picking a folder changes several of these at once
   // and each keystroke in a prefix box would otherwise be a request.
-  useEffect(() => {
+  usePageSave("Track2DatasetAssemblePanel", async () => {
     // Auto Training only previews the dataset recipe.
-    if (!settingsRead || previewOnly) return;
-    const timer = setTimeout(async () => {
+    if (previewOnly) return;
+    if (!settingsRead) throw new Error("Dataset settings have not loaded.");
       // Merge the dataset recipe with unrelated saved card settings.
       const saved = await getTrack2PullControl()
-        .then((s) => s.config.dataset_assemble || {}).catch(() => null);
-      if (saved === null) return;
-      void saveTrack2PullConfig({
+        .then((s) => s.config.dataset_assemble || {});
+
+      await saveTrack2PullConfig({
         dataset_assemble: {
           ...saved,
           only: onOnlyChange ? !!only : savedOnly,
@@ -483,11 +484,9 @@ export function Track2DatasetAssemblePanel({
         // The folders, classes and ticks are what a run trains on; the
         // Training tab re-reads its summary of the sources on this.
         .then(() => post("data-sources-changed", { from: "assemble" }))
-        .catch(() => undefined);
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [settingsRead, previewOnly, only, onOnlyChange, savedOnly, useFolders, labelClassesText,
-      dropUndeclared, trainSources, evalSources, folders, overwrite, built]);
+        ;
+
+  });
 
   // Check each filled pair as it is filled. Debounced, because picking a
   // folder changes a field per click and every keystroke in a prefix box

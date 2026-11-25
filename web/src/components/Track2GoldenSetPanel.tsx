@@ -1,3 +1,4 @@
+import {usePageSave} from "../lib/pageSave";
 import { useCallback, useEffect, useState } from "react";
 import { useCardOpen } from "../lib/cardState";
 import { announceGolden, onGoldenChanged } from "../lib/useGoldenSync";
@@ -126,8 +127,8 @@ export function Track2GoldenSetPanel() {
         if (typeof g.split === "boolean") setSplit(g.split);
         if (typeof g.train_percent === "number") setTrainPercent(g.train_percent);
       })
-      .catch(() => undefined)
-      .finally(() => setLoaded(true));
+      .then(() => setLoaded(true))
+      .catch(() => undefined);
   }, []);
 
   // The folders under whatever the open picker is looking at. One
@@ -161,30 +162,27 @@ export function Track2GoldenSetPanel() {
   }, [bucket, source, labelsSource]);
 
   // Debounced: dragging the split slider is one decision, not forty.
-  useEffect(() => {
-    if (!loaded) return;
-    const timer = window.setTimeout(() => {
-      saveTrack2PullConfig({
+  usePageSave("Track2GoldenSetPanel", async () => {
+    if (!loaded) throw new Error("Settings are still loading.");
+      await saveTrack2PullConfig({
         golden_set: {
           bucket, source, labels_source: labelsSource,
           target_bucket: targetBucket,
           target_folder: targetFolder, split, train_percent: trainPercent,
         },
-      }).catch(() => undefined);
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [loaded, bucket, source, labelsSource, targetBucket, targetFolder,
-      split, trainPercent]);
+      });
 
+  });
+
+  usePageSave('Golden set enabled',async()=>{if(!loaded||inUse===null)throw new Error('Settings are loading.');await saveTrack2Retention({use_golden:inUse});});
   async function setUse(next: boolean) {
     setSwitching(true);
     setError("");
     try {
       // A PATCH, so the folder and bucket survive being switched off --
       // turning it back on must not mean finding the path again.
-      const out = await saveTrack2Retention({ use_golden: next });
-      setInUse(Boolean(out.config.use_golden));
-      announceGolden(Boolean(out.config.use_golden));
+      setInUse(next);
+      announceGolden(next);
       // Switching it ON opens the card, so the folder picker it needs is
       // on screen. The card remembers being shut, and saying "use a
       // golden set" to a collapsed card left the one thing it then wants

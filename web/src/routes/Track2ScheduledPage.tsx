@@ -1,3 +1,4 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
 import { CalendarDays, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -81,15 +82,6 @@ function readPicks(): string[] | "*" {
   }
 }
 
-function writePicks(picks: string[] | "*") {
-  try {
-    window.localStorage.setItem(PICK_KEY, JSON.stringify(picks));
-  } catch {
-    // Private window or blocked storage: the picker still works, it just
-    // will not be remembered.
-  }
-}
-
 /** The pop-up on hover: which file, what kind of run, and from what. */
 function EventPopup({ ev, color }: { ev: CalendarEvent; color: string }) {
   const train = ev.kind === "train";
@@ -155,6 +147,7 @@ export function Track2ScheduledPage() {
   const [showTraining, setShowTraining] = useState(true);
   const [showSql, setShowSql] = useState(true);
   const [showExports, setShowExports] = useState(true);
+  usePageSnapshot('calendar',{offset,picks,showTraining,showSql,showExports},v=>{setOffset(v.offset);setPicks(v.picks);setShowTraining(v.showTraining);setShowSql(v.showSql);setShowExports(v.showExports);});
 
   useEffect(() => {
     let cancelled = false;
@@ -172,7 +165,7 @@ export function Track2ScheduledPage() {
 
   function choose(next: string[] | "*") {
     setPicks(next);
-    writePicks(next);
+
   }
 
   const colorOf = useMemo(() => {

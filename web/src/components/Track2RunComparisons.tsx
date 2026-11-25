@@ -1,3 +1,4 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
 import {useEffect, useState} from 'react';
 import {ApiError, listRunComparisons, runBaselineComparison, type BaselineSelection,
   type RunComparisonSummary} from '../lib/api';
@@ -10,6 +11,7 @@ export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun
   const [runs, setRuns] = useState<RunComparisonSummary[]>([]);
   const [selected, setSelected] = useState(initialRun);
   const [selection, setSelection] = useState<BaselineSelection>({enabled: false});
+  usePageSnapshot('saved-run-comparison',{selected,selection},v=>{setSelected(v.selected);setSelection(v.selection);onRunChange?.(v.selected);});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => {

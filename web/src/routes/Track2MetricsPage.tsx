@@ -1,3 +1,4 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
 import { AlertCircle, BarChart3, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "../components/Card";
@@ -244,6 +245,7 @@ export function Track2MetricsPage() {
   // no way to tell a page from five minutes ago from one from five hours
   // ago -- which on a page about which model is best is the difference
   // between a decision and a guess.
+  usePageSnapshot('comparison-view',{comparisonView,baselineRun},v=>{setComparisonView(v.comparisonView);setBaselineRun(v.baselineRun);});
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [reloading, setReloading] = useState(false);
   // The audits are a second read: their own loading and failure, never
@@ -490,7 +492,7 @@ export function Track2MetricsPage() {
         <label><input type="radio" name="comparison-view" checked={comparisonView === 'baseline'} onChange={() => setComparisonView('baseline')} /> Compare with baseline</label>
         <label><input type="radio" name="comparison-view" checked={comparisonView === 'models'} onChange={() => setComparisonView('models')} /> Compare across models</label>
       </fieldset>
-      <div hidden={comparisonView !== 'models'} className="sticky z-20 mb-5" style={{ top: "var(--stale-banner-h, 0px)" }}>
+      <div className="sticky z-20 mb-5" style={{ top: "var(--stale-banner-h, 0px)" }}>
         <Card collapsible={false}>
         <Track2ExportSettingsBar
           onRestoringChange={setRestoringSettings}
@@ -531,7 +533,7 @@ export function Track2MetricsPage() {
             !rows?.some(row => runsByArn[row.model_package_arn]?.run_id === baselineRun) ?
               <p role="status" className="text-sm">No registered model is available for this run, or its model details are still loading.</p> :
               <Track2ComparisonExport
-                key={baselineRun}
+                key={baselineRun} stateKey={`baseline/${baselineRun}`}
                 rows={rows.filter(row => runsByArn[row.model_package_arn]?.run_id === baselineRun)}
                 runs={runsByArn} settings={exportSettings} onChange={setExportSettings} autoSelect
               />}

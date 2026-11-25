@@ -1,3 +1,4 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
 ﻿import {useEffect, useState} from 'react';
 import {Card} from '../components/Card';
 import {ApiError, listPtRegistered, inspectPtUpload, inspectPtRegistered, type PtInspection} from '../lib/api';
@@ -7,6 +8,7 @@ export function Track2PtViewPage() {
   const [loading,setLoading]=useState(true);
   const [listError,setListError]=useState('');
   const [arn,setArn]=useState('');
+  usePageSnapshot('checkpoint',{mode,arn},v=>{setMode(v.mode);setArn(v.arn);});
   const [file,setFile]=useState<File|null>(null);
   const [result,setResult]=useState<PtInspection|null>(null);
   const [error,setError]=useState('');

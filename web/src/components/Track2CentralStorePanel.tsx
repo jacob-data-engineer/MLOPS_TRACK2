@@ -1,3 +1,4 @@
+import {usePageSave} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import {
   ApiError,
@@ -44,20 +45,18 @@ export function Track2CentralStorePanel() {
         if (store.folder) setFolder(store.folder);
         setTrainFromCombined(Boolean(store.train_from_combined));
       })
-      .catch(() => undefined)
-      .finally(() => setSettingsRead(true));
+      .then(() => setSettingsRead(true))
+      .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    if (!settingsRead) return;
+  usePageSave("Track2CentralStorePanel", async () => {
+    if (!settingsRead) throw new Error("Settings are still loading.");
     setSaved(false);
-    const timer = window.setTimeout(() => {
-      void saveTrack2PullConfig({ central_store: { bucket, folder, train_from_combined: trainFromCombined } })
+      await saveTrack2PullConfig({ central_store: { bucket, folder, train_from_combined: trainFromCombined } })
         .then(() => setSaved(true))
-        .catch(() => undefined);
-    }, 600);
-    return () => window.clearTimeout(timer);
-  }, [settingsRead, bucket, folder, trainFromCombined]);
+        ;
+
+  });
 
   // The last combine, and while one runs, every 5 s until it ends.
   useEffect(() => {

@@ -250,6 +250,7 @@ DEFAULTS = {
     # a page that reopens with every card collapsed is one you have to
     # rebuild by hand before you can read it.
     "card_state": {},
+    "page_state": {},
     # Whether every run freezes a snapshot of its dataset before training
     # (the chain's freeze step, and a queue-add from the training card).
     # A setting because it is a choice about RECORDS, not about training:
@@ -3131,6 +3132,9 @@ def scope_slice(config: dict, scope: str) -> dict:
             **config["training_data_preparation"],
             "config": {key: config[key] for key in TRAINING_DATA_KEYS if key in config},
         }
+    pages = config.get("page_state")
+    if isinstance(pages, dict):
+        out["page_state"] = {k: v for k, v in pages.items() if any(k.startswith(prefix) for prefix in (("/track2/data-preparation/", "/track2/sql/") if scope == "dp" else ("/track2/multi-auto-training/", "/track2/models/")))}
     cards = config.get("card_state")
     if isinstance(cards, dict):
         out["card_state"] = {k: v for k, v in cards.items()
@@ -3520,6 +3524,7 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True,
             other = {k: v for k, v in (live.get("card_state") or {}).items()
                      if (k in DP_CARDS) != (scope == "dp")}
             update["card_state"] = {**other, **(config.get("card_state") or {})}
+            update["page_state"] = {**(live.get("page_state") or {}), **(config.get("page_state") or {})}
             update[f"settings_file_{scope}"] = name
         else:
             # The file's own name wins over any `settings_file` inside it: a

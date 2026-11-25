@@ -1,3 +1,4 @@
+import {usePageSave} from "../lib/pageSave";
 import { useEffect, useRef, useState } from "react";
 import {
   ApiError,
@@ -196,15 +197,14 @@ export function Track2ImportCheckpointPanel({ onImported,
             });
         }
       })
-      .catch(() => undefined)
-      .finally(() => setSettingsRead(true));
+      .then(() => setSettingsRead(true))
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!settingsRead) return;
-    const timer = setTimeout(() => {
-      void saveTrack2PullConfig({
+  usePageSave("Track2ImportCheckpointPanel", async () => {
+    if (!settingsRead) throw new Error("Settings are still loading.");
+      await saveTrack2PullConfig({
         import_checkpoint: {
           architecture, source, bucket_key: bucketKey, prefix,
           detector_slug: detectorSlug, use_file_classes: useFileClasses,
@@ -217,11 +217,9 @@ export function Track2ImportCheckpointPanel({ onImported,
           new_label: newLabel,
           description,
         },
-      }).catch(() => undefined);
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [settingsRead, architecture, source, bucketKey, prefix, detectorSlug,
-      useFileClasses, usePreparationClasses, inspection, pickedClasses, newLabel, description]);
+      });
+
+  });
 
   useEffect(() => {
     loadDetectors();

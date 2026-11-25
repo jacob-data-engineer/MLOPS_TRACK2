@@ -1,3 +1,5 @@
+import {capturePageSnapshot,restorePageSnapshot} from "../lib/pageSnapshot";
+import {saveEntirePage} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import {
   ApiError,
@@ -77,7 +79,7 @@ export function Track2ExportSettingsBar({
           try {
             const got = await loadTrack2ExportSettings(listed.last_loaded);
             if (disposed) return;
-            onChange(got.settings); setLoaded(got.name);
+            restorePageSnapshot(got.settings.page_state); onChange(got.settings); setLoaded(got.name);
             setSavedAt(got.saved_at ? new Date(got.saved_at).toLocaleString() : "");
             setNote(`Automatically loaded ${got.name} with ${got.settings.comparison_versions?.length ?? 0} compared model(s)`);
           } catch (err) {
@@ -107,7 +109,7 @@ export function Track2ExportSettingsBar({
     try {
       await work();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "That did not work.");
+      setError(err instanceof Error ? err.message : "That did not work.");
     } finally {
       setBusy("");
     }
@@ -147,7 +149,8 @@ export function Track2ExportSettingsBar({
           // file that is loaded. A Save that silently invented a name
           // would scatter near-identical files.
           const name = saveAs.trim() || loaded;
-          await saveTrack2ExportSettings(name, settings);
+          await saveEntirePage();
+          await saveTrack2ExportSettings(name, {...settings,page_state:capturePageSnapshot()});
           setLoaded(name);
           setPick(name);
           setSaveAs("");
@@ -181,7 +184,7 @@ export function Track2ExportSettingsBar({
         disabled={!!busy || !pick}
         onClick={() => withBusy("Loading...", async () => {
           const got = await loadTrack2ExportSettings(pick);
-          onChange(got.settings);
+          restorePageSnapshot(got.settings.page_state); onChange(got.settings);
           setLoaded(got.name);
           setSavedAt(got.saved_at ? new Date(got.saved_at).toLocaleString() : "");
           setNote(`Loaded ${got.name} with ${got.settings.comparison_versions?.length ?? 0} compared model(s)`);

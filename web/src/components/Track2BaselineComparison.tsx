@@ -1,3 +1,4 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
 import {useEffect, useState} from 'react';
 import {ApiError, getTrack2Metrics, listBaselineModels, registerBaselineModel, uploadBaselineModel, deleteBaselineModel,
   type BaselineSelection, type BaselineVersion, type Track2MetricsRow} from '../lib/api';
@@ -19,6 +20,7 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
   const [reload, setReload] = useState(0);
   const [deleteTarget,setDeleteTarget] = useState<BaselineVersion|null>(null);
   const [deleteError,setDeleteError] = useState('');
+  usePageSnapshot('baseline-form',{source,sourceKind,label},v=>{setSource(v.source);setSourceKind(v.sourceKind);setLabel(v.label);});
   async function removeBaseline() {
     if (!deleteTarget) return;
     setBusy(true);setDeleteError('');setNotice('');

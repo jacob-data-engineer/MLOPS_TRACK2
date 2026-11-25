@@ -1,3 +1,4 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
 import { useEffect, useState } from "react";
 import { Card } from "./Card";
 import {
@@ -21,6 +22,7 @@ export function Track2TrainingDataFile() {
   const [preview, setPreview] = useState<Track2TrainingDataPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState("");
+  usePageSnapshot("preparation-file",{selected},v=>setSelected(v.selected));
   const shown = selected || loaded;
   useEffect(() => {
     if (!shown) { setPreview(null); return; }

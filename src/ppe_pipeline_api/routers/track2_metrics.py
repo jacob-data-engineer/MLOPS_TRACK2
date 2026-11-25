@@ -184,6 +184,7 @@ class PackageOptions(BaseModel):
 
 
 class ExportSettings(BaseModel):
+    page_state: dict = {}
     package_options: PackageOptions | None = None
     export_mode: str = "selected"
     auto_scope: str = "comparison"

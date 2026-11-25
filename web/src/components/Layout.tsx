@@ -1,3 +1,4 @@
+import {PageSaveBar} from "./PageSaveBar";
 import {
   BarChart3,
   CalendarDays,
@@ -370,6 +371,7 @@ export function Layout() {
               boundary would make every page after a broken one look
               broken too. */}
           <RouteBoundary key={location.pathname}>
+            {["/track2/pt-view","/track2/scheduled"].includes(location.pathname) && <PageSaveBar key={location.pathname}/>}
             <Outlet />
           </RouteBoundary>
         </div>

@@ -95,3 +95,11 @@ def test_disabled_schedule_can_save_blank_new_page(settings_dir, monkeypatch):
     monkeypatch.setattr(sql_sensor, "_running", False)
     ss.save_with_schedule("blank", ss.SqlSettings(schedule=ss.SqlSchedule()))
     assert ss.load("blank")["settings"]["schedule"]["enabled"] is False
+
+
+def test_query_and_page_choices_roundtrip(settings_dir):
+    values = ss.SqlSettings(sql="SELECT image_key FROM images LIMIT 12", page_state={"/track2/sql/card-layout": {"sql frames": False}})
+    ss.save("complete", values)
+    restored = ss.load("complete")["settings"]
+    assert restored["sql"] == values.sql
+    assert restored["page_state"] == values.page_state

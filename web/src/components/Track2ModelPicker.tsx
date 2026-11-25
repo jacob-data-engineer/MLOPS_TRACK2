@@ -1,3 +1,4 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
 import { useEffect, useMemo, useState } from "react";
 import { isSeedVersion, statusLabel } from "../lib/slug";
 import { Badge } from "./Badge";
@@ -113,6 +114,7 @@ export function Track2ModelPicker({
   const [measuredOnly, setMeasuredOnly] = useState(false);
   const [group, setGroup] = useState("");
   const [version, setVersion] = useState("");
+  usePageSnapshot('model-picker',{classFilter,generationFilter,sizeFilter,measuredOnly,group,version},v=>{setClassFilter(v.classFilter);setGenerationFilter(v.generationFilter);setSizeFilter(v.sizeFilter);setMeasuredOnly(v.measuredOnly);setGroup(v.group);setVersion(v.version);});
 
   const classes = useMemo(
     () => Array.from(new Set(rows.map((r) => r.registry))).sort(), [rows]);

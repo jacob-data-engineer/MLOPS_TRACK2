@@ -1,3 +1,5 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
+import {usePageSave} from "../lib/pageSave";
 import { Track2TrainingDataFile } from "../components/Track2TrainingDataFile";
 import { Track2TrainingVariants } from "../components/Track2TrainingVariants";
 import { Track2RecordingProgress } from '../components/Track2RecordingProgress';
@@ -383,11 +385,14 @@ export function TrainingForm({
   const { epochs, imgSize, batch, seed, patience, hyperparams, datasetFolder, detectorSlug, architecture, basePackageArn, notes } = selection;
   const [busy, setBusy] = useState(false);
   const [dataChoice, setDataChoice] = useState<TrainingDataChoice>({mode: 'prepared', id: '', checked: false});
+  const restoredComparison=useRef(false);
+  usePageSnapshot('training-data',{mode:dataChoice.mode,id:dataChoice.id,comparison:selection.comparison},v=>{restoredComparison.current=true;setDataChoice({mode:v.mode,id:v.id,checked:false});setSelection({comparison:v.comparison});});
   const [restoringComparison, setRestoringComparison] = useState(false);
   const [comparisonRestoreError, setComparisonRestoreError] = useState('');
   useEffect(() => {
     let active = true;
     setComparisonRestoreError('');
+    if(restoredComparison.current){restoredComparison.current=false;setRestoringComparison(false);return;}
     if (dataChoice.mode !== 'saved' || !dataChoice.id) {setRestoringComparison(false); return;}
     setRestoringComparison(true);
     savedBaselineSelection(dataChoice.id).then(result => {
@@ -1032,6 +1037,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
     notes: "",
   });
 
+  usePageSave('Starting version',async()=>{await saveTrack2PullConfig({default_version:selection.basePackageArn});});
   function setSelection(patch: Partial<TrainingSelection>) {
     setSelectionState((current) => ({ ...current, ...patch }));
   }
@@ -1380,8 +1386,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               setSelection({ basePackageArn: arn });
               // Saved server-side like any other choice of starting
               // version, so the settings file carries it.
-              void saveTrack2PullConfig({ default_version: arn })
-                .catch(() => undefined);
             }}
             pendingImport={pendingImport}
             onImported={() => setDetectorsVersion((n) => n + 1)}
@@ -1462,8 +1466,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                 // Which version a run starts FROM is half of what
                 // defines the run; a settings file holding the Class
                 // but not the version restores a different run.
-                void saveTrack2PullConfig({ default_version: arn })
-                  .catch(() => undefined);
               }}
               refreshKey={detectorsVersion}
             />

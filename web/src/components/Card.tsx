@@ -38,7 +38,7 @@ export function Card({
   children,
   collapsible = true,
   defaultOpen = true,
-  keepMounted = false,
+  keepMounted = true,
   stateKey,
   summary,
   step,
@@ -156,7 +156,12 @@ export function Card({
         <p className="mb-3 text-sm text-ink-secondary">{caption}</p>
       )}
       {keepMounted ? (
-        <div hidden={shut}><CardBoundary title={title}>{children}</CardBoundary></div>
+        <>
+          {shut && summary && <CardBoundary title={title}>{summary}</CardBoundary>}
+          <div hidden={shut}><CardBoundary title={title}>{children}</CardBoundary>
+            {whatNext && <p className="mt-3 border-t border-hairline pt-2 text-xs text-ink-muted"><span className="font-medium text-ink-secondary">Next:</span> {whatNext}</p>}
+          </div>
+        </>
       ) : shut ? (
         // The summary renders when the card is SHUT, and it reads the
         // same state the body does -- so it can throw for the same

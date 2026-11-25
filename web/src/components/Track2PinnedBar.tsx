@@ -1,3 +1,4 @@
+import {saveEntirePage,usePageSave} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import { formatDayTime } from "../lib/format";
 import { Track2ChainStatusBar } from "./Track2ChainStatusBar";
@@ -16,11 +17,11 @@ import {
   type Track2SettingsScope,
   type Track2TrainingTrigger,
 } from "../lib/api";
-import { pendingCards } from "../lib/pendingChanges";
+
 
 /** Shared settings-file toolbar. Data Preparation shows file controls only;
  * Multi-Auto Training also shows its schedule, GPU status and cost.
- * Settings are saved by scope, and only applied card values are saved.
+ * Save captures all current card values within the page scope.
  */
 /** Both readings on this strip -- when the settings were saved, and when the
  * schedule next fires -- are instants the SERVER recorded or computed, so
@@ -63,6 +64,9 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
   const [trainNext, setTrainNext] = useState("");
   const [scheduleDirty, setScheduleDirty] = useState(false);
   const [busy, setBusy] = useState("");
+  usePageSave("Training schedule",async()=>{
+    if(scope==='at'&&scheduleDirty){await saveTrack2Retrain({trigger,every_days:trainEvery,at:trainAt,from_date:trainFrom});setScheduleDirty(false);}
+  });
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   /** The file the settings are in, and the moment it was last written --
@@ -120,7 +124,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
     try {
       await work();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : `${label} failed.`);
+      setError(err instanceof Error ? err.message : `${label} failed.`);
     } finally {
       setBusy("");
     }
@@ -197,10 +201,9 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
               setError("Type a name -- there is no current file to save over.");
               return;
             }
-            // A file is a snapshot of the settings IN FORCE, so a card
-            // whose Apply has not been pressed is not in it. Said after
-            // the write rather than refused over.
-            const unapplied = pendingCards();
+            // Capture all current card values before writing the named file.
+            await saveEntirePage();
+
             try {
               await saveTrack2SettingsFile(target, allowClash, scope);
             } catch (err) {
@@ -213,10 +216,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
             setClashed(false);
             setAllowClash(false);
             setName("");
-            setNote(unapplied.length
-              ? `Saved ${saved}. ${unapplied.join(" and ")} has not had Apply `
-                + "pressed, so the trigger is still set to what it was."
-              : `Saved ${saved}.`);
+            setNote(`Saved all page settings to ${saved}. Edits are saved only when you press Save.`);
             await refresh();
           })}
           className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40"

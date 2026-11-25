@@ -1,3 +1,4 @@
+import {usePageSave} from "../lib/pageSave";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCardOpen } from "../lib/cardState";
 import {
@@ -792,38 +793,36 @@ export function Track2PullControlPanel({
   // The weeks table's two view choices, saved on their own: they are not
   // pull settings, and the guarded writer below must not start sending a
   // whole pull config because somebody ticked "show all weeks".
-  useEffect(() => {
-    if (!loadedConfig || viewing) return;
-    const timer = window.setTimeout(() => {
-      void saveTrack2PullConfig({ pull_control_view: { watching, show_all_weeks: showAllWeeks } })
-        .catch(() => undefined);
-    }, 600);
-    return () => window.clearTimeout(timer);
-  }, [loadedConfig, viewing, watching, showAllWeeks]);
+  usePageSave("Track2PullControlPanel", async () => {
+    if (!loadedConfig) throw new Error("Pull settings have not loaded.");
+    if (viewing) return;
+      await saveTrack2PullConfig({ pull_control_view: { watching, show_all_weeks: showAllWeeks } })
+        ;
+
+  });
 
   const configJson = JSON.stringify(currentConfig());
   const latestConfigRef = useRef(configJson);
   latestConfigRef.current = configJson;
-  useEffect(() => {
+  usePageSave("Track2PullControlPanel", async () => {
     // BOTH guards. `dirty` alone was not enough: it says somebody typed,
     // not that the card has read what it is about to overwrite. Edit any
     // field before the first load lands and this wrote the card's blank
     // `week_cutoff` over a real date -- which is the shape of every
     // "my settings cleared themselves" report on this page.
-    if (!loadedConfig || !dirty) return;
-    const timer = window.setTimeout(() => {
+    if (!loadedConfig) throw new Error("Pull settings have not loaded.");
+    if (!dirty) return;
       const sent = configJson;
-      saveTrack2PullConfig(JSON.parse(sent))
+      await saveTrack2PullConfig(JSON.parse(sent))
         .then(() => {
           // Saved, so nothing on screen is pending any more -- unless it
           // was edited while this was in flight, in which case that edit
           // still needs its own save and must stay marked.
           if (latestConfigRef.current === sent) setDirty(false);
         })
-        .catch(() => undefined);
-    }, 800);
-    return () => window.clearTimeout(timer);
-  }, [loadedConfig, dirty, configJson]);
+        ;
+
+  });
 
   return (
     // collapsible={false}: this card runs its own Show/Hide,

@@ -118,6 +118,7 @@ class ConfigRequest(BaseModel):
     # Which cards are open. Restored with everything else so a loaded
     # file puts the page back as it was left.
     card_state: dict | None = None
+    page_state: dict | None = None
     # Whether each run freezes a snapshot first; see pull_control.
     freeze_on_run: bool | None = None
     # The Assemble card's folders, detector, overwrite tick and its

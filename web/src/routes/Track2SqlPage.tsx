@@ -1,3 +1,5 @@
+import {capturePageSnapshot,restorePageSnapshot} from "../lib/pageSnapshot";
+import {usePageSave} from "../lib/pageSave";
 import { Track2SqlSettingsBar, SQL_DEFAULTS, SQL_SCHEDULE_DEFAULTS, type SqlPageSettings, type SqlSavedPreset } from "../components/Track2SqlSettingsBar";
 import { useCardOpen, ensureCardState } from "../lib/cardState";
 import {
@@ -163,10 +165,9 @@ export function Track2SqlPage() {
     if (settingsRead && !database && dbs.length) setDatabase(dbs[0].key);
   }, [settingsRead, database, dbs]);
 
-  useEffect(() => {
-    if (!settingsRead) return;
-    const timer = window.setTimeout(() => {
-      void saveTrack2PullConfig({ readiness_flow: { hazard: explorationHazard }, sql_explorer: {
+  usePageSave("Track2SqlPage", async () => {
+    if (!settingsRead) throw new Error("Settings are still loading.");
+      await saveTrack2PullConfig({ readiness_flow: { hazard: explorationHazard }, sql_explorer: {
         database, bucket, folder, sql,
         preset_class: presetClass, preset_scope: presetScope,
         pull_bucket: pullBucket, pull_folder: pullFolder, train_percent: trainPercent,
@@ -175,11 +176,9 @@ export function Track2SqlPage() {
         // the whole SQL page and not just the query (2026-11-13).
         // Training after a scheduled pull was removed (2026-11-16): always off.
         by_week: byWeek, train_after: false, class_ids: classIds,
-      } }).catch(() => undefined);
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [settingsRead, explorationHazard, database, bucket, folder, sql, presetClass, presetScope,
-      pullBucket, pullFolder, trainPercent, showLabels, withLabels, byWeek, classIds]);
+      } });
+
+  });
 
   // ...and different classes. Read live, so a new class shows up here
   // without a change to the app. Only once the database is running: a
@@ -327,11 +326,13 @@ export function Track2SqlPage() {
   }
 
   function loadPageSettings(next: SqlPageSettings) {
+    restorePageSnapshot(next.page_state);
+
     setSchedule(next.schedule ?? SQL_SCHEDULE_DEFAULTS);
     setSettingsOpen(next.settings_open ?? true);
     runId.current += 1;
     setBusy(false); setResult(null); setPreviews([]); setPulled(null);
-    setError(""); setPullError(""); setSql("");
+    setError(""); setPullError(""); setSql(next.sql ?? "");
     setDatabase(next.database); setPresetClass(next.preset_class); setPresetScope(next.preset_scope);
     setPullBucket(next.pull_bucket); setPullFolder(next.pull_folder); setTrainPercent(next.train_percent);
     setShowLabels(next.show_labels); setWithLabels(next.with_labels);
@@ -387,6 +388,8 @@ export function Track2SqlPage() {
   const hasLabels = labelsByUri.size > 0;
   const incompleteCount = [...labelsByUri.values()].filter((l) => !l.complete).length;
   const pageSettings: SqlPageSettings = {
+    sql,
+    page_state: capturePageSnapshot(),
     settings_open: settingsOpen,
     schedule,
     database, preset_class: presetClass, preset_scope: presetScope,

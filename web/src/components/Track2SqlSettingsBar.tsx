@@ -1,9 +1,13 @@
+import {saveEntirePage} from "../lib/pageSave";
+import {capturePageSnapshot,restorePageSnapshot} from "../lib/pageSnapshot";
 import { useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "../lib/api";
 
 export type SqlSchedule = { enabled: boolean; every_days: number; at: string; from_date: string };
 export const SQL_SCHEDULE_DEFAULTS: SqlSchedule = { enabled: false, every_days: 1, at: "00:00", from_date: "" };
 export type SqlPageSettings = {
+  page_state?: Record<string,unknown>;
+  sql?: string;
   schedule?: SqlSchedule | null;
   settings_open?: boolean;
   class_ids: Record<string, number>;
@@ -67,7 +71,8 @@ export function Track2SqlSettingsBar({ settings, onLoad, disabled, initialPreset
       <button className={button} disabled={locked} onClick={() => { onLoad(SQL_DEFAULTS); setLoaded(""); setSavedAt(""); setName(""); setMessage(""); setError(""); }}>New</button>
       <label className="text-xs">Save as <input aria-label="SQL settings name" value={name} disabled={locked} onChange={e => setName(e.target.value)} placeholder="name (saved as name_sql)" className="ml-2 w-44 rounded-sm border border-black/15 bg-page px-2 py-1 text-xs" /></label>
       <button className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40" disabled={locked || !(name.trim() || loaded)} onClick={() => void work(async () => {
-        const got = await apiPost<{name: string; path: string; saved_at: string}>("/track2/sql/settings/save", {name: name.trim() || loaded, settings});
+        await saveEntirePage();
+        const got = await apiPost<{name: string; path: string; saved_at: string}>("/track2/sql/settings/save", {name: name.trim() || loaded, settings:{...settings,page_state:capturePageSnapshot()}});
         window.dispatchEvent(new Event("sql-settings-saved"));
         setLoaded(got.name); setSelected(got.name); setName(""); setSavedAt(got.saved_at); setMessage(`Saved ${got.name}`); await refresh();
       })}>{name.trim() ? `Save as ${saveName}` : "Save"}</button>
@@ -77,7 +82,7 @@ export function Track2SqlSettingsBar({ settings, onLoad, disabled, initialPreset
       </select>
       <button className={button} disabled={locked || !selected} onClick={() => void work(async () => {
         const got = await apiPost<{name: string; settings: SqlPageSettings; saved_at: string}>("/track2/sql/settings/load", {name: selected});
-        onLoad(got.settings); setSavedAt(got.saved_at); setLoaded(got.name); setName(""); setMessage(`Loaded ${got.name}`);
+        restorePageSnapshot(got.settings.page_state); onLoad(got.settings); setSavedAt(got.saved_at); setLoaded(got.name); setName(""); setMessage(`Loaded ${got.name}`);
       })}>Load</button>
       <button className="px-1 text-xs text-critical underline disabled:opacity-40" disabled={locked || !selected} onClick={() => void work(async () => {
         await apiPost("/track2/sql/settings/delete", {name: selected});

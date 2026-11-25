@@ -90,6 +90,7 @@ def test_the_request_model_and_the_defaults_agree():
 #: Panels that hold no settings. Each is here for a stated reason, so
 #: adding a name is a decision rather than a way to silence the test.
 NO_SETTINGS_OF_THEIR_OWN = {
+    "Track2TrainingDataChoice.tsx": "value/onChange props; mode and dataset saved by ModelsPage snapshot; checks are revalidated",
     # Read-only: they render what the server already decided.
     "Track2ChainStatusBar.tsx": "status display",
     "Track2TrainingAuditPanel.tsx": "history, read-only",
@@ -118,7 +119,7 @@ NO_SETTINGS_OF_THEIR_OWN = {
 #: A panel with at least this many pieces of state is making choices.
 _BUSY = 8
 
-_PERSISTS = re.compile(r"\bsave(?:Track2|Trained)\w*\(|\barm\w*\(|\bdisarm\w*\(")
+_PERSISTS = re.compile(r"\busePage(?:Save|Snapshot)\(|\bsave(?:Track2|Trained)\w*\(|\barm\w*\(|\bdisarm\w*\(")
 
 
 @pytest.mark.parametrize(

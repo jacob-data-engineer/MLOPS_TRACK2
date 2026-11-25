@@ -1,3 +1,4 @@
+import {usePageSnapshot} from "../lib/pageSnapshot";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, checkCatalogDataset, getTrack2CatalogMetadata, getTrack2CatalogExports,
   estimateTrack2CatalogExport, type PackageSizeEstimate, type Track2ExportSettings, type ModelPackageOptions, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector, getTrack2Buckets, listTrack2Folders,
@@ -16,9 +17,9 @@ type Metric = typeof METRICS[number];
 type Target = { row: Track2MetricsRow; run?: Track2RunForModel; estimate?: PackageSizeEstimate };
 const message = (e: unknown) => e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "Export failed.";
 
-export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSelect = false, onOpenRun, settings, onChange }: {
+export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSelect = false, onOpenRun, settings, onChange, stateKey="models" }: {
   rows: Track2MetricsRow[]; runs: Record<string, Track2RunForModel>; browseAll?: boolean;
-  autoSelect?: boolean;
+  autoSelect?: boolean; stateKey?: string;
   onOpenRun?: (id:string)=>void;
   settings: Track2ExportSettings; onChange: (value: Track2ExportSettings) => void;
 }) {
@@ -65,6 +66,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
   const [sizeFilter, setSizeFilter] = useState("");
   const [showBy, setShowBy] = useState<"model" | "run">("model");
   const [runOrder, setRunOrder] = useState<"desc" | "asc">("desc");
+  usePageSnapshot(`export-view/${stateKey}`,{metric,chosen,search,modelFilter,generationFilter,sizeFilter,showBy,runOrder},v=>{setMetric(v.metric);setChosen(v.chosen);setSearch(v.search);setModelFilter(v.modelFilter);setGenerationFilter(v.generationFilter);setSizeFilter(v.sizeFilter);setShowBy(v.showBy);setRunOrder(v.runOrder);});
   const [direct, setDirect] = useState<{label: string; url: string; uri: string}[]>([]);
   const cancel = useRef(false);
   useEffect(() => () => { cancel.current = true; }, []);
