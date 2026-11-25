@@ -40,7 +40,6 @@ import {
   getTrack2Models,
   getTrack2ModelsLive,
   removeTrack2Queue,
-  stopTrack2Queue,
   stopTrack2Training,
   type Track2DatasetClasses,
   type Track2Detector,
@@ -1221,24 +1220,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
   const [stopOpen, setStopOpen] = useState(false);
   const [alsoForeign, setAlsoForeign] = useState(false);
 
-  async function handleQueueStop() {
-    if (queueBusy) return;
-    setQueueBusy("stop");
-    setQueueNote(null);
-    try {
-      setQueueNote({ text: (await stopTrack2Queue()).message, bad: false });
-    } catch (err) {
-      setQueueNote({
-        text: err instanceof ApiError ? err.detail : "Could not stop the queue.",
-        bad: true,
-      });
-    } finally {
-      setQueueBusy("");
-      load();
-    }
-  }
-
-
   /** Kills the run currently on the GPU. NOT the same as Stop Queue:
    * /queue/stop only halts the loop and lets the in-flight run finish,
    * so without this there is no way to end a run early and the
@@ -1524,21 +1505,10 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             }
             action={
               <div className="flex shrink-0 gap-2">
-                {/* The label says what is happening, and every button
-                    goes down while any one of them is in flight -- they
-                    all act on the same queue, so a second press during
-                    the first is never the next thing to do. */}
-                <button
-                  type="button"
-                  onClick={handleQueueStop}
-                  disabled={!!queueBusy || !data.queue.started}
-                  className="rounded-md bg-red-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
-                >
-                  {queueBusy === "stop" ? "Stopping queue..." : "Stop Queue"}
-                </button>
                 <button
                   type="button"
                   onClick={() => { setAlsoForeign(false); setStopOpen(true); }}
+                  title="Stops a running training job. Dataset preparation cannot be stopped with this button."
                   // custom_run_id matters: during a custom run
                   // training_progress reports the last PRODUCTION
                   // execution, which is a finished one -- keying off it
@@ -1564,6 +1534,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
               </div>
             }
           >
+            {!stoppableOwnRun && foreignGpuJobs.length === 0 && <p className="mb-2 text-xs text-ink-muted">Stop Training becomes available when a training job starts. It does not cancel dataset preparation.</p>}
             {/* The answer, where the question was asked. The buttons are
                 in this card's header; the page's own banners are nearly
                 three hundred lines above, off the top of the screen. */}
