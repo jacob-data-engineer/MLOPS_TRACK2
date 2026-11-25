@@ -38,6 +38,7 @@ test('training mode gates editors and queues only the selected workflow with a s
   assert.equal(await page.locator('input[name="track2-base-package"]').isEnabled(),true);
   await page.getByRole('button',{name:'Add to Queue',exact:true}).click();
   assert.equal(launches[0].kind,'single');
+  assert.equal(launches[0].payload.submit,'queue');
   assert.equal(launches[0].payload.training.base_version,arn);
   await page.getByRole('radio',{name:'Train a series of experiments',exact:true}).check();
   assert.equal(await page.getByLabel('Epochs',{exact:true}).isDisabled(),true);

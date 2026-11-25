@@ -39,7 +39,6 @@ import {
   getTrack2Models,
   getTrack2ModelsLive,
   removeTrack2Queue,
-  startTrack2Queue,
   stopTrack2Queue,
   stopTrack2Training,
   type Track2DatasetClasses,
@@ -735,7 +734,7 @@ export function TrainingForm({
     setBusy(true);
     setError(null);
     try {
-      const got = await runTrack2Retrain("enqueue", true, {
+      const got = await runTrack2Retrain("queue", true, {
         epochs, img_size: imgSize, batch, seed, patience, hyperparams,
         detector_slug: detectorSlug, architecture, notes,
         base_version: basePackageArn,
@@ -801,7 +800,7 @@ export function TrainingForm({
           </p>
         </>
       }
-      next="The Training queue below -- press Start Queue to let it run."
+      next="The Training queue below starts automatically after data preparation."
     >
       {/* No arming tick here any more. It existed to grey this card out
           while IMPORT was selected, and import is no longer one of the
@@ -1220,27 +1219,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
   const [stopOpen, setStopOpen] = useState(false);
   const [alsoForeign, setAlsoForeign] = useState(false);
 
-  async function handleQueueStart() {
-    if (queueBusy) return;
-    setQueueBusy("start");
-    setQueueNote(null);
-    try {
-      // The reply, SHOWN. This used to be awaited and dropped, so a
-      // refusal -- "Queue is empty -- add at least one run first" --
-      // arrived as a 400 the page never mentioned. The button simply
-      // did nothing, eleven times.
-      setQueueNote({ text: (await startTrack2Queue()).message, bad: false });
-    } catch (err) {
-      setQueueNote({
-        text: err instanceof ApiError ? err.detail : "Could not start the queue.",
-        bad: true,
-      });
-    } finally {
-      setQueueBusy("");
-      load();
-    }
-  }
-
   async function handleQueueStop() {
     if (queueBusy) return;
     setQueueBusy("stop");
@@ -1532,6 +1510,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
 
           <Card
             title="Training queue"
+            titleAside={<span className="text-xs font-normal text-ink-muted">Starts automatically</span>}
             caption={
               // Counts the running entry too. Counting only `pending` made
               // a run that STARTED look like one that disappeared: press
@@ -1547,18 +1526,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                     goes down while any one of them is in flight -- they
                     all act on the same queue, so a second press during
                     the first is never the next thing to do. */}
-                <button
-                  type="button"
-                  onClick={handleQueueStart}
-                  disabled={
-                    !!queueBusy
-                    || data.queue.started
-                    || (data.queue.pending.length === 0 && !data.queue.running)
-                  }
-                  className="rounded-md border border-black/15 px-3 py-2 text-xs font-medium text-ink-secondary disabled:opacity-40"
-                >
-                  {queueBusy === "start" ? "Starting queue..." : "Start Queue"}
-                </button>
                 <button
                   type="button"
                   onClick={handleQueueStop}

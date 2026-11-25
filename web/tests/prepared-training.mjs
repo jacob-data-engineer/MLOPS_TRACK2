@@ -89,7 +89,7 @@ test('training supports prepared data and checked saved SQL data', async () => {
     await page.waitForFunction(()=>document.body.dataset.submitted==='yes');
     assert.equal(await page.getByRole('progressbar').getAttribute('aria-valuenow'),'100');
     assert.equal(queued.length,1);
-    assert.deepEqual(queued[0], {submit:'enqueue',prepared_only:true,training:{epochs:25,img_size:640,batch:8,
+    assert.deepEqual(queued[0], {submit:'queue',prepared_only:true,training:{epochs:25,img_size:640,batch:8,
       seed:42,patience:10,hyperparams:{lr0:0.001},detector_slug:'helmet',architecture:'yolo11s',notes:'repeatable test',
       base_version:'arn:aws:sagemaker:test:model-package/helmet/2',comparison:{enabled:false}}});
     await page.getByRole('radio',{name:'Use a saved dataset',exact:true}).check();
