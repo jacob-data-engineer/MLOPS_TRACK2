@@ -14,6 +14,26 @@ type Run = {
 type Status = { config: Config; next_at: string | null; running: boolean; saved_at?: string; last_run?: Run; history: Run[] };
 const stamp = (value?: string | null) => value ? new Date(value).toLocaleString("en-SG", { timeZone: "Asia/Singapore" }) : "—";
 
+
+function PullTiming({ run }: { run: Run }) {
+  const [now, setNow] = useState(Date.now());
+  const active = run.status === "running";
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active, run.id]);
+  const start = Date.parse(run.started_at);
+  const end = run.finished_at ? Date.parse(run.finished_at) : active ? now : NaN;
+  const seconds = Math.max(0, Math.floor((end - start) / 1000));
+  const duration = Number.isFinite(seconds) ? `${Math.floor(seconds / 60)} min ${seconds % 60} sec` : "Not recorded";
+  return <p className="mt-1">Started: {stamp(run.started_at)} SGT
+    {run.finished_at && <> / Finished: {stamp(run.finished_at)} SGT</>}
+    {" / "}{active ? "Elapsed" : "Duration"}: {duration}
+  </p>;
+}
+
 export function Track2SqlSensorPanel({ schedule, onChange }: {
   schedule: SqlSchedule; onChange: (value: SqlSchedule) => void;
 }) {
@@ -102,6 +122,7 @@ export function Track2SqlSensorPanel({ schedule, onChange }: {
         </div>
         {last.status === "unchanged" && <p className="font-semibold">Check complete  -  no new files to pull. All eligible images and labels are already in the saved destination.</p>}
         <p>Last check: {stamp(last.started_at)} SGT · {last.status}</p>
+        <PullTiming run={last} />
         {last.found !== undefined && <p>{last.found} frames found · {last.eligible} eligible · {last.newly_eligible} newly seen eligible · {last.pending} needing images or labels · {last.excluded} excluded</p>}
         {last.summary && <p>{last.summary.copied} images copied · {last.summary.skipped} images already present · {last.summary.with_label} with labels · {last.summary.failed} failed</p>}
         {last.summary?.weeks && Object.keys(last.summary.weeks).length > 0 && <p>Filed into: {Object.entries(last.summary.weeks).map(([week, count]) => `${week} (${count})`).join(", ")}</p>}
@@ -152,7 +173,8 @@ export function SqlScheduledPullProgress() {
       <span>{run.status}{percent !== undefined ? ` - ${percent}% processed` : " - checking frames and destination"}</span></div>
     <div role="progressbar" aria-label="Scheduled SQL pull progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
       className="h-2 overflow-hidden rounded bg-black/10"><div className="h-full rounded bg-green-600 transition-[width]" style={{width: `${percent ?? 0}%`}} /></div>
-    <p className="mt-1">{stamp(run.started_at)} SGT{total > 0 ? ` / ${finished ? total : done} of ${total} frames processed` : ""}</p>
+    <PullTiming run={run} />
+    {total > 0 && <p>{finished ? total : done} of {total} frames processed</p>}
     {run.summary && <p>{run.summary.copied} copied / {run.summary.skipped} already present / {run.summary.failed} failed</p>}
     {run.error && <p className="text-critical">{run.error}</p>}
     {error && <p role="alert">Progress updates unavailable; retrying. Displayed progress may be stale.</p>}
