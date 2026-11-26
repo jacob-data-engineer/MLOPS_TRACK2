@@ -115,7 +115,6 @@ export function Track2SqlSensorPanel({ schedule, onChange }: {
         {!!last.summary?.errors?.length && <p className="text-critical">{last.summary.errors.join("; ")}</p>}
         {last.error && <p className="text-critical">{last.error}</p>}
       </div>}
-      <p className="text-ink-muted">Runs on EC2 with the browser closed while the app is running. After downtime, one catch-up check runs. The selected database must be running.</p>
       {status && status.history.length > 0 && <details><summary className="cursor-pointer">Recent checks ({status.history.length})</summary>
         <ul className="mt-1 space-y-1">{status.history.map(run => <li key={run.id}>{stamp(run.started_at)} · {run.status}{run.summary ? ` · ${run.summary.copied} copied` : ""}{run.error ? ` · ${run.error}` : ""}</li>)}</ul>
       </details>}

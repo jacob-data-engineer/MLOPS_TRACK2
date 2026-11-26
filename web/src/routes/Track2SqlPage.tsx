@@ -100,7 +100,7 @@ export function Track2SqlPage() {
   const [trainPercent, setTrainPercent] = useState(80);
   // File into Pull Control's weeks by capture date instead of one folder,
   // so Retention decays SQL frames with everything else.
-  const [byWeek, setByWeek] = useState(false);
+  const byWeek = false;
   // Where week folders live: Pull Control's root. Read, never edited here.
   const [weekRoot, setWeekRoot] = useState<{ bucket: string; root: string; cutoff: string; days: number } | null>(null);
   const [pullProgress, setPullProgress] = useState<Track2SqlPullProgress | null>(null);
@@ -139,7 +139,6 @@ export function Track2SqlPage() {
         if (typeof saved.train_percent === "number") setTrainPercent(saved.train_percent);
         if (typeof saved.show_labels === "boolean") setShowLabels(saved.show_labels);
         if (typeof saved.with_labels === "boolean") setWithLabels(saved.with_labels);
-        if (typeof saved.by_week === "boolean") setByWeek(saved.by_week);
         if (saved.class_ids && typeof saved.class_ids === "object") setClassIds(saved.class_ids);
         // Named EC2 files take precedence over the last auto-saved working state.
         // Finish restoring them before enabling queries or auto-save.
@@ -336,7 +335,6 @@ export function Track2SqlPage() {
     setDatabase(next.database); setPresetClass(next.preset_class); setPresetScope(next.preset_scope);
     setPullBucket(next.pull_bucket); setPullFolder(next.pull_folder); setTrainPercent(next.train_percent);
     setShowLabels(next.show_labels); setWithLabels(next.with_labels);
-    setByWeek(!!next.by_week);
     setClassIds(next.class_ids ?? SQL_DEFAULTS.class_ids);
     setExplorationHazard(next.exploration_hazard); setExplorationOpen(next.exploration_open); setFramesOpen(next.frames_open);
     setSettingsRevision(v => v + 1);
@@ -604,22 +602,7 @@ export function Track2SqlPage() {
                     Copies frames and their labels into the selected training folder. Source images and reviews stay unchanged.
 
                   </p>
-                  <label className="mb-3 flex items-start gap-1.5 text-xs text-ink">
-                    <input type="checkbox" className="mt-0.5" checked={byWeek}
-                           onChange={(e) => setByWeek(e.target.checked)} />
-                    <span>
-                      Sort into weeks by capture date
-                      <span className="block text-ink-muted">
-                        {byWeek
-                          ? <>Each frame goes into the week it was captured in, under Pull Control&rsquo;s root{" "}
-                              <span className="tabular text-ink">s3://{weekRoot?.bucket}/{weekRoot?.root || "(no root set)"}/week_N/</span>
-                              {weekRoot?.cutoff ? <> ({weekRoot.days}-day weeks from {new Date(weekRoot.cutoff).toLocaleDateString("en-SG")}; everything before is week_1)</> : null}.
-                              {" "}Retention then decays these weeks like any other. The capture date is the stamp in the frame&rsquo;s case key, not its review date; frames without one are left out and counted.</>
-                          : "Off: everything goes into the one folder below, outside the weeks, so Retention does not see it."}
-                      </span>
-                      {byWeek && !weekRoot?.root && <span className="block text-critical">Pull Control has no root folder. Set it on the Data Preparation tab first.</span>}
-                    </span>
-                  </label>
+
                   <div className={`grid gap-3 ${byWeek ? "md:grid-cols-[9rem]" : "md:grid-cols-[14rem_1fr_9rem]"}`}>
                     {!byWeek && <>
                     <label className="block text-xs text-ink-muted">
