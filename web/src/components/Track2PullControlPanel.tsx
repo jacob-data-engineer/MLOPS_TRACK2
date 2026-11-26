@@ -1104,24 +1104,16 @@ export function Track2PullControlPanel({
           <div className="block">
             <S3FolderField
               label="Root folder"
+              showSelectedPath={false}
               hint="(holds every week; train and val sit inside each one)"
               value={root}
               onChange={(folder) => { setRoot(folder); setDirty(true); }}
               bucket={destBucket}
               allowCreate
             />
-            <p className="mt-1 text-xs text-ink-muted">
-              One root means one S3 prefix, which is what a trainer downloads --
-              so a <span className="tabular">data.yaml</span> naming both splits
-              resolves from a single fetch.
-            </p>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-4">
-            <div className="text-xs text-ink-secondary sm:col-span-3">
-              Fixed folder names: <span className="tabular">images</span>, <span className="tabular">labels</span>.
-              Week prefix: <span className="tabular">week_</span>.
-            </div>
+          <div className="w-full sm:max-w-sm">
             <label className="block">
               <span className="mb-1 block text-xs text-ink-muted">New week every</span>
               <select className="w-full rounded-md border border-black/15 bg-page px-3 py-2 text-xs"

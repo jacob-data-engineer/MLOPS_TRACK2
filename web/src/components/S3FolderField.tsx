@@ -42,6 +42,7 @@ export function S3FolderField({
   bucket = "",
   allowCreate = false,
   showSelectedDelete = false,
+  showSelectedPath = true,
   disabled = false,
 }: {
   label: string;
@@ -54,6 +55,7 @@ export function S3FolderField({
   /** For a destination that is allowed not to exist yet. */
   allowCreate?: boolean;
   showSelectedDelete?: boolean;
+  showSelectedPath?: boolean;
   disabled?: boolean;
 }) {
   // Opens where the field already points, so a card that restored a saved
@@ -153,7 +155,7 @@ export function S3FolderField({
           prints the key it picked the same way. Without it the only
           record of the choice is a tick several rows up, which scrolls
           out of view the moment you navigate anywhere. */}
-      {value && (
+      {showSelectedPath && value && (
         <p className="tabular mt-1 text-xs text-ink-secondary">{value}</p>
       )}
       {showSelectedDelete && value.trim().replace(/^\/+|\/+$/g, "") && (
