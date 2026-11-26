@@ -51,7 +51,7 @@ export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun
       {experiments.map(e=><option key={e.id} value={`experiment:${e.id}`}>Run {e.run_number??'pending'} / {e.name} / {e.variants.length} variants + baseline / {e.state}</option>)}
       {runs.filter(r=>!membership(r.id)).map(r=><option key={r.id} value={r.id}>{r.run_number!=null?`Run ${r.run_number}`:r.id} / {r.label} / {formatDayTime(r.submitted_at)} / {r.status}</option>)}
     </select></label>
-    {grouped&&<Track2ExperimentRuns initialExperiment={grouped.id}/>}
+    {grouped&&<Track2ExperimentRuns initialExperiment={grouped.id} selectedExperiment={grouped}/>}
     {experimentError&&<p role="alert" className="text-xs text-critical">{experimentError}</p>}
     {experimentRun&&<div className="my-2 border border-hairline p-3 text-sm"><p className="font-semibold">{experimentRun.experiment.variants.length} experimental models + 1 baseline</p><p>{experimentRun.experiment.name}: {experimentRun.variant.name}. {experimentRun.experiment.variants.filter(v=>v.state==='Succeeded').length} models trained successfully.</p><p>Shared baseline comparison: {experimentRun.experiment.comparison?.status??experimentRun.experiment.state}. Select “Experiment (all variants)” above to review the whole experiment.</p>{experimentRun.experiment.comparison?.error&&<p className="text-critical">{experimentRun.experiment.comparison.error}</p>}</div>}
     {run && <>
