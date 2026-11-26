@@ -15,7 +15,6 @@ import {
   type Track2WeekPurgePreview,
   getTrack2SettingsFiles,
   listTrack2Folders,
-  previewTrack2Pull,
   purgeTrack2Week,
   getTrack2CurrentRun,
   getTrack2Pending,
@@ -30,7 +29,6 @@ import {
   type Track2Pairing,
   type Track2PullConfig,
   type Track2PendingSummary,
-  type Track2PullPlan,
   type Track2PullRunState,
   type Track2PullStatus,
   type Track2SettingsFile,
@@ -355,7 +353,6 @@ export function Track2PullControlPanel({
   // it re-counts, so a guess would only ever be a 409.
   const [purgeCount, setPurgeCount] = useState<number | null>(null);
   const [settingsFiles, setSettingsFiles] = useState<Track2SettingsFile[]>([]);
-  const [plan, setPlan] = useState<Track2PullPlan | null>(null);
   // The sweep that is running, polled while it runs. Held rather than
   // awaited: a pull over a few thousand files is minutes, and a request
   // that blocks for minutes can neither show progress nor be stopped.
@@ -1627,40 +1624,11 @@ export function Track2PullControlPanel({
           <div className="rounded-md border border-hairline p-3">
             <p className="mb-1 text-xs font-medium text-ink">Pull</p>
             <div className="mb-3"><Track2DatasetClassesSummary /></div>
-            <p className="mb-2 text-xs text-ink-muted">
-              A pull walks every folder above and copies what is new into the week
-              it belongs to --{" "}
-              <span className="tabular">
-                {root || "<root>"}/{activeWeek || `${weekPrefix}N`}/{imagesSub}/train/
-              </span>{" "}
-              for training,{" "}
-              <span className="tabular">
-                .../{imagesSub}/val/
-              </span>{" "}
-              for evaluation. Image or label comes from the file extension; the split
-              comes from the list the folder is in. Anything already filed under the
-              root is skipped, so a pull only ever copies what has appeared since the
-              last one. Originals are never touched.
-            </p>
-
-            {/* The manual pull, first: it uses exactly the rules configured
-                above, so it is also how you check them before arming
-                anything. */}
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <button type="button" disabled={!!busy || !anyPicked}
-                onClick={() => withBusy("Looking...", async () => {
-                  const got = await previewTrack2Pull();
-                  setPlan(got);
-                  setNote(`${got.planned.length} file${got.planned.length === 1 ? "" : "s"} would be copied.`);
-                })}
-                className="rounded-md border border-black/15 px-3 py-1.5 text-xs font-medium text-ink-secondary disabled:opacity-40">
-                Preview
-              </button>
               <button type="button"
                 disabled={!!busy || !anyPicked || unpaired || run?.status === "running"}
                 onClick={() => withBusy("Starting...", async () => {
                   const started = await startTrack2Pull(20000);
-                  setPlan(null);
                   // Only the id comes back. Everything after this is the
                   // poll above, which is what makes progress and Stop
                   // possible at all.
@@ -1858,25 +1826,7 @@ export function Track2PullControlPanel({
               </div>
             )}
 
-            {plan && (
-              <div className="mt-2 rounded-md border border-black/15 bg-page p-2">
-                {plan.would_create.length > 0 && (
-                  <p className="mb-1 text-xs text-critical">
-                    Will also create: {plan.would_create.join(", ")}
-                  </p>
-                )}
-                <p className="mb-1 text-xs font-medium text-ink">
-                  {plan.planned.length} to copy, {plan.skipped.length} skipped
-                </p>
-                <div className="flex max-h-40 flex-col gap-0.5 overflow-y-auto">
-                  {plan.planned.slice(0, 200).map((e) => (
-                    <p key={e.key} className="tabular truncate text-xs text-ink-secondary">
-                      {e.key} {"->"} {e.destination}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            )}
+
           </div>
 
           {/* Saved settings moved to the Retention card, above
