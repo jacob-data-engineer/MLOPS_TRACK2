@@ -260,9 +260,9 @@ export function Track2PullControlPanel({
   // One root holds everything. The train/val split lives inside each
   // week, under images/ and labels/ -- see the tree below.
   const [root, setRoot] = useState("retraining");
-  const [imagesSub, setImagesSub] = useState("images");
-  const [labelsSub, setLabelsSub] = useState("labels");
-  const [weekPrefix, setWeekPrefix] = useState("week_");
+  const imagesSub = "images";
+  const labelsSub = "labels";
+  const weekPrefix = "week_";
   const [weekDays, setWeekDays] = useState(7);
   // Which clock decides a file's week. capture_time reads the moment
   // written into the filename; file_time uses when it was uploaded.
@@ -371,13 +371,10 @@ export function Track2PullControlPanel({
     // than as a blank field nobody would know to fill in.
     if (c.root) setRoot(c.root);
     else if (c.training_root) setRoot(c.training_root);
-    if (c.images_subpath !== undefined) setImagesSub(c.images_subpath);
-    if (c.labels_subpath !== undefined) setLabelsSub(c.labels_subpath);
     // The real value, always. The field is read-only now, and one that
     // hid what is actually configured would simply be lying -- the
     // whole point of showing it is that `week_3` on screen and
     // `week_3` in the bucket are the same string.
-    if (c.week_prefix !== undefined) setWeekPrefix(c.week_prefix || "week_");
     if (c.week_length_days !== undefined) setWeekDays(c.week_length_days);
     if (c.week_by) setWeekBy(c.week_by === "scan" ? "scan" : "file_time");
     if (c.auto_create_weeks !== undefined) setAutoWeeks(c.auto_create_weeks);
@@ -1121,36 +1118,10 @@ export function Track2PullControlPanel({
           </div>
 
           <div className="grid gap-2 sm:grid-cols-4">
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Images subfolder</span>
-              <input className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-xs"
-                     value={imagesSub} onChange={(e) => { setImagesSub(e.target.value); setDirty(true); }} />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Labels subfolder</span>
-              <input className="tabular w-full rounded-md border border-black/15 bg-page px-3 py-2 text-xs"
-                     value={labelsSub} onChange={(e) => { setLabelsSub(e.target.value); setDirty(true); }} />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Week prefix</span>
-              {/* FIXED, and shown rather than hidden.
-                  `plan_routing` and `week_at` skip any folder that does
-                  not start with this prefix, so changing it does not
-                  rename anything -- it makes every week folder already
-                  in the bucket invisible to the system at once. There
-                  are seven of them.
-                  `readOnly` rather than `disabled`: a disabled input is
-                  skipped by the keyboard and reads to a screen reader as
-                  unavailable, when the value is the thing worth
-                  reading. */}
-              <input className="tabular w-full cursor-default rounded-md border border-black/15 bg-ink/[0.04] px-3 py-2 text-xs text-ink-secondary"
-                     value={weekPrefix} readOnly
-                     aria-describedby="week-prefix-fixed" />
-              <span id="week-prefix-fixed" className="mt-1 block text-xs text-ink-muted">
-                Fixed. The folders already pulled are named with it, and the
-                sweep only sees folders that start with it.
-              </span>
-            </label>
+            <div className="text-xs text-ink-secondary sm:col-span-3">
+              Fixed folder names: <span className="tabular">images</span>, <span className="tabular">labels</span>.
+              Week prefix: <span className="tabular">week_</span>.
+            </div>
             <label className="block">
               <span className="mb-1 block text-xs text-ink-muted">New week every</span>
               <select className="w-full rounded-md border border-black/15 bg-page px-3 py-2 text-xs"
