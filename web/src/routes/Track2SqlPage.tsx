@@ -644,6 +644,8 @@ export function Track2SqlPage() {
                       onChange={setPullFolder}
                       bucket={pullBucket}
                       allowCreate
+                      showSelectedDelete
+                      disabled={pulling}
                     />
                     </>}
                     <label className="block text-xs text-ink-muted">

@@ -41,6 +41,7 @@ export function S3FolderField({
   onChange,
   bucket = "",
   allowCreate = false,
+  showSelectedDelete = false,
   disabled = false,
 }: {
   label: string;
@@ -52,6 +53,7 @@ export function S3FolderField({
   bucket?: string;
   /** For a destination that is allowed not to exist yet. */
   allowCreate?: boolean;
+  showSelectedDelete?: boolean;
   disabled?: boolean;
 }) {
   // Opens where the field already points, so a card that restored a saved
@@ -102,6 +104,9 @@ export function S3FolderField({
       // A folder that no longer exists cannot stay chosen.
       const gone = toDelete.replace(/\/+$/, "");
       if (value === gone || value.startsWith(gone + "/")) onChange("");
+      if (prefix === gone || prefix.startsWith(gone + "/")) {
+        setPrefix(gone.split("/").slice(0, -1).join("/"));
+      }
       setToDelete(null);
       setCheck(null);
       setReload((n) => n + 1);
@@ -150,6 +155,13 @@ export function S3FolderField({
           out of view the moment you navigate anywhere. */}
       {value && (
         <p className="tabular mt-1 text-xs text-ink-secondary">{value}</p>
+      )}
+      {showSelectedDelete && value.trim().replace(/^\/+|\/+$/g, "") && (
+        <button type="button" disabled={disabled || deleting}
+          className="mt-2 rounded border border-critical/40 px-3 py-1.5 text-xs text-critical disabled:opacity-40"
+          onClick={() => openDelete(value)}>
+          Delete selected folder
+        </button>
       )}
       {error && <p className="mt-1 text-xs text-critical">{error}</p>}
 
