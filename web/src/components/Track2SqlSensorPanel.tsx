@@ -51,6 +51,15 @@ export function Track2SqlSensorPanel({ schedule, onChange }: {
     finally { setBusy(false); }
   }
   const last = status?.last_run;
+  const finished = !!last && ["complete", "unchanged", "partial"].includes(last.status);
+  const total = Math.max(0, last?.progress?.total ?? 0);
+  const completed = Math.max(0, Math.min(total, last?.progress?.completed ?? 0));
+  const percent = finished ? 100 : total > 0 ? Math.floor(completed / total * 100) : undefined;
+  const progressLabel = finished
+    ? (last?.status === "partial" ? "Finished with errors - 100% processed" : "Complete - 100%")
+    : last?.status === "error" ? `Failed${percent !== undefined ? ` - ${percent}% processed` : ""}`
+    : percent !== undefined ? `${last?.progress?.phase || "Processing"} - ${percent}%`
+    : "Checking frames and destination - waiting for measured progress";
   const target = status?.config.settings;
   const button = "rounded border border-hairline px-3 py-1.5 text-xs disabled:opacity-40";
   return <section className="space-y-1" aria-label="New frames sensor">
@@ -80,6 +89,17 @@ export function Track2SqlSensorPanel({ schedule, onChange }: {
       </details>
       {status?.running && <p role="status" className="font-medium">Checking for new frames and missing labels... This can take a few minutes.</p>}
       {last && <div className="rounded border border-hairline bg-page p-3" role="status">
+        <div className="my-2 space-y-1">
+          <div className="flex items-center justify-between gap-3">
+            <span>Check progress</span><span>{progressLabel}</span>
+          </div>
+          <div role="progressbar" aria-label="SQL check progress" aria-valuemin={0} aria-valuemax={100}
+            aria-valuenow={percent} aria-valuetext={progressLabel}
+            className="h-2 w-full overflow-hidden rounded bg-black/10">
+            <div className="h-full rounded bg-green-600 transition-[width]" style={{ width: `${percent ?? 0}%` }} />
+          </div>
+          {!finished && total > 0 && <p>{completed.toLocaleString()} / {total.toLocaleString()} frames processed</p>}
+        </div>
         {last.status === "unchanged" && <p className="font-semibold">Check complete  -  no new files to pull. All eligible images and labels are already in the saved destination.</p>}
         <p>Last check: {stamp(last.started_at)} SGT · {last.status}</p>
         {last.found !== undefined && <p>{last.found} frames found · {last.eligible} eligible · {last.newly_eligible} newly seen eligible · {last.pending} needing images or labels · {last.excluded} excluded</p>}
@@ -93,7 +113,6 @@ export function Track2SqlSensorPanel({ schedule, onChange }: {
           Not copied: {last.summary?.left_out_incomplete} image(s) - no exportable label boxes. Add or recover object bounding boxes before exporting with labels.
         </p>}
         {!!last.summary?.errors?.length && <p className="text-critical">{last.summary.errors.join("; ")}</p>}
-        {status?.running && last.progress && <progress aria-label="Sensor pull progress" className="w-full" value={last.progress.completed} max={Math.max(1, last.progress.total)} />}
         {last.error && <p className="text-critical">{last.error}</p>}
       </div>}
       <p className="text-ink-muted">Runs on EC2 with the browser closed while the app is running. After downtime, one catch-up check runs. The selected database must be running.</p>
