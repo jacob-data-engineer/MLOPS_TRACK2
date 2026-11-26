@@ -387,3 +387,84 @@ def test_scheduled_pull_must_finish_before_preparation(store,monkeypatch,result)
     else:
         with pytest.raises(ValueError,match='pull failed'):e.prepare_variant(j,j['variants'][0])
     assert not e.read(p['id']).get('pull_done')
+
+def test_transient_timeout_retries_with_backoff_without_losing_queue(store,monkeypatch):
+    j=job(store);j['state']='Training';j['variants'][0].update(state='Queued',run_id='existing-run');e.save(j)
+    calls=[]
+    def fail(current):calls.append(current['id']);raise TimeoutError('The read operation timed out')
+    monkeypatch.setattr(e,'advance',fail)
+    e.advance_current(j['id']);saved=e.read(j['id'])
+    assert saved['state']=='Training' and saved['retry_count']==1
+    assert saved['variants'][0]['run_id']=='existing-run'
+    assert 'retrying automatically' in saved['error']
+    e.advance_current(j['id']);assert len(calls)==1
+    saved['retry_at']='2000-01-01T00:00:00+00:00';e.save(saved)
+    monkeypatch.setattr(e,'advance',lambda current:None)
+    e.advance_current(j['id']);saved=e.read(j['id'])
+    assert saved['error']=='' and saved['retry_count']==0 and 'retry_at' not in saved
+
+
+def test_legacy_timeout_reconciles_success_then_reuses_dataset_for_next_variant(store,monkeypatch):
+    j=job(store);j.update(state='Needs attention',error='The read operation timed out',
+        baseline={'key':'pinned.pt'},working_dataset_version_id='shared-working')
+    j['variants'][0].update(state='Queued',run_id='run-74',entry_id='existing')
+    e.save(j)
+    store[1].put_item(Item={'id':'run-74','status':'Succeeded','model':{'model_package_arn':ARN}})
+    monkeypatch.setattr(e.t2,'queue_snapshot',lambda:{})
+    monkeypatch.setattr(e.data,'prepare_saved_training',lambda *a,**kw:pytest.fail('must not rebuild shared inputs'))
+    monkeypatch.setattr(e.data,'version_run_fields',lambda version:{'dataset_version_id':version['version_id']})
+    monkeypatch.setattr(e.data,'mark_version',lambda *a,**kw:None)
+    entries=[]
+    def publish(current,variant,entry):
+        entries.append(entry)
+        variant.update(state='Queued',run_id='run-next',entry_id=entry['id'])
+        current['state']='Training';e.save(current)
+    monkeypatch.setattr(e,'publish',publish)
+    e.advance_current(j['id'])
+    saved=e.read(j['id'])
+    assert saved['variants'][0]['state']=='Succeeded'
+    assert saved['variants'][0]['run_id']=='run-74'
+    assert len(entries)==1 and entries[0]['dataset_version_id']=='shared-working'
+    assert saved['variants'][1]['state']=='Queued' and saved['error']==''
+
+
+def test_lost_commit_response_does_not_restore_stale_pending_variant(store,monkeypatch):
+    j=job(store)
+    def committed_then_timeout(current):
+        saved=e.read(current['id']);saved['state']='Training'
+        saved['variants'][0].update(state='Queued',run_id='committed-run');e.save(saved)
+        raise TimeoutError('lost response')
+    monkeypatch.setattr(e,'advance',committed_then_timeout)
+    e.advance_current(j['id'])
+    assert e.read(j['id'])['variants'][0]['run_id']=='committed-run'
+
+
+def test_permanent_error_still_requires_attention(store,monkeypatch):
+    j=job(store)
+    monkeypatch.setattr(e,'advance',lambda j:(_ for _ in ()).throw(ValueError('Class names do not match')))
+    e.advance_current(j['id']);saved=e.read(j['id'])
+    assert saved['state']=='Needs attention' and not e.recoverable(saved)
+
+
+def test_failed_error_save_does_not_write_stale_snapshot_from_tick(store,monkeypatch):
+    j=job(store)
+    monkeypatch.setattr(e.record_store,'enabled',lambda:True)
+    monkeypatch.setattr(e,'advance_current',lambda ident:(_ for _ in ()).throw(TimeoutError('SQL unavailable')))
+    monkeypatch.setattr(e,'save',lambda item:pytest.fail('outer tick must not overwrite newer state'))
+    e.tick.__wrapped__()
+    assert e.read(j['id'])['state']=='Pending'
+
+def test_wrapped_database_socket_timeout_is_retryable():
+    wrapped=RuntimeError('network error')
+    wrapped.__cause__=TimeoutError('socket expired')
+    assert e.transient_error(wrapped)
+
+
+def test_timeout_does_not_revive_cancelled_experiment(store,monkeypatch):
+    j=job(store)
+    def cancelled_then_timeout(current):
+        latest=e.read(current['id']);latest['state']='Cancelled';e.save(latest)
+        raise TimeoutError('late response')
+    monkeypatch.setattr(e,'advance',cancelled_then_timeout)
+    e.advance_current(j['id'])
+    assert e.read(j['id'])['state']=='Cancelled'

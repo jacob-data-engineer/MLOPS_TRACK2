@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import uuid
+import logging
 from botocore.exceptions import ClientError
 from .. import data, pull_control as pc, record_store
 from ..training import track2_shared as t2, comparison as cmp
@@ -298,18 +299,80 @@ def advance(job):
     else:
         job.update(state='Failed',error='No successful variants to compare.');save(job)
 
+ACTIVE_STATES = ('Pending', 'Preparing', 'Training', 'Comparing')
+TRANSIENT_MESSAGES = ('the read operation timed out', 'read timeout', 'read timed out',
+                      'connection timed out', 'connection reset', 'connection refused',
+                      'server closed the connection', 'could not connect to the endpoint')
+
+
+def transient_error(exc):
+    seen=set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (TimeoutError, ConnectionError)):
+            return True
+        if isinstance(exc, ClientError):
+            return exc.response['Error']['Code'] in ('Throttling', 'ThrottlingException',
+                'ServiceUnavailable', 'InternalFailure', 'RequestTimeout', 'RequestTimeoutException')
+        if isinstance(exc, ValueError):
+            return False
+        if any(text in str(exc).lower() for text in TRANSIENT_MESSAGES):
+            return True
+        exc=exc.__cause__ or exc.__context__
+    return False
+
+
+def recoverable(job):
+    return job['state'] in ACTIVE_STATES or (
+        job['state']=='Needs attention' and
+        any(text in str(job.get('error','')).lower() for text in TRANSIENT_MESSAGES))
+
+
+def retry_due(job):
+    return not job.get('retry_at') or dt.datetime.fromisoformat(job['retry_at']) <= dt.datetime.now(dt.timezone.utc)
+
+
 def advance_current(ident):
-    """Re-read after acquiring this experiment's lock; stale listings cannot revive removals."""
+    """Reconcile durable state after transient failures, never replay a stale submission."""
     def owned():
         job=read(ident)
-        if job['state'] in ('Pending','Preparing','Training','Comparing'):
-            try:
-                advance(job)
-            except control.Stopped as exc:
-                job.update(state='Cancelled',stage=str(exc));save(job)
-            except Exception as exc:
-                job.update(state='Needs attention',error=str(exc)[:1500]);save(job)
+        if not recoverable(job) or not retry_due(job):
+            return
+        if job['state']=='Needs attention':
+            # Legacy timeout failures must resume reconciliation, not start a new attempt.
+            job['state']='Comparing' if job.get('comparison') else 'Training' if any(
+                v['state']=='Queued' for v in job['variants']) else 'Preparing'
+            save(job)
+        try:
+            control.checkpoint()
+            advance(job)
+            if job.get('retry_count') or job.get('error') or job.get('retry_at'):
+                current=read(ident)
+                if current['state']!='Cancelled':
+                    current.update(error='',retry_count=0)
+                    current.pop('retry_at',None)
+                    save(current)
+        except control.Stopped as exc:
+            current=read(ident)
+            current.update(state='Cancelled',stage=str(exc));save(current)
+        except Exception as exc:
+            logging.getLogger(__name__).exception('Experiment %s reconciliation failed',ident)
+            # A lost response can follow a successful SQL commit. Re-read before writing
+            # error metadata so queued entries / completed runs are never overwritten.
+            current=read(ident)
+            if current['state'] not in ACTIVE_STATES:
+                return
+            if transient_error(exc):
+                attempts=int(current.get('retry_count',0))+1
+                delay=min(60,5 * 2**min(attempts-1,4))
+                current.update(retry_count=attempts,
+                    retry_at=(dt.datetime.now(dt.timezone.utc)+dt.timedelta(seconds=delay)).isoformat(),
+                    error=f'Temporary connection error; retrying automatically in {delay}s: {exc}'[:1500])
+            else:
+                current.update(state='Needs attention',error=str(exc)[:1500])
+            save(current)
     return record_store.exclusive('training_variant:'+ident)(owned)()
+
 
 @record_store.exclusive('training_variants')
 def tick():
@@ -317,13 +380,13 @@ def tick():
     if not record_store.enabled():
         return
     for job in reversed(all_records()):
-        if job['state'] not in ('Pending','Preparing','Training','Comparing'):
+        if not recoverable(job) or not retry_due(job):
             continue
         try:
             advance_current(job['id'])
-        except Exception as exc:
-            job.update(state='Needs attention',error=str(exc)[:1500]);save(job)
-        # One experiment per tick keeps preparation and AWS calls bounded.
+        except Exception:
+            # If even reading/saving failed, leave SQL state intact for the next tick.
+            logging.getLogger(__name__).exception('Experiment %s worker will retry',job['id'])
         break
 
 @record_store.exclusive('training_variants')
