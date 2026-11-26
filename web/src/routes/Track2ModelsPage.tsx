@@ -894,7 +894,7 @@ export function TrainingForm({
         Each new-data run rebuilds a fresh decay dataset. Saved-data runs recreate their recorded selection.
         Central-store files and SQL records remain available for comparisons, repeat runs and exports.
       </p>
-      <Track2BaselineComparison value={selection.comparison || {enabled: false}}
+      <Track2BaselineComparison expectedClasses={chosenDetector?.classes} value={selection.comparison || {enabled: false}}
         onChange={comparison => setSelection({comparison})} disabled={busy || preparing || restoringComparison}/>
       {restoringComparison && <p role="status" className="text-xs">Restoring saved comparison selections…</p>}
       {comparisonRestoreError && <p role="alert" className="text-xs text-critical">{comparisonRestoreError}</p>}

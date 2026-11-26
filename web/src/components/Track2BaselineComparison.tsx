@@ -1,11 +1,12 @@
+import {BaselineClassWarning} from "./BaselineClassWarning";
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import {useEffect, useState} from 'react';
 import {ApiError, getTrack2Metrics, listBaselineModels, registerBaselineModel, uploadBaselineModel, deleteBaselineModel,
   type BaselineSelection, type BaselineVersion, type Track2MetricsRow} from '../lib/api';
 import {ConfirmDialog} from './ConfirmDialog';
 
-export function Track2BaselineComparison({value, onChange, disabled = false, completed = false}: {
-  value: BaselineSelection; onChange: (value: BaselineSelection) => void; disabled?: boolean; completed?: boolean;
+export function Track2BaselineComparison({value, onChange, disabled = false, completed = false, expectedClasses}: {
+  value: BaselineSelection; onChange: (value: BaselineSelection) => void; disabled?: boolean; completed?: boolean; expectedClasses?: Record<string,string>;
 }) {
   const [modelToAdd,setModelToAdd]=useState('');
   const [modelsToRemove,setModelsToRemove]=useState<string[]>([]);
@@ -109,6 +110,7 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
         <button type="button" className="rounded border border-critical/40 px-3 py-2 text-critical disabled:opacity-40" disabled={!(value.other_arns||[]).some(a=>modelsToRemove.includes(a))} onClick={()=>{onChange({...value,other_arns:(value.other_arns||[]).filter(a=>!modelsToRemove.includes(a))});setModelsToRemove([]);}}>Remove selected models</button>
         <p className="text-xs text-ink-muted">Removal only changes this comparison list. Registered models are kept.</p>
       </div>
+      <BaselineClassWarning expected={expectedClasses} arns={[value.baseline_arn,...(value.other_arns||[])].filter((arn):arn is string=>!!arn)}/>
       <p className="text-xs text-ink-muted">{completed ? 'Evaluate' : 'After training, evaluate'} these fixed versions on this run’s preserved validation images and labels. This starts a separate billed evaluation job; it does not train the baseline or change the serving model.</p>
     </>}
 
