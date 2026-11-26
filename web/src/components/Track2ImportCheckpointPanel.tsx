@@ -527,7 +527,6 @@ export function Track2ImportCheckpointPanel({ onImported,
     // on the Register card and is the same fix.
     <Card
       title="Import a pretrained COCO or an already-trained model"
-      caption="Reads a .pt trained elsewhere -- an official COCO release like yolo11s.pt, or weights somebody already trained -- shows what it detects, and registers it as a version in a Model Name's registry. Optional: skip it if the Model Name already has a version to continue from."
       defaultOpen={false}
     >
       {/* NOT one of the exclusive options, and never greyed -- the same

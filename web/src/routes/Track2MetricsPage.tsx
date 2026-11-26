@@ -419,13 +419,6 @@ export function Track2MetricsPage() {
   // Groups the "All versions" table with a header row between each model
   // size -- rows already arrive sorted size-first from the API, this just
   // makes that grouping visible instead of implicit in the sort order.
-  // What is ACTUALLY registered, rather than the one generation this page
-  // used to assert. Sorted so the order does not shuffle as rows arrive.
-  const generationsInUse =
-    Array.from(new Set((rows ?? []).map((r) => r.generation).filter(Boolean)))
-      .sort()
-      .map((g) => `YOLO${g}`)
-      .join(", ") || "none registered yet";
 
   return (
     <div>
@@ -433,16 +426,7 @@ export function Track2MetricsPage() {
         <BarChart3 size={20} className="text-accent" strokeWidth={2} />
         Track2 Review &amp; Metrics
       </h1>
-      <p className="mb-6 max-w-3xl text-sm text-ink-secondary">
-        Model generations in use:{" "}
-        <span className="font-semibold text-ink">{generationsInUse}</span>. Pick
-        up to {MAX_COMPARE} registered versions and compare their real registry
-        metrics side by side -- no fabricated numbers, and no filtering by
-        approval state, so an Approved version stays comparable against
-        whatever is Rejected or still Pending. The validation count beside each
-        version is part of the comparison: a score measured on five images is
-        not a better score than one measured on two hundred.
-      </p>
+
 
       {/* When this was read, and the way to read it again. A training run
           that finishes while the page is open changes nothing on it, and

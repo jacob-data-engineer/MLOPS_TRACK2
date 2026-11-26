@@ -75,7 +75,6 @@ export function Track2TrainingDataFile() {
         </span>
       )}
     </p>
-    <p className="mt-1 text-sm text-ink-secondary">These are shared data settings, also visible in Data Preparation. Loading does not start a job. Later edits to the data cards affect the next run.</p>
     {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
     {shown && <TrainingDataPreview name={shown} preview={preview} busy={previewing} error={previewError} />}
     {recipe && <details key={`${loaded}:${shown}`} open={false} className="mt-3"><summary className="cursor-pointer">View imported preparation settings</summary>

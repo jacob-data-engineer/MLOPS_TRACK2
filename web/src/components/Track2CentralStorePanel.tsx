@@ -107,7 +107,6 @@ export function Track2CentralStorePanel() {
   return (
     <Card
       title="Central data store"
-      caption="The one place all the data and images are kept. Pick the bucket, then the folder inside it."
     >
       <div className="grid gap-3 md:grid-cols-2">
         <label className="block">
@@ -156,13 +155,7 @@ export function Track2CentralStorePanel() {
                  onChange={(e) => setTrainFromCombined(e.target.checked)} />
           <span>
             Train from the combined store
-            <span className="block text-ink-muted">
-              Before every run, each ticked source (Assemble&apos;s folders, the golden set,
-              Pull Control&apos;s weeks) is copied into the store, then{" "}
-              <span className="tabular">{decayedPath || "<store>_decay/"}</span> is rebuilt from it
-              through the retention policy and the run trains on that alone. It is deleted once
-              the run has finished. The store itself is never pruned or overwritten.
-            </span>
+
           </span>
         </label>
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -177,10 +170,7 @@ export function Track2CentralStorePanel() {
               {combine.stopping ? "Stopping..." : "Stop"}
             </button>
           )}
-          <span className="text-ink-muted">
-            Does the copy and the decay now, without training. The decayed copy is brought up to date, not
-            rebuilt from empty: only files the decay no longer keeps are removed, only missing ones copied.
-          </span>
+
         </div>
         {path && (
           <dl className="tabular mt-2 grid grid-cols-[auto_1fr] gap-x-2 text-ink-secondary">

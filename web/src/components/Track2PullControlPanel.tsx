@@ -862,7 +862,6 @@ export function Track2PullControlPanel({
           </p>
         </>
       }
-      next="Step 4, Selection weeks -- point at the week folders and decide how much of each to use."
       collapsible={false}
       titleAside={onOnlyChange ? (
         // Beside the title, where the card's own name is -- the same
@@ -883,7 +882,6 @@ export function Track2PullControlPanel({
           Use Pull Control
         </label>
       ) : undefined}
-      caption="Pick the folders. Everything below follows from them -- where files land, how a week is decided, and what fires a sweep."
       action={
         <button
           type="button"
@@ -915,7 +913,7 @@ export function Track2PullControlPanel({
         <p className="text-xs text-ink-muted">
           {status
             ? `${(status.config.sources ?? []).length} folder${(status.config.sources ?? []).length === 1 ? "" : "s"}, ${status.weeks.length} week${status.weeks.length === 1 ? "" : "s"}, trigger: ${liveMode}`
-            : "Press Show to configure."}
+            : null}
         </p>
       ) : (
         <div className="flex flex-col gap-3">

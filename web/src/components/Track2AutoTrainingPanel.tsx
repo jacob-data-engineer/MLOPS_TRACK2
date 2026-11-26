@@ -353,7 +353,6 @@ export function Track2AutoTrainingPanel() {
           </p>
         </>
       }
-      caption="One root of week folders, and what each one holds. The dataset itself is built from the data.yaml below."
     >
 
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
@@ -363,23 +362,14 @@ export function Track2AutoTrainingPanel() {
         <div className="min-w-0">
           <span className="mb-1 block text-xs text-ink-muted">
             Root folder{" "}
-            <span className="text-ink-muted/70">
-              (holds the week folders; images/ and labels/ come from the pull
-              control)
-            </span>
+
           </span>
           {/* Which folder this is, and whether it is the one the automated
               run will use. Silence here is what let the card and the chain
               drift apart: the chain reads the pull's root whatever this
               card shows. */}
           {followPull ? (
-            <p className="mb-1 text-xs text-ink-muted">
-              Following the pull control
-              {pullRoot && (
-                <> &mdash; <span className="tabular font-medium text-ink">{pullRoot}</span></>
-              )}
-              . Change it there and this follows.
-            </p>
+            null
           ) : (
             <p className="mb-1 text-xs text-critical">
               Overridden. The automated run still uses the pull control&rsquo;s

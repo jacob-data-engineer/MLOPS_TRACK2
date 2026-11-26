@@ -42,11 +42,6 @@ export function Track2DataPrepPage() {
           <Database size={20} className="text-accent" strokeWidth={2} />
           Track2 Data Preparation
         </h1>
-        <p className="mb-2 max-w-3xl text-sm text-ink-secondary">
-          What a training run learns from: folders picked by hand, the golden
-          set, the pulled week folders and the retention policy over them.
-          Training happens on the Multi-Auto Training tab.
-        </p>
         <Track2PinnedBar scope="dp" />
       </div>
 

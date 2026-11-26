@@ -910,7 +910,6 @@ export function Track2DetectorsPanel({
             detects, in order.
           </p>
         )}
-        caption="A name plus the class names it detects, in order. This is what a trained model is filed under, and what a dataset is checked against."
         help={
           <>
             <p>
