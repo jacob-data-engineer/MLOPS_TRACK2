@@ -14,7 +14,7 @@ import {
   type Track2Bucket,
 } from "../lib/api";
 import { Card } from "./Card";
-import { listen } from "../lib/bus";
+import { Track2DatasetClassesSummary } from "./Track2DatasetClassesSummary";
 // Both, deliberately. The SOURCE pair is the Assemble card's shape --
 // collapsed fields with one browser opened under whichever was clicked.
 // The TARGET folder keeps the always-open field: it is one folder, not a
@@ -40,26 +40,6 @@ export function Track2GoldenSetPanel() {
   const [open, setOpen] = useCardOpen("golden_set", false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [datasetClasses, setDatasetClasses] = useState<Record<string, string> | null>(null);
-  const [classesError, setClassesError] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    let generation = 0;
-    const refresh = () => {
-      const current = ++generation;
-      getTrack2PullControl().then((result) => {
-        if (cancelled || current !== generation) return;
-        setDatasetClasses(result.config.dataset_assemble?.label_classes ?? {});
-        setClassesError(false);
-      }).catch(() => {
-        if (!cancelled && current === generation) setClassesError(true);
-      });
-    };
-    const unsubscribe = listen("data-sources-changed", refresh);
-    refresh();
-    return () => { cancelled = true; unsubscribe(); };
-  }, []);
 
   const [bucket, setBucket] = useState("track2-s3");
   const [buckets, setBuckets] = useState<Track2Bucket[]>([]);
@@ -451,23 +431,7 @@ export function Track2GoldenSetPanel() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs text-ink-muted">
-              Label classes (shared dataset mapping, in index order)
-              <input
-                type="text"
-                readOnly
-                value={classesError ? "Could not load dataset classes." : datasetClasses === null
-                  ? "Loading classes..."
-                  : Object.entries(datasetClasses).sort(([a], [b]) => Number(a) - Number(b))
-                    .map(([id, name]) => `${id} ${name}`).join(", ") || "No dataset classes configured."}
-                className="tabular mt-1 w-full rounded border border-black/15 bg-page px-2 py-1 text-sm text-ink"
-              />
-            </label>
-            <p className="mt-1 text-xs text-ink-muted">
-              Uses the saved Data Preparation class list; these are not classes detected from this folder.
-            </p>
-          </div>
+          <Track2DatasetClassesSummary />
 
           {/* --------------------------------------------- the split ---- */}
           <div className="rounded-md border border-hairline p-3">

@@ -1,3 +1,4 @@
+import { Track2DatasetClassesSummary } from "./Track2DatasetClassesSummary";
 import {usePageSave} from "../lib/pageSave";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCardOpen } from "../lib/cardState";
@@ -1625,6 +1626,7 @@ export function Track2PullControlPanel({
           {/* ------------------------------------ 7. what fires a pull */}
           <div className="rounded-md border border-hairline p-3">
             <p className="mb-1 text-xs font-medium text-ink">Pull</p>
+            <div className="mb-3"><Track2DatasetClassesSummary /></div>
             <p className="mb-2 text-xs text-ink-muted">
               A pull walks every folder above and copies what is new into the week
               it belongs to --{" "}
