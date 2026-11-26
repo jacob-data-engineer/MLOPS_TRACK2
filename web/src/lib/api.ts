@@ -3,12 +3,12 @@
  * src/ppe_pipeline_api/CONTRACT.md at the repo root -- this file should
  * stay in step with that document, not guess at shapes).
  *
- * The base URL points at the local FastAPI dev server by default; override
+ * Local development uses FastAPI on port 8000; built deployments use the page origin. Override
  * with VITE_API_BASE_URL for any other deployment.
  */
 
 export const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? "http://localhost:8000" : "");
 
 export interface BaselineSelection { enabled: boolean; baseline_arn?: string; other_arns?: string[] }
 export type VariantSettingsSnapshot = {notes?:string;epochs:number;img_size:number;batch:number;seed:number;patience:number;hyperparams:Record<string,unknown>};
