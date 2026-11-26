@@ -407,11 +407,6 @@ export function Track2SqlPage() {
         <Database size={20} className="text-accent" strokeWidth={2} />
         Track2 SQL Database Query
       </h1>
-      <p className="mb-4 max-w-3xl text-sm text-ink-secondary">
-        Pick a class and see its frames. Only frames people have fully answered are shown &mdash;
-        every person in the frame has a human violation / no violation; VLM-only and
-        pre-filled answers are left out. Read only: nothing here changes the database.
-      </p>
 
       <Card title="Settings and schedule" stateKey="sql settings and schedule" keepMounted>
       <Track2SqlSettingsBar initialPreset={initialPreset} disabled={!settingsRead || pulling} onLoad={loadPageSettings}
