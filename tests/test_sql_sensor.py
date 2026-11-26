@@ -232,3 +232,11 @@ def test_excluded_frames_report_separate_reasons(env, monkeypatch):
     assert [r["count"] for r in last["exclusion_reasons"]] == [1, 1]
     assert "label boxes" in last["exclusion_reasons"][0]["reason"]
     assert "bucket" in last["exclusion_reasons"][1]["reason"]
+
+
+def test_status_reports_other_worker_running(monkeypatch):
+    monkeypatch.setattr(ss, '_running', False)
+    monkeypatch.setattr(ss, 'read', lambda: {'last_run': {'status': 'running'}})
+    assert ss.status()['running'] is True
+    monkeypatch.setattr(ss, 'read', lambda: {'last_run': {'status': 'complete'}})
+    assert ss.status()['running'] is False

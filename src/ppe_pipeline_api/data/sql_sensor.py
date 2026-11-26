@@ -84,7 +84,7 @@ def write(state):
 def status():
     with _lock:
         state = read()
-        return {k: v for k, v in state.items() if k != "seen"} | {"running": _running, "timezone": "Asia/Singapore"}
+        return {k: v for k, v in state.items() if k != "seen"} | {"running": _running or (state.get("last_run") or {}).get("status") == "running", "timezone": "Asia/Singapore"}
 
 
 def validate_selection(config):

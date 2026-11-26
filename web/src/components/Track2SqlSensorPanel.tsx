@@ -38,7 +38,7 @@ export function Track2SqlSensorPanel({ schedule, onChange }: {
     void refresh();
     const saved = () => void refresh();
     window.addEventListener("sql-settings-saved", saved);
-    const timer = setInterval(() => void refresh(), 10000);
+    const timer = setInterval(() => void refresh(), 2000);
     return () => { cancelled = true; clearInterval(timer); window.removeEventListener("sql-settings-saved", saved); };
   }, []);
   const locked = busy || !status || status.running;
@@ -122,4 +122,39 @@ export function Track2SqlSensorPanel({ schedule, onChange }: {
       {error && <p role="alert" className="text-critical">{error}</p>}
     </div>
   </section>;
+}
+
+
+export function SqlScheduledPullProgress() {
+  const [status, setStatus] = useState<Status | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      try {
+        const result = await apiGet<Status>("/track2/sql/sensor");
+        if (!disposed) { setStatus(result); setError(false); }
+      } catch { if (!disposed) setError(true); }
+      finally { if (!disposed) timer = setTimeout(poll, 2000); }
+    }
+    void poll();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, []);
+  const run = status?.last_run;
+  if (!run) return error ? <p role="alert">Could not load scheduled pull progress. Retrying...</p> : null;
+  const finished = ["complete", "unchanged", "partial"].includes(run.status);
+  const total = Math.max(0, run.progress?.total ?? 0);
+  const done = Math.max(0, Math.min(total, run.progress?.completed ?? 0));
+  const percent = finished ? 100 : total ? Math.floor(done / total * 100) : undefined;
+  return <div className="mt-3 rounded border border-hairline p-3 text-xs" aria-live="polite">
+    <div className="mb-2 flex justify-between gap-2"><strong>Scheduled / Check now pull progress</strong>
+      <span>{run.status}{percent !== undefined ? ` - ${percent}% processed` : " - checking frames and destination"}</span></div>
+    <div role="progressbar" aria-label="Scheduled SQL pull progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
+      className="h-2 overflow-hidden rounded bg-black/10"><div className="h-full rounded bg-green-600 transition-[width]" style={{width: `${percent ?? 0}%`}} /></div>
+    <p className="mt-1">{stamp(run.started_at)} SGT{total > 0 ? ` / ${finished ? total : done} of ${total} frames processed` : ""}</p>
+    {run.summary && <p>{run.summary.copied} copied / {run.summary.skipped} already present / {run.summary.failed} failed</p>}
+    {run.error && <p className="text-critical">{run.error}</p>}
+    {error && <p role="alert">Progress updates unavailable; retrying. Displayed progress may be stale.</p>}
+  </div>;
 }

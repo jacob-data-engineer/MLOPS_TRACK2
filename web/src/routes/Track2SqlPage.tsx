@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card } from "../components/Card";
 import { S3FolderField } from "../components/S3FolderField";
 import { Track2ReadinessFlowPanel } from "../components/Track2ReadinessFlowPanel";
-import { Track2SqlSensorPanel } from "../components/Track2SqlSensorPanel";
+import { Track2SqlSensorPanel, SqlScheduledPullProgress } from "../components/Track2SqlSensorPanel";
 import {
   ApiError,
   apiGet,
@@ -708,6 +708,7 @@ export function Track2SqlPage() {
                     </p>
                   )}
                   <p className="mt-2 text-xs text-ink-muted">Manual pulls continue on EC2 after you close this page. Enabled, saved schedules automatically pull at the selected time without an open browser.</p>
+                  <SqlScheduledPullProgress />
                   {pullProgress && (
                     <div className="mt-3 rounded border border-hairline p-3" aria-label="Frame pull progress">
                       <div className="mb-2 flex justify-between text-xs" role="status">
