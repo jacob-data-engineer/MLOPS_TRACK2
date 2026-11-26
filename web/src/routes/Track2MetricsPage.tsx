@@ -531,7 +531,7 @@ export function Track2MetricsPage() {
         <fieldset aria-label="Baseline comparison source" className="my-4 flex gap-4"><label><input type="radio" name="baseline-source" checked={baselineSource==='single'} onChange={()=>setBaselineSource('single')}/> Single training run</label><label><input type="radio" name="baseline-source" checked={baselineSource==='experiment'} onChange={()=>setBaselineSource('experiment')}/> Experiment (all variants)</label></fieldset>
         {baselineSource==='experiment'?<Track2ExperimentRuns/>:<>
         <Track2RunComparisons initialRun={baselineRun} onRunChange={setBaselineRun} />
-        <Card title="Model export">
+        {!baselineRun.startsWith('experiment:') && <>        <Card title="Model export">
           <p className="mb-3 text-xs">Export the selected training run's model, data and metadata. Choose the package contents and destination below.</p>
           {!baselineRun ? <p className="text-sm">Choose a training run above to export.</p> :
             !rows?.some(row => runsByArn[row.model_package_arn]?.run_id === baselineRun) ?
@@ -541,7 +541,7 @@ export function Track2MetricsPage() {
                 rows={rows.filter(row => runsByArn[row.model_package_arn]?.run_id === baselineRun)}
                 runs={runsByArn} settings={exportSettings} onChange={setExportSettings} autoSelect
               />}
-        </Card>
+        </Card></>}
         </>}
       </>}
       <fieldset hidden={comparisonView !== 'models'} className="min-w-0 w-full" disabled={restoringSettings} aria-busy={restoringSettings}>

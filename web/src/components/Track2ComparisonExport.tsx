@@ -17,9 +17,9 @@ type Metric = typeof METRICS[number];
 type Target = { row: Track2MetricsRow; run?: Track2RunForModel; estimate?: PackageSizeEstimate };
 const message = (e: unknown) => e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "Export failed.";
 
-export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSelect = false, onOpenRun, settings, onChange, stateKey="models" }: {
+export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSelect = false, onOpenRun, settings, onChange, stateKey="models", experimentId, experimentRunNumber }: {
   rows: Track2MetricsRow[]; runs: Record<string, Track2RunForModel>; browseAll?: boolean;
-  autoSelect?: boolean; stateKey?: string;
+  autoSelect?: boolean; stateKey?: string; experimentId?: string; experimentRunNumber?:number|null;
   onOpenRun?: (id:string)=>void;
   settings: Track2ExportSettings; onChange: (value: Track2ExportSettings) => void;
 }) {
@@ -115,6 +115,18 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
       const targets: Target[] = []; const warnings: string[] = [];
       for (const row of ranked.filter(r => arns.includes(r.model_package_arn))) {
         const run = runs[row.model_package_arn];
+        if (experimentId) {
+          if (images) {
+            const availability = await checkCatalogDataset("experiment", experimentId);
+            if (["unavailable","check_failed"].includes(availability.state)) throw new Error(availability.detail);
+          }
+          const estimate = await estimateTrack2CatalogExport("experiment", experimentId, {...destination,
+            format: destination.destination === "local" ? "zip" : destination.format,
+            include_images: images, include_model: model, include_metadata: metadata,
+            metadata_groups: groups, model_package_arn: row.model_package_arn});
+          targets.push({row,run,estimate}); continue;
+        }
+
         if (!run) {
           if (images || metadata || !model) throw new Error(`${modelLabel(row)} has no recorded training run. Select only Model (.pt) to export its registered checkpoint.`);
           targets.push({row}); continue;
@@ -148,17 +160,17 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
     try {
       for (const target of targets) {
         if (cancel.current) break;
-        if (!target.run) {
+        if (!target.run && !experimentId) {
           const result = await exportTrack2BestWeights({group_name:target.row.group_name,criterion:"newest",
             model_package_arn:target.row.model_package_arn,destination:options.destination,bucket:options.bucket,prefix:options.prefix,retention:"keep_all"});
           setDirect(old=>[...old,{label:`${target.row.registry} · ${modelLabel(target.row)}`,url:result.url,uri:result.written_to}]);
           continue;
         }
-        const started = await startTrack2CatalogExport("run", target.run.run_id,
+        const started = await startTrack2CatalogExport(experimentId ? "experiment" : "run", experimentId || target.run!.run_id,
           { ...options, model_package_arn: target.row.model_package_arn });
         let finished = false;
         while (!finished && !cancel.current) {
-          const result = await getTrack2CatalogExports({ kind: "run", id: target.run.run_id });
+          const result = await getTrack2CatalogExports(experimentId ? undefined : { kind: "run", id: target.run!.run_id });
           const job = result.exports.find(e => e.id === started.id);
           if (job) {
             setJobs(previous => [...previous.filter(e => e.id !== job.id), job]);
@@ -219,7 +231,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
             const selected = chosen.includes(row.model_package_arn);
             return <tr key={row.model_package_arn} className={`border-b border-hairline/50 hover:bg-black/[0.03] [&_td]:px-2 [&_td]:py-1 ${selected ? "bg-accent-subtle" : ""}`}>
               <td><input aria-label={`Export ${modelLabel(row)}`} type="checkbox" checked={selected} onChange={e => setChosen(old => e.target.checked ? [...old, row.model_package_arn] : old.filter(a => a !== row.model_package_arn))} /></td>
-              <td className="font-medium text-ink">{run ? onOpenRun ? <button type="button" className="rounded px-1 underline focus-visible:outline focus-visible:outline-2" aria-label={`Open Run ${run.run_number} in Run Central`} onClick={() => onOpenRun(run.run_id)}>Run {run.run_number}</button> : `Run ${run.run_number}` : "No run recorded"}</td>
+              <td className="font-medium text-ink">{experimentId ? `Run ${experimentRunNumber??"pending"}` : run ? onOpenRun ? <button type="button" className="rounded px-1 underline focus-visible:outline focus-visible:outline-2" aria-label={`Open Run ${run.run_number} in Run Central`} onClick={() => onOpenRun(run.run_id)}>Run {run.run_number}</button> : `Run ${run.run_number}` : "No run recorded"}</td>
               <td>{formatSgt(run?.submitted_at, "--")}</td>
               <td>{run?.status || (isSeedVersion(row.description) ? "Seed" : statusLabel(row.status))}</td>
               <td>{run?.detector || row.registry}</td>

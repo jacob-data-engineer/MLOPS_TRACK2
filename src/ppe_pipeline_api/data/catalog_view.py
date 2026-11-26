@@ -82,6 +82,21 @@ def _iso(rows: list[dict]) -> list[dict]:
 
 # --- browsing ---------------------------------------------------------------
 
+def reserve_experiment_number(ident):
+    """Reserve from the same permanent sequence as ordinary runs; never recycle."""
+    catalog.ensure_schema_once()
+    conn = catalog.connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO run_number_registry(run_id) VALUES (%s) ON CONFLICT(run_id) DO NOTHING", ('experiment-'+ident,))
+        cur.execute("SELECT run_number FROM run_number_registry WHERE run_id=%s", ('experiment-'+ident,))
+        number = cur.fetchone()[0]
+        conn.commit()
+        return number
+    finally:
+        conn.close()
+
+
 def run_numbers(run_ids: list[str]) -> dict[str, int]:
     """Global chronological numbers, independent of filtering and model version."""
     if not run_ids or not catalog.configured():
@@ -328,6 +343,15 @@ def _frozen(stored: str, original: str, expected_etag: str = '') -> tuple[bytes 
 
 
 def _plan(kind: str, ident: str) -> tuple[list[tuple[str, str, dict]], dict | None, str]:
+    if kind == 'experiment':
+        from ..chain import training_variants as variants
+        job = variants.public(variants.read(ident))
+        version = job.get('working_dataset_version_id') or job.get('dataset_version_id')
+        if not version:
+            raise ValueError('This experiment has no preserved dataset yet.')
+        entries, names, _ = _plan('version', version)
+        return entries, names, f"run-{job.get('run_number') or ident}"
+
     """[(zip path, source uri, manifest row)], the class names, a label."""
     entries, taken = [], set()
 
@@ -737,7 +761,7 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
                  metadata_groups: list[str] | None = None, model_package_arn: str = "") -> dict:
     """Start building a zip of a run or a dataset version. Returns at once;
     `exports()` shows its progress."""
-    if kind not in ("run", "version"):
+    if kind not in ("run", "version", "experiment"):
         raise ValueError("Export a run or a dataset version.")
     bucket, prefix = _destination(destination, bucket, prefix)
     format = format or ("zip" if destination == "local" else "folder")
@@ -745,8 +769,18 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
         raise ValueError("Choose ZIP for a local download, or ZIP / folder for S3.")
     catalog.ensure_schema_once()          # it writes schema-9 columns
     entries, names, label = _plan(kind, ident)
-    metadata = catalog_metadata.describe(kind, ident) if include_metadata else None
-    if model_package_arn or include_model:
+    from . import experiment_export
+    experiment = experiment_export.context(ident, model_package_arn) if kind == 'experiment' else None
+    metadata = (experiment_export.metadata(ident, model_package_arn) if experiment else catalog_metadata.describe(kind, ident)) if include_metadata else None
+    if experiment:
+        label = experiment['label']
+        checkpoint_uri = experiment['weights_uri']
+        if include_model:
+            if not checkpoint_uri.startswith('s3://') or not checkpoint_uri.endswith('.pt'):
+                raise ValueError('The selected experiment checkpoint is unavailable.')
+            source_bucket, source_key = _split_uri(checkpoint_uri)
+            storage.s3.head_object(Bucket=source_bucket, Key=source_key)
+    if not experiment and (model_package_arn or include_model):
         if kind != "run":
             raise ValueError("Select a training run to export a model.")
         saved = _rows("SELECT model_package_arn, record FROM training_runs WHERE run_id = %s", (ident,))
@@ -778,6 +812,8 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
         options = metadata["export_options"]
         metadata = catalog_metadata.select_groups(metadata, metadata_groups)
         metadata["export_options"] = options
+        if experiment:
+            metadata['groups']['Experiment'] = experiment_export.metadata(ident, model_package_arn)['groups']['Experiment']
     if not metadata and not any(path for path, _, _ in entries):
         raise ValueError("Nothing to export: no files are recorded for it.")
     if not _building.acquire(blocking=False):
@@ -791,12 +827,13 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
             conn.cursor().execute(
                 "INSERT INTO exports (id, version_id, run_id, label, state, files, destination, destination_uri, format, options, updated_at)"
                 " VALUES (%s, %s, %s, %s, 'building', %s, %s, %s, %s, %s::jsonb, now())",
-                (export_id, ident if kind == "version" else None,
+                (export_id, experiment["dataset"] if experiment else ident if kind == "version" else None,
                  ident if kind == "run" else None, label,
                  sum(1 for path, _, _ in entries if path), destination,
                  f"s3://{bucket}/" + "/".join(p for p in (prefix, f"{label}-{export_id}") if p) + "/", format,
                  json.dumps({'include_metadata': include_metadata, 'include_images': include_images,
-                             'include_model': include_model, 'metadata_groups': metadata_groups})))
+                             'include_model': include_model, 'metadata_groups': metadata_groups,
+                             'experiment_id': ident if experiment else None, 'model_package_arn': model_package_arn})))
             conn.commit()
         finally:
             conn.close()
@@ -840,6 +877,13 @@ def dataset_availability(kind: str, ident: str) -> dict:
     about whether the files are there).
     """
     from . import central_recipe, dataset_versions, prepared_training
+    if kind == 'experiment':
+        from ..chain import training_variants
+        job = training_variants.read(ident)
+        version = job.get('working_dataset_version_id') or job.get('dataset_version_id')
+        if not version:
+            raise ValueError('This experiment has no preserved dataset yet.')
+        return dataset_availability('version', version)
     if kind not in ('run', 'version'):
         raise ValueError('Choose a run or dataset version.')
     checked_at = _dt.datetime.now(_dt.timezone.utc).isoformat()

@@ -1,3 +1,4 @@
+import {Track2ExperimentRuns} from "./Track2ExperimentRuns";
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import {useEffect, useState} from 'react';
 import {listVariantRuns, type VariantRunRecord, ApiError, listRunComparisons, runBaselineComparison, type BaselineSelection,
@@ -27,7 +28,9 @@ export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun
     void load(); const timer = window.setInterval(load, 10000);
     return () => {active = false; window.clearInterval(timer);};
   }, []);
-  const run = runs.find(r => r.id === selected);
+  const grouped = experiments.find(e=>`experiment:${e.id}`===selected) || membership(selected)?.experiment;
+  useEffect(()=>{if(grouped&&!selected.startsWith('experiment:')){const id=`experiment:${grouped.id}`;setSelected(id);onRunChange?.(id);}},[grouped?.id,selected]);
+  const run = grouped ? undefined : runs.find(r => r.id === selected);
   const experimentRun=run?membership(run.id):undefined;
   const result = run?.comparison?.result;
   const waiting = run?.status === 'Running' || run?.status === 'Pending';
@@ -45,8 +48,10 @@ export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun
     <label className="block text-sm">Training run<select className="my-2 block w-full rounded border border-hairline bg-page p-2" value={selected}
       onChange={e => {setSelected(e.target.value); onRunChange?.(e.target.value); setSelection({enabled:false});}}>
       <option value="">Choose a saved training run</option>
-      {runs.map(r => {const member=membership(r.id);return <option key={r.id} value={r.id}>{r.run_number != null ? `Run ${r.run_number}` : r.id} / {r.label} / {formatDayTime(r.submitted_at)} / {member?`${member.variant.name} / ${member.experiment.variants.length} experimental models / ${member.experiment.state}`:r.status}</option>;})}
+      {experiments.map(e=><option key={e.id} value={`experiment:${e.id}`}>Run {e.run_number??'pending'} / {e.name} / {e.variants.length} variants + baseline / {e.state}</option>)}
+      {runs.filter(r=>!membership(r.id)).map(r=><option key={r.id} value={r.id}>{r.run_number!=null?`Run ${r.run_number}`:r.id} / {r.label} / {formatDayTime(r.submitted_at)} / {r.status}</option>)}
     </select></label>
+    {grouped&&<Track2ExperimentRuns initialExperiment={grouped.id}/>}
     {experimentError&&<p role="alert" className="text-xs text-critical">{experimentError}</p>}
     {experimentRun&&<div className="my-2 border border-hairline p-3 text-sm"><p className="font-semibold">{experimentRun.experiment.variants.length} experimental models + 1 baseline</p><p>{experimentRun.experiment.name}: {experimentRun.variant.name}. {experimentRun.experiment.variants.filter(v=>v.state==='Succeeded').length} models trained successfully.</p><p>Shared baseline comparison: {experimentRun.experiment.comparison?.status??experimentRun.experiment.state}. Select “Experiment (all variants)” above to review the whole experiment.</p>{experimentRun.experiment.comparison?.error&&<p className="text-critical">{experimentRun.experiment.comparison.error}</p>}</div>}
     {run && <>

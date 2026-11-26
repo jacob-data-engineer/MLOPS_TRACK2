@@ -26,6 +26,7 @@ def store(monkeypatch):
     monkeypatch.setattr(e.t2,'get_detector',lambda slug:{'slug':slug,'classes':{'0':'helmet'}})
     monkeypatch.setattr(e.t2,'detector_group_name',lambda *a:'yolo26s-helmet-detector')
     monkeypatch.setattr(e.t2.sm,'describe_model_package',lambda **kw:{'ModelPackageStatus':'Completed'})
+    monkeypatch.setattr(e.catalog_view,'reserve_experiment_number',lambda ident:101)
     monkeypatch.setattr(e.catalog_view,'run_numbers',lambda ids:{i:n+1 for n,i in enumerate(ids)})
     monkeypatch.setattr(e.record_store,'enabled',lambda:False)
     monkeypatch.setattr(e.control,'state',lambda:{'halted':False,'generation':''})
@@ -468,3 +469,19 @@ def test_timeout_does_not_revive_cancelled_experiment(store,monkeypatch):
     monkeypatch.setattr(e,'advance',cancelled_then_timeout)
     e.advance_current(j['id'])
     assert e.read(j['id'])['state']=='Cancelled'
+
+def test_parent_run_number_groups_all_variants(store):
+    j=job(store)
+    for i,v in enumerate(j['variants']):v['run_id']=f'child-{i}'
+    got=e.public(j)
+    assert got['run_number']==101
+    assert [v['run_number'] for v in got['variants']]==[101,101]
+    assert [v['training_job_number'] for v in got['variants']]==[1,2]
+
+
+def test_legacy_experiment_uses_latest_existing_number_without_renumbering(store):
+    j=job(store);j.pop('run_number')
+    for i,v in enumerate(j['variants']):v['run_id']=f'child-{i}'
+    got=e.public(j)
+    assert got['run_number']==2
+    assert [v['run_number'] for v in got['variants']]==[2,2]

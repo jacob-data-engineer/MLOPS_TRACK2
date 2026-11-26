@@ -10,13 +10,18 @@ from .. import storage
 def estimate(kind, ident, *, destination="local", bucket="", prefix="", format=None,
              include_images=True, include_model=False, include_metadata=False,
              metadata_groups=None, model_package_arn=""):
-    if kind not in ("run", "version"):
+    if kind not in ("run", "version", "experiment"):
         raise ValueError("Export a run or a dataset version.")
     format = format or ("zip" if destination == "local" else "folder")
     if format not in ("zip", "folder"):
         raise ValueError("Choose ZIP or folder.")
     entries, names, label = cv._plan(kind, ident)
     record = {}
+    if kind == 'experiment':
+        from . import experiment_export
+        experiment = experiment_export.context(ident, model_package_arn)
+        record = {'weights_uri': experiment['weights_uri']}
+        label = experiment['label']
     if kind == "run":
         saved = cv._rows("SELECT model_package_arn, record FROM training_runs WHERE run_id = %s", (ident,))
         if not saved or (model_package_arn and saved[0].get("model_package_arn") != model_package_arn):
@@ -65,7 +70,7 @@ def estimate(kind, ident, *, destination="local", bucket="", prefix="", format=N
     generated = manifest + len(json.dumps(names, default=str).encode()) + 8192
     generated += len(catalog_metadata.dumps(catalog_metadata.clean(record.get("reproducibility") or {})).encode())
     if include_metadata:
-        metadata = catalog_metadata.describe(kind, ident)
+        metadata = experiment_export.metadata(ident, model_package_arn) if kind == 'experiment' else catalog_metadata.describe(kind, ident)
         if metadata_groups is not None:
             metadata = catalog_metadata.select_groups(metadata, metadata_groups)
         metadata_bytes = len(catalog_metadata.dumps(metadata).encode()) + 8192

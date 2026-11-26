@@ -129,6 +129,7 @@ def create(payload, *, preparation_config=None, trigger="manual"):
                          'settings':effective,'state':'Pending','attempt':0,'history':[]})
     job = {'kind':KIND,'sort':ident,'id':ident,'name':payload['name'], 'request_digest':digest,
            'created_at':now(),'updated_at':now(),'state':'Pending','detector':detector,
+           'run_number':catalog_view.reserve_experiment_number(ident),
            'architecture':payload['architecture'],'baseline_arn':baseline,
            'data_mode':mode,'preparation_config':config,'trigger':trigger,
            'dataset_version_id':payload['dataset_version_id'] if mode=='saved' else '', 'dataset':check,'shared':shared,
@@ -149,8 +150,10 @@ def public(job):
     value.pop('request_digest',None)
     ids=[v['run_id'] for v in value['variants'] if v.get('run_id')]
     numbers=catalog_view.run_numbers(ids)
+    value['run_number']=value.get('run_number') or max(numbers.values(),default=None)
     for v in value['variants']:
-        v['run_number']=numbers.get(v.get('run_id'))
+        v['training_job_number']=numbers.get(v.get('run_id'))
+        v['run_number']=value['run_number']
     variants_by_arn={v['model_package_arn']:v for v in value['variants'] if v.get('model_package_arn')}
     for row in ((value.get('comparison') or {}).get('result') or {}).get('rows',[]):
         variant=variants_by_arn.get(row.get('id'))
@@ -392,6 +395,7 @@ def tick():
 @record_store.exclusive('training_variants')
 def retry(ident, index=None):
     job=read(ident)
+    job['run_number']=public(job).get('run_number') or catalog_view.reserve_experiment_number(ident)
     if job['state']=='Cancelled':
         raise ValueError('This experiment was removed. Submit a new experiment to run these variants.')
     if job['state'] in ('Pending','Preparing','Training','Comparing'):

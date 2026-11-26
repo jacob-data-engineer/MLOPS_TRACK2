@@ -16,6 +16,7 @@ export type VariantSettingsSnapshot = {notes?:string;epochs:number;img_size:numb
 export type SavedTrainingVariant = {id:string;name:string;settings:VariantSettingsSnapshot;selected:boolean};
 export type TrainingVariantDraft = {batch_name?:string;id:string;revision:number;detector_slug:string;architecture:string;baseline_arn:string;dataset_version_id:string;data_mode?:"saved"|"prepared";variants:SavedTrainingVariant[]};
 export interface VariantRunRecord {
+  run_number?:number|null;
   trigger?:string; pull_done?:boolean; working_dataset_version_id?:string;
   id:string; name:string; state:string; stage?:string; error?:string; created_at:string;
   baseline_arn:string; dataset_version_id:string; data_mode?:"saved"|"prepared"; shared:Record<string,unknown>;
@@ -4213,11 +4214,11 @@ export interface PackageSizeEstimate {
   estimated_bytes: number | null; recommended_bytes: number | null;
   files: number; unknown_files: number; format: string; note: string;
 }
-export function estimateTrack2CatalogExport(kind: "run" | "version", id: string, options: CatalogExportDestination): Promise<PackageSizeEstimate> {
+export function estimateTrack2CatalogExport(kind: "run" | "version" | "experiment", id: string, options: CatalogExportDestination): Promise<PackageSizeEstimate> {
   return apiPost("/track2/catalog/exports/estimate", {kind, id, ...options});
 }
 
-export function startTrack2CatalogExport(kind: "run" | "version", id: string,
+export function startTrack2CatalogExport(kind: "run" | "version" | "experiment", id: string,
   options?: CatalogExportDestination): Promise<{
   id: string; label: string; state: string;
 }> {
@@ -4240,7 +4241,7 @@ export interface DatasetAvailability {
   problem?: 'sql_membership' | 'files' | 'version';
   version_id?: string; version_number?: number | null; train_images?: number | null; val_images?: number | null;
 }
-export function checkCatalogDataset(kind: 'run' | 'version', id: string): Promise<DatasetAvailability> {
+export function checkCatalogDataset(kind: 'run' | 'version' | 'experiment', id: string): Promise<DatasetAvailability> {
   return apiGet(`/track2/catalog/dataset-availability?kind=${kind}&id=${encodeURIComponent(id)}`);
 }
 
