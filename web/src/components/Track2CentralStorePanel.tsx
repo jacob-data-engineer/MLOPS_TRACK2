@@ -1,3 +1,4 @@
+import { Track2CentralClasses } from "./Track2CentralClasses";
 import {usePageSave, saveEntirePage} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import {
@@ -145,6 +146,8 @@ export function Track2CentralStorePanel() {
           {saved && <span className="ml-2 text-ink-muted">saved</span>}
         </p>
       )}
+
+      <Track2CentralClasses bucket={bucket} folder={folder} />
 
       {/* ---- combine (2026-11-13) ---- Every ticked source into the
            store, which is only ever added to; then a decayed copy of it
