@@ -17,7 +17,7 @@ import { formatDayTime } from "../lib/format";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
 import { ProgressBar } from "../components/ProgressBar";
-import { Track2TrainingRunProgress } from "../components/Track2TrainingRunProgress";
+
 import { StatTile } from "../components/StatTile";
 import { Track2DatasetAssemblePanel } from "../components/Track2DatasetAssemblePanel";
 import { Track2DetectorsPanel } from "../components/Track2DetectorsPanel";
@@ -277,7 +277,6 @@ function QueueEntryBlock({
             </span>
           )}
         </div>
-        {running && progress?.status === "Executing" && <Track2TrainingRunProgress progress={progress} />}
       </div>
       {onRemove && (
         <button
@@ -1463,7 +1462,6 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                   tone="pending"
                   label={data.training_progress.status}
                 />
-                <Track2TrainingRunProgress progress={data.training_progress} />
               </div>
             ) : null}
             {data.queue.last_error && (
