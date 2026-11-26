@@ -1636,6 +1636,18 @@ def combine_and_decay(config: dict | None = None, *, for_run: bool, stop=None,
     picks = source_selection(config)
     assembled = assemble_plan(config)
     golden = golden_plan(config)
+    if golden and not for_run:
+        if stop and stop():
+            from ..data.combined_store import Stopped
+            raise Stopped("Stopped before preparing the Golden Set.")
+        if progress:
+            progress("Preparing Golden Set split", 0, 0)
+        built = data.build_golden(**golden)
+        if built.get("errors"):
+            raise ValueError("Golden Set preparation failed: " + "; ".join(built["errors"][:3]))
+        if stop and stop():
+            from ..data.combined_store import Stopped
+            raise Stopped("Stopped after preparing the Golden Set.")
     root = str(config.get("root") or "").strip("/")
     week_prefix = str(config.get("week_prefix") or "week_")
     use_weeks = bool(picks["pull"] and root)
@@ -1949,14 +1961,19 @@ def golden_plan(config: dict) -> dict | None:
     if not retention.get("use_golden"):
         return None
     source = str(saved.get("source") or "").strip("/")
+    store = config.get("central_store") or {}
     target = str(saved.get("target_folder") or "").strip("/")
+    target_bucket = str(saved.get("target_bucket") or "")
+    if store.get("bucket") and str(store.get("folder") or "").strip("/"):
+        target = str(store["folder"]).strip("/") + "/golden"
+        target_bucket = str(store["bucket"])
     if not source or not target:
         return None
     return {
         "source": source,
         "target_folder": target,
         "bucket": str(saved.get("bucket") or ""),
-        "target_bucket": str(saved.get("target_bucket") or ""),
+        "target_bucket": target_bucket,
         "labels_source": str(saved.get("labels_source") or ""),
         "split": bool(saved.get("split", True)),
         "train_percent": int(saved.get("train_percent") or 80),

@@ -1,4 +1,4 @@
-import {usePageSave} from "../lib/pageSave";
+import {usePageSave, saveEntirePage} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import {
   ApiError,
@@ -78,7 +78,7 @@ export function Track2CentralStorePanel() {
 
   function combineNow() {
     setCombineError("");
-    startTrack2Combine()
+    saveEntirePage().then(() => startTrack2Combine())
       .then(setCombine)
       .catch((err) => {
         // Already running (pressed before the card had heard): show that

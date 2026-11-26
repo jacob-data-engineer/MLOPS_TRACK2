@@ -4,18 +4,14 @@ import { useCardOpen } from "../lib/cardState";
 import { announceGolden, onGoldenChanged } from "../lib/useGoldenSync";
 import {
   ApiError,
-  buildTrack2Split,
   getTrack2Buckets,
   getTrack2PullControl,
   getTrack2Retention,
-  previewTrack2Split,
   saveTrack2PullConfig,
   checkTrack2Pairing,
   listTrack2Folders,
   saveTrack2Retention,
   type Track2Bucket,
-  type Track2SplitPlan,
-  type Track2SplitResult,
 } from "../lib/api";
 import { Card } from "./Card";
 // Both, deliberately. The SOURCE pair is the Assemble card's shape --
@@ -41,7 +37,6 @@ import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
  */
 export function Track2GoldenSetPanel() {
   const [open, setOpen] = useCardOpen("golden_set", false);
-  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
 
@@ -75,7 +70,6 @@ export function Track2GoldenSetPanel() {
 
   // A preview or a build result -- the latter is the former plus what it
   // did, so one slot holds whichever came back last.
-  const [plan, setPlan] = useState<Track2SplitPlan | Track2SplitResult | null>(null);
 
   /** Whether a golden set is used at all.
    *
@@ -217,19 +211,6 @@ export function Track2GoldenSetPanel() {
     setTargetBucket(store.bucket); setTargetFolder(target);
     return {use_central_store: true, source, labels_source: labelsSource, bucket, target_bucket: store.bucket,
       target_folder: target, split, train_percent: trainPercent};
-  }
-
-  async function withBusy(label: string, work: () => Promise<void>) {
-    setBusy(label);
-    setError("");
-    setNote("");
-    try {
-      await work();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "That did not work.");
-    } finally {
-      setBusy("");
-    }
   }
 
   // The slider is about PAIRS, so both numbers are shown -- "80%" alone
@@ -492,78 +473,8 @@ export function Track2GoldenSetPanel() {
             Central store destination: {targetBucket && targetFolder ? `s3://${targetBucket}/${targetFolder}/` : "Choose and save the Central data store first."}
           </p>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" disabled={!!busy || !source}
-              onClick={() => withBusy("Looking...", async () => {
-                const got = await previewTrack2Split(await request());
-                setPlan(got);
-                setNote(`${got.pairs.toLocaleString()} pair(s) found.`);
-              })}
-              className="rounded-md border border-black/15 px-3 py-1.5 text-xs font-medium text-ink-secondary disabled:opacity-40">
-              Preview
-            </button>
-            <button type="button" disabled={!!busy || !plan?.ready}
-              onClick={() => withBusy("Copying...", async () => {
-                const got = await buildTrack2Split(await request());
-                setPlan(got);
-                setNote(`Copied ${got.copied.toLocaleString()} files to ${got.uri}`
-                  + `${got.errors.length ? ` -- ${got.errors.length} failed` : ""}.`);
-              })}
-              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40">
-              {busy || "Build the split"}
-            </button>
-          </div>
+          <p className="text-xs text-ink-secondary">Use Combine data sources in the Central data store card to prepare this split.</p>
 
-          {plan && (
-            <div className="rounded-md border border-black/15 bg-page p-3">
-              <p className="mb-2 text-xs text-ink-secondary">
-                {plan.membership_locked
-                  ? `Existing split preserved. ${plan.new_training_pairs ?? 0} new pairs will join training.`
-                  : "First build freezes validation membership. Future additions go to training, so the original percentage may change."}
-                {" "}Changing sources or split settings requires a new Central data store location.
-              </p>
-              {plan.benchmark_id && <p className="mb-2 break-all text-xs text-ink-muted">Benchmark: {plan.benchmark_id}</p>}
-              {plan.problems.map((problem) => (
-                <p key={problem.text}
-                   className={`mb-1 text-xs ${
-                     problem.level === "blocking" ? "text-critical" : "text-ink-secondary"
-                   }`}>
-                  {problem.level === "blocking" ? "Blocking: " : "Note: "}{problem.text}
-                </p>
-              ))}
-
-              <p className="tabular text-xs text-ink-secondary">
-                {plan.pairs.toLocaleString()} pair(s) -- {plan.train.toLocaleString()} train,{" "}
-                {plan.val.toLocaleString()} val -- {plan.files_to_copy.toLocaleString()} files
-                to copy. Layout read as <span className="text-ink">{plan.layout}</span>.
-              </p>
-
-              {plan.sample.length > 0 && (
-                <div className="mt-2 flex flex-col gap-1">
-                  <p className="text-xs font-medium text-ink">Where they go</p>
-                  {plan.sample.map((row) => (
-                    <div key={`${row.side}-${row.stem}`} className="flex flex-col">
-                      <p className="tabular truncate text-xs text-ink-muted">
-                        <span className="mr-2 inline-block w-10 text-ink-secondary">
-                          {row.side}
-                        </span>
-                        {row.image}
-                      </p>
-                      <p className="tabular truncate pl-12 text-xs text-ink-muted/70">
-                        {row.label}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {"manifest" in plan && plan.manifest && (
-                <p className="tabular mt-2 text-xs text-ink-muted">
-                  Which stems went where: {plan.manifest}
-                </p>
-              )}
-            </div>
-          )}
         </div>
       )}
     </Card>
