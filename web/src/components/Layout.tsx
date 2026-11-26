@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { PageLoadingIndicator } from "./PageLoadingIndicator";
 import { getTrack2Build, type Track2Build } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useNavGuard } from "../context/NavGuardContext";
@@ -368,7 +367,6 @@ export function Layout() {
         <Track2CompletionNotices />
 
         <div className="mx-auto w-full min-w-0 px-4 py-6 md:px-8 md:py-8">
-          <PageLoadingIndicator />
           {/* Keyed by path so navigating away clears a failure: a latched
               boundary would make every page after a broken one look
               broken too. */}
