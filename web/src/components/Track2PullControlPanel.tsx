@@ -664,11 +664,6 @@ export function Track2PullControlPanel({
 
   const liveMode = status?.config.mode ?? "off";
 
-  // One number in days, whichever unit was used to type it.
-  // The tree, drawn from what is actually picked. A root with no folders
-  // behind it is left out entirely rather than shown empty, because
-  // nothing will create it -- and drawing a folder that will not exist is
-  // how the old version came to promise a shape it never built.
   // The prefix as SAVED, which is what the folders on S3 are named
   // after -- not the one being typed.
   const savedPrefix = status?.config?.week_prefix ?? "";
@@ -689,35 +684,6 @@ export function Track2PullControlPanel({
   });
   const unpaired = unpairedSides.length > 0;
   const firstWeek = `${weekPrefix}1`;
-
-  // NOTE: everything this reads must be declared ABOVE it. It is invoked
-  // immediately, so a `const` declared further down is still in its
-  // temporal dead zone and throws -- which blanks the page, because a
-  // throw during render unmounts the whole tree. TypeScript does not
-  // catch it: the reference sits inside an arrow function, which it
-  // treats as a closure that might be called later.
-  const builtTree = (() => {
-    const head = `s3://${destBucket || "<this app's bucket>"}/`;
-    const splits: [string, number, number][] = [
-      ["train", picks.train_images.length, picks.train_labels.length],
-      ["val", picks.val_images.length, picks.val_labels.length],
-    ];
-    const live = splits.filter(([, images, labels]) => images || labels);
-    if (!live.length) return `${head}\n  (pick some folders above)`;
-
-    const lines = [head, `${root || "<root>"}/`, `  ${firstWeek}/`];
-    // images/ then labels/, each with the splits under it -- the shape
-    // Ultralytics reads, and the shape the pull actually writes.
-    ([[imagesSub, 0], [labelsSub, 1]] as const).forEach(([folder, which]) => {
-      const rows = live.filter((entry) => entry[1 + which]);
-      if (!rows.length) return;
-      lines.push(`    ${folder}/`);
-      rows.forEach(([split, ...counts]) => {
-        lines.push(`      ${split}/    <- ${counts[which]} folder(s)`);
-      });
-    });
-    return lines.join("\n");
-  })();
 
   // "" means "use the cut-off's time", which is exactly what the API
   // takes, so the two states need no translation between them.
@@ -1275,26 +1241,6 @@ export function Track2PullControlPanel({
                      onChange={(e) => { setBacklog(e.target.checked); setDirty(true); }} />
               {firstWeek} takes everything already there
             </label>
-          </div>
-
-          {/* -------------------------------------- 5. what will be built */}
-          <div className="rounded-md border border-black/15 bg-page p-3">
-            <p className="mb-1.5 text-xs font-medium text-ink">What gets built</p>
-            <pre className="tabular overflow-x-auto text-xs leading-5 text-ink-secondary">
-{builtTree}
-            </pre>
-            <p className="mt-1 text-xs text-ink-muted">
-              No <span className="tabular">train/</span> or{" "}
-              <span className="tabular">val/</span> level: the root says which one it
-              is, so repeating it inside would be saying it twice. Only the folders
-              that actually receive files are created -- a folder here means
-              something is in it.
-            </p>
-            <p className="mt-1 text-xs text-ink-muted">
-              {firstWeek} is created by the first pull and takes everything already in those
-              folders. Anything appearing afterwards goes into {weekPrefix}2, and a new week
-              opens every {weekDays} day{weekDays === 1 ? "" : "s"} from then on.
-            </p>
           </div>
 
           {/* ------------------------------ 6. every week, past and ahead */}
