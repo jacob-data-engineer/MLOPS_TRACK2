@@ -1,0 +1,15 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const ts = require('../web/node_modules/typescript');
+const source = fs.readFileSync(require('node:path').join(__dirname, '../web/src/lib/classMappingInput.ts'), 'utf8');
+const compiled = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
+const scope = {exports:{}};
+vm.runInNewContext(compiled, scope);
+const resolve = scope.exports.resolveClassTarget;
+const names = {'0':'helmet', '1':'gloves', '2':'person'};
+for (const text of ['0', 'helmet', '0 helmet', ' 0 helmet ', '0: helmet']) assert.equal(resolve(text,names),'0');
+assert.equal(resolve('', names),null);
+for (const text of ['0 gloves','9','unknown']) assert.throws(()=>resolve(text,names));
+assert.throws(()=>resolve('helmet',{'0':'helmet','1':'helmet'}));
+console.log('10 free-text mapping checks passed');
