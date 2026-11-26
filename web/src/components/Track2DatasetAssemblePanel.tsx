@@ -778,33 +778,7 @@ export function Track2DatasetAssemblePanel({
         </p>
       </div>
 
-      <p className="mt-2 text-xs text-ink-muted">
-        {/* No Destination field any more: nothing is copied, so there is
-            nowhere to copy it to. The yaml is written at the common
-            parent of the folders above, because that is the one prefix
-            the run downloads and a data.yaml has to sit at its root. */}
-        Nothing is copied. The run&apos;s <span className="tabular">data.yaml</span>{" "}
-        names these folders where they already are, and the class
-        indices in your .txt files are not rewritten &mdash; so they must
-        already match the order above. Labels are never named in the file:
-        Ultralytics finds them by swapping{" "}
-        <span className="tabular">/images/</span> for{" "}
-        <span className="tabular">/labels/</span>, so each folder above needs
-        its labels sibling in that exact shape.
-      </p>
-
-      {/* No Generate button (2026-10-26). The yaml below is a preview,
-          kept current as the card changes, like "What will be built"
-          above. The run builds the real one. */}
-      <p className="mt-3 text-xs text-ink-muted">
-        <span className="font-medium text-ink-secondary">Preview only -- nothing is written.</span>{" "}
-        It updates as you change the folders or dataset classes. The data.yaml
-        a run trains on is built when you press <em>Add to Queue</em> in step 6,
-        and each time the schedule runs &mdash; after the retention policy has
-        been applied, when Pull Control&apos;s week folders are one of the
-        ticked sources.
-        {busy && <span className="ml-1">Checking...</span>}
-      </p>
+      {busy && <p className="mt-3 text-xs text-ink-muted">Checking...</p>}
       {error && <p className="mt-2 text-xs text-critical">{error}</p>}
       {!Object.keys(classesOf()).length && complete && (
         <p className="mt-1 text-xs text-info">
@@ -846,7 +820,6 @@ export function Track2DatasetAssemblePanel({
     <Card
       title="Assemble a dataset"
       collapsible={false}
-      caption="Point at your images and labels wherever they live. Nothing is copied: the run's data.yaml names these folders where they already are."
       titleAside={onOnlyChange ? (
         // THIS card's own source, and only this one. The other two are
         // ticked on the cards they belong to -- Pick Golden Set / Edge
@@ -884,21 +857,7 @@ export function Track2DatasetAssemblePanel({
           thing it switches -- but it means nowhere else on the page
           shows them added up. This is a reading of them, not a second
           place to set them. */}
-      {onOnlyChange && (
-        <p className="mb-2 text-xs text-ink-secondary">
-          <span className="font-medium text-ink">data.yaml will be built from:</span>{" "}
-          {[
-            useFolders ? "these folders" : "",
-            useGolden ? "the golden set / edge cases" : "",
-            !only ? "Pull Control's week folders" : "",
-          ].filter(Boolean).join(" + ") || (
-            <span className="text-critical">
-              nothing &mdash; tick at least one, or the run has no training data
-            </span>
-          )}
-          {useGolden ? " (the golden set's val side is the held-out evaluation set)" : ""}
-        </p>
-      )}
+
       {only && onOnlyChange && (
         <p className="mb-3 rounded-md border border-accent/40 bg-accent-subtle px-3 py-2 text-xs text-ink-secondary">
           This run takes its data from the folders on this card.{" "}
