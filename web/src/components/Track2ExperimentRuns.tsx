@@ -2,7 +2,7 @@ import {ExperimentSteps,type ExperimentLiveProgress} from "./ExperimentSteps";
 import {StopTrainingButton} from "./StopTrainingButton";
 import {useEffect,useState} from 'react';
 import {usePageSnapshot} from '../lib/pageSnapshot';
-import {ApiError,removePendingVariantRun,retryVariantRun,listVariantRuns,getTrack2Metrics,getTrack2RunsByModel,type VariantRunRecord,type Track2MetricsRow,type Track2RunForModel,type Track2ExportSettings} from '../lib/api';
+import {getTrack2TrainingAudit,type Track2TrainingProgress,ApiError,removePendingVariantRun,retryVariantRun,listVariantRuns,getTrack2Metrics,getTrack2RunsByModel,type VariantRunRecord,type Track2MetricsRow,type Track2RunForModel,type Track2ExportSettings} from '../lib/api';
 import {VariantSettings,VariantResults} from './Track2VariantResults';
 import {Track2ComparisonExport} from './Track2ComparisonExport';
 import {formatDayTime} from '../lib/format';
@@ -30,7 +30,10 @@ export function ExperimentSummary({run,onRemoved,live}:{run:VariantRunRecord;liv
   {retryError&&<p role="alert">{retryError}</p>}
  </section>;
 }
-export function Track2ExperimentRuns({queue=false,live}:{queue?:boolean;live?:ExperimentLiveProgress}){
+export function Track2ExperimentRuns({queue=false,progress}:{queue?:boolean;progress?:Track2TrainingProgress|null}){
+ const [progressRun,setProgressRun]=useState<{execution:string;runId:string}|null>(null);
+ useEffect(()=>{if(!queue||!progress?.execution_arn)return;let alive=true;const execution=progress.execution_arn;async function resolve(){try{const result=await getTrack2TrainingAudit(200);const audit=result.audits.find(a=>a.execution_arn===execution);if(alive)setProgressRun(audit?{execution,runId:audit.id}:null);}catch{/* Retry without assigning another run's progress. */}}void resolve();const timer=setInterval(resolve,15000);return()=>{alive=false;clearInterval(timer);};},[queue,progress?.execution_arn]);
+ const live=progress&&progressRun?.execution===progress.execution_arn?{runId:progressRun.runId,progress}:undefined;
  const [runs,setRuns]=useState<VariantRunRecord[]>([]),[selected,setSelected]=useState(''),[error,setError]=useState('');
  const [models,setModels]=useState<Track2MetricsRow[]>([]),[modelRuns,setModelRuns]=useState<Record<string,Track2RunForModel>>({});
  const [modelError,setModelError]=useState('');

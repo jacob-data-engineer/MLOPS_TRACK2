@@ -1467,7 +1467,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             {data.queue.last_error && (
               <p className="mb-2 text-xs text-critical">{data.queue.last_error}</p>
             )}
-            <Track2ExperimentRuns queue live={data.queue.running?.run_id && data.training_progress?.execution_arn.split("/").pop()===data.queue.running.run_id ? {runId:`run-${data.queue.running.id}`,progress:data.training_progress} : undefined}/>
+            <Track2ExperimentRuns queue progress={data.training_progress}/>
             <Track2RecordingProgress progress={data.queue.submission_progress}/>
             <div className="mb-3">
               <StatTile label="Completed" value={data.queue.completed_count} />
