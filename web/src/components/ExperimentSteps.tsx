@@ -1,7 +1,8 @@
-import type {VariantRunRecord} from '../lib/api';
+import type {VariantRunRecord, Track2TrainingProgress} from '../lib/api';
 
 type Step={id:string;label:string;state:'Waiting'|'In progress'|'Complete'|'Failed'|'Stopped'|'Cancelled';percent?:number;detail?:string};
-export function experimentSteps(run:VariantRunRecord):Step[]{
+export type ExperimentLiveProgress={runId:string;progress:Track2TrainingProgress};
+export function experimentSteps(run:VariantRunRecord,live?:ExperimentLiveProgress):Step[]{
  const stage=run.stage??'';
  const counts=/\((\d+)\s*\/\s*(\d+)\)/.exec(stage);
  const measured=counts&&Number(counts[2])>0?Math.min(100,Math.round(Number(counts[1])/Number(counts[2])*100)):undefined;
@@ -20,14 +21,17 @@ export function experimentSteps(run:VariantRunRecord):Step[]{
  phase(['Check shared central-store files','Prepare shared training inputs once','Save shared training input records'],inputPhase,'inputs',!!run.working_dataset_version_id,!!run.dataset_version_id&&!run.working_dataset_version_id&&['Preparing','Needs attention'].includes(run.state),run.state==='Needs attention');
  for(const variant of run.variants){
   const state:Step['state']=variant.state==='Succeeded'?'Complete':variant.state==='Failed'?'Failed':variant.state==='Stopped'?'Stopped':variant.state==='Queued'&&variant.training_status&&!['Queued','Pending'].includes(variant.training_status)?'In progress':'Waiting';
-  steps.push({id:`train-${variant.index}`,label:`${variant.name}: train model (${String(variant.settings.epochs??'?')} epochs)`,state,percent:state==='Complete'?100:undefined,detail:variant.state==='Queued'?variant.training_status??'Queued':undefined});
+  const epochs=live && live.runId===variant.run_id?live.progress.epoch_progress:null;
+  const completed=epochs?Math.max(0,epochs.current-(epochs.completed?0:1)):0;
+  const percent=epochs&&epochs.total>0?Math.min(100,Math.floor(completed/epochs.total*100)):undefined;
+  steps.push({id:`train-${variant.index}`,label:`${variant.name}: train model (${String(variant.settings.epochs??'?')} epochs)`,state,percent:state==='Complete'?100:state==='Waiting'?0:percent,detail:variant.state==='Queued'?(epochs?`${completed} / ${epochs.total} epochs completed`:variant.training_status??'Queued'):undefined});
  }
  const comparison=run.comparison?.status;
  steps.push({id:'compare',label:'Compare trained variants with the baseline',state:comparison==='Completed'?'Complete':['Failed','Unavailable'].includes(comparison??'')?'Failed':run.state==='Comparing'?'In progress':'Waiting',percent:comparison==='Completed'?100:undefined});
  if(run.state==='Cancelled')for(const step of steps)if(step.state!=='Complete')step.state='Cancelled';
  return steps;
 }
-export function ExperimentSteps({run}:{run:VariantRunRecord}){
- const steps=experimentSteps(run);
- return <div aria-label="Experiment steps" className="space-y-2 rounded border border-hairline p-3"><h4 className="text-sm font-semibold">Steps and progress</h4><p className="text-xs text-ink-muted">Training inputs are prepared once and reused by every variant. Each variant starts from the same base model. Percentages apply to each step, not the whole experiment. Steps without measured counts show In progress; earlier completed steps stay at 100%.</p><ol className="space-y-2">{steps.map((step,i)=><li key={step.id} className="grid items-center gap-2 text-xs sm:grid-cols-[minmax(12rem,2fr)_minmax(8rem,1fr)_10rem]"><span>{i+1}. {step.label}{step.detail&&<span className="block text-ink-muted">{step.detail}</span>}</span><div role="progressbar" aria-label={step.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={step.state==='Waiting'?0:step.percent} aria-valuetext={step.percent==null?step.state:`${step.percent}% - ${step.state}`} className="h-2 overflow-hidden rounded bg-black/10"><div className={`h-full ${step.state==='Failed'?'bg-red-600':'bg-green-600'} ${step.state==='In progress'&&step.percent==null?'w-1/3 animate-pulse':''}`} style={{width:step.state==='Waiting'?'0%':step.percent!=null?`${step.percent}%`:step.state==='In progress'?'33%':'0%'}}/></div><span>{step.state}{step.percent==null?'':` - ${step.percent}%`}</span></li>)}</ol></div>;
+export function ExperimentSteps({run,live}:{run:VariantRunRecord;live?:ExperimentLiveProgress}){
+ const steps=experimentSteps(run,live).map(step=>step.state==='Waiting'?{...step,percent:0}:step);
+ return <div aria-label="Experiment steps" className="space-y-2 rounded border border-hairline p-3"><h4 className="text-sm font-semibold">Steps and progress</h4><p className="text-xs text-ink-muted">Training inputs are prepared once and reused by every variant. Each variant starts from the same base model. Percentages apply to each step, not the whole experiment. Training percentages use completed epochs. Steps without measured counts show Waiting for progress; earlier completed steps stay at 100%.</p><ol className="space-y-2">{steps.map((step,i)=><li key={step.id} className="grid items-center gap-2 text-xs sm:grid-cols-[minmax(12rem,2fr)_minmax(8rem,1fr)_10rem]"><span>{i+1}. {step.label}{step.detail&&<span className="block text-ink-muted">{step.detail}</span>}</span><div role="progressbar" aria-label={step.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={step.state==='Waiting'?0:step.percent} aria-valuetext={step.percent==null?step.state:`${step.percent}% - ${step.state}`} className="h-2 overflow-hidden rounded bg-black/10"><div className={`h-full ${step.state==='Failed'?'bg-red-600':'bg-green-600'} ${step.state==='In progress'&&step.percent==null?'w-1/3 animate-pulse':''}`} style={{width:step.state==='Waiting'?'0%':step.percent!=null?`${step.percent}%`:step.state==='In progress'?'33%':'0%'}}/></div><span>{step.state==='In progress'&&step.percent==null?'Waiting for progress':step.state}{step.percent==null?'':` - ${step.percent}%`}</span></li>)}</ol></div>;
 }
