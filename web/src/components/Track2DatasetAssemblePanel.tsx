@@ -44,52 +44,6 @@ export function formatLabelClasses(classes: Record<string, string>): string {
     .join(", ");
 }
 
-/** Draws the layout that will be built, as a tree.
- *
- * The shape is the whole point of this panel, and a shape is far easier to
- * check by eye than four paths listed one per line.
- */
-function LayoutTree({
-  layout,
-  destination,
-  classes,
-}: {
-  layout: Track2DatasetLayout;
-  destination: string;
-  classes: string;
-}) {
-  // Totalled PER SPLIT, not per source. `layout.splits` has one row per
-  // source folder now, so drawing it directly rendered "train/" once for
-  // every folder -- as if the dataset had several training directories,
-  // which it will not: they are merged into one.
-  const totals = new Map<string, number>();
-  for (const source of layout.splits) {
-    totals.set(source.split, (totals.get(source.split) ?? 0) + source.image_count);
-  }
-  const splits = [...totals.entries()].filter(([, count]) => count > 0);
-  if (splits.length === 0) return null;
-
-  const lines: string[] = [`${destination || "<the folder the run downloads>"}/`];
-  lines.push(`├── data.yaml${classes ? `        names: ${classes}` : ""}`);
-  (["images", "labels"] as const).forEach((kind, kindIndex) => {
-    const last = kindIndex === 1;
-    lines.push(`${last ? "└──" : "├──"} ${kind}/`);
-    splits.forEach(([split, count], index) => {
-      const stem = last ? "    " : "│   ";
-      const branch = index === splits.length - 1 ? "└──" : "├──";
-      lines.push(
-        `${stem}${branch} ${split}/`.padEnd(20)
-        + `${count.toLocaleString()} ${kind === "images" ? "images" : "label files"}`,
-      );
-    });
-  });
-  return (
-    <pre className="tabular overflow-x-auto rounded-md border border-black/15 bg-page p-3 text-xs leading-relaxed text-ink-secondary">
-      {lines.join("\n")}
-    </pre>
-  );
-}
-
 /** One image folder and the label folder that goes with it. */
 interface AssembleSource {
   images: string;
@@ -328,9 +282,6 @@ export function Track2DatasetAssemblePanel({
     train_images: "", train_labels: "", eval_images: "", eval_labels: "",
   });
   const [layout, setLayout] = useState<Track2DatasetLayout | null>(null);
-  // Shown while a preview request is in flight, so the panel reads as
-  // live rather than as a stale answer to the previous pick.
-  const [previewing, setPreviewing] = useState(false);
   // `scheduled` is gone. The Training data radios in step 6 decide
   // what a scheduled run builds from, and "Enabled for scheduling"
   // beside them turns it on -- so a copy of that answer here could only
@@ -574,11 +525,9 @@ export function Track2DatasetAssemblePanel({
       return;
     }
     let cancelled = false;
-    setPreviewing(true);
     getTrack2DatasetLayout(currentFolders())
       .then((res) => !cancelled && setLayout(res))
-      .catch(() => !cancelled && setLayout(null))
-      .finally(() => !cancelled && setPreviewing(false));
+      .catch(() => !cancelled && setLayout(null));
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folders, trainSources, evalSources, multiSource, hasTraining]);
@@ -1096,47 +1045,7 @@ export function Track2DatasetAssemblePanel({
             </div>
           ))}
 
-          {/* Every chosen path in full. The rows above truncate to fit
-              two per line, and an S3 key here runs to ~90 characters --
-              so two folders that differ only near the end look identical
-              there. This is the copy you can actually check. */}
-          <div className="rounded-md border border-black/15 bg-page p-3">
-            <p className="mb-1.5 text-xs font-medium text-ink">Selected folders</p>
-            {([
-              ["Training", trainSources],
-              ["Evaluation", evalSources],
-            ] as const).map(([heading, list]) => {
-              const filled = list.filter((s) => s.images || s.labels);
-              return (
-                <div key={heading} className="mb-2 last:mb-0">
-                  <p className="text-xs text-ink-muted">
-                    {heading}{" "}
-                    <span className="text-ink-muted/70">
-                      ({filled.length} {filled.length === 1 ? "pair" : "pairs"})
-                    </span>
-                  </p>
-                  {filled.length === 0 ? (
-                    <p className="text-xs text-critical">
-                      None chosen -- {heading.toLowerCase()} needs at least one pair.
-                    </p>
-                  ) : (
-                    filled.map((source, index) => (
-                      <div key={index} className="tabular mt-1 text-xs">
-                        <p className="break-all text-ink-secondary">
-                          <span className="text-ink-muted">{index + 1}. images </span>
-                          {source.images || <span className="text-critical">not chosen</span>}
-                        </p>
-                        <p className="break-all text-ink-secondary">
-                          <span className="text-ink-muted">&nbsp;&nbsp; labels </span>
-                          {source.labels || <span className="text-critical">not chosen</span>}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-              );
-            })}
-          </div>
+
         </div>
       ) : (
       <div className="grid gap-3 sm:grid-cols-2">
@@ -1161,67 +1070,6 @@ export function Track2DatasetAssemblePanel({
         ))}
       </div>
       )}
-
-      {/* The live build preview. Updates on every pick, so the shape
-          being produced is visible while the folders are still being
-          chosen rather than only after pressing Assemble. */}
-      <div className="mt-3 rounded-md border border-black/15 p-3">
-        <div className="mb-2 flex items-center gap-2">
-          <p className="text-xs font-medium text-ink">What will be built</p>
-          {previewing && (
-            <span className="text-xs text-ink-muted">checking folders...</span>
-          )}
-        </div>
-
-        {!layout ? (
-          <p className="text-xs text-ink-muted">
-            Pick a training images folder to see the dataset take shape.
-          </p>
-        ) : (
-          <>
-            <LayoutTree
-              layout={layout}
-              destination={preview?.folder ?? ""}
-              classes={Object.values(classesOf()).join(", ")}
-            />
-
-            {/* One row per SOURCE. A single total would hide an empty
-                folder sitting among full ones, which is the mistake this
-                panel exists to catch. */}
-            <div className="mt-2 flex flex-col gap-0.5">
-              {layout.splits.map((split) => {
-                const bad = split.image_count === 0 || split.paired === 0;
-                return (
-                  <p
-                    key={`${split.split}-${split.source_index ?? 0}`}
-                    className={`tabular text-xs ${bad ? "text-critical" : "text-ink-secondary"}`}
-                  >
-                    <span className="font-medium text-ink">
-                      {split.split} {(split.source_index ?? 0) + 1}
-                    </span>{" "}
-                    <span className="break-all">{split.images_prefix || "(no folder)"}</span>
-                    {" -- "}
-                    {split.image_count.toLocaleString()} images,{" "}
-                    <span className="font-medium">{split.paired.toLocaleString()} paired</span>
-                    {split.unlabelled > 0 && `, ${split.unlabelled.toLocaleString()} without labels`}
-                    {split.orphan_labels > 0
-                      && `, ${split.orphan_labels.toLocaleString()} labels with no image`}
-                  </p>
-                );
-              })}
-            </div>
-
-            <p className="tabular mt-2 text-xs text-ink">
-              Total paired:{" "}
-              <span className="font-medium">{layout.total_paired.toLocaleString()}</span>
-            </p>
-
-            {layout.warnings.map((warning) => (
-              <p key={warning} className="mt-1 text-xs text-critical">{warning}</p>
-            ))}
-          </>
-        )}
-      </div>
 
       {/* Dataset classes belong to Data Preparation; Training previews them. */}
       {!buildSlot && buildSection}
