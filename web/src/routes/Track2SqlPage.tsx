@@ -603,7 +603,31 @@ export function Track2SqlPage() {
 
                   </p>
 
-                  <div className={`grid gap-3 ${byWeek ? "md:grid-cols-[9rem]" : "md:grid-cols-[14rem_1fr_9rem]"}`}>
+                  <div className="mb-3 grid max-w-md grid-cols-2 gap-3">
+                    <label className="block text-xs text-ink-muted">
+                      % to train
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={trainPercent}
+                        onChange={(e) => setTrainPercent(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                        className="tabular mt-1 w-full rounded border border-black/15 bg-surface px-2 py-1.5 text-sm text-ink"
+                      />
+                    </label>
+                    <label className="block text-xs text-ink-muted">
+                      % for validation
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={100 - trainPercent}
+                        onChange={(e) => setTrainPercent(100 - Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                        className="tabular mt-1 w-full rounded border border-black/15 bg-surface px-2 py-1.5 text-sm text-ink"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
                     {!byWeek && <>
                     <label className="block text-xs text-ink-muted">
                       Into bucket
@@ -631,17 +655,7 @@ export function Track2SqlPage() {
                       disabled={pulling}
                     />
                     </>}
-                    <label className="block text-xs text-ink-muted">
-                      % to train
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={trainPercent}
-                        onChange={(e) => setTrainPercent(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                        className="tabular mt-1 w-full rounded border border-black/15 bg-surface px-2 py-1.5 text-sm text-ink"
-                      />
-                    </label>
+
                   </div>
                   <p className="mt-1 text-xs text-ink-muted">
                     The rest go to val. Each frame&rsquo;s side is fixed by its address, so pulling
