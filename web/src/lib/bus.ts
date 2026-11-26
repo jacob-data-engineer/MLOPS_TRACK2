@@ -20,6 +20,7 @@
 /** Every message a card may post, and what it carries. Adding one here is
  * the whole contract: the type checker then holds both ends to it. */
 export interface Track2Messages {
+  "dataset-classes-saved": Record<string, string>;
   /** The golden set was ticked on or off (`retention.use_golden`). */
   "golden-changed": boolean;
   /** A data card saved something that changes what a run trains on:

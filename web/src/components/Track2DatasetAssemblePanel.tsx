@@ -2,7 +2,7 @@ import {usePageSave} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCardOpen } from "../lib/cardState";
-import { post } from "../lib/bus";
+import { post, listen } from "../lib/bus";
 import { onGoldenChanged } from "../lib/useGoldenSync";
 import {
   ApiError,
@@ -233,6 +233,7 @@ export function Track2DatasetAssemblePanel({
   const [useFolders, setUseFolders] = useState(true);
   /** Complete dataset taxonomy, independent of the model trained later. */
   const [labelClassesText, setLabelClassesText] = useState("");
+  useEffect(() => listen("dataset-classes-saved", classes => setLabelClassesText(formatLabelClasses(classes))), []);
   /** Preparation refuses missing classes instead of discarding boxes. */
   const dropUndeclared = false; // Legacy preparation filters no longer discard dataset classes.
   /** Where the yaml build renders: a slot the page places just above

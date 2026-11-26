@@ -1,8 +1,8 @@
-import { resolveClassTarget } from "../lib/classMappingInput";
+import { resolveClassTarget, editedTargetClasses } from "../lib/classMappingInput";
 import { useEffect, useRef, useState } from "react";
 import { getTrack2PullControl, readTrack2YamlClasses, inspectTrack2LabelClasses, saveTrack2PullConfig, type SourceClassMapping } from "../lib/api";
 import { usePageSave } from "../lib/pageSave";
-import { listen } from "../lib/bus";
+import { listen, post } from "../lib/bus";
 
 type Row = { source: string; path: string; classes: Record<string, string>; differences: string[]; verified: boolean; labelNote?: string; mappingKey: string; labelBucket: string; labelPrefix: string };
 export function Track2CentralClasses({ bucket, folder }: { bucket: string; folder: string }) {
@@ -15,13 +15,34 @@ export function Track2CentralClasses({ bucket, folder }: { bucket: string; folde
   const [observed, setObserved] = useState<Record<string, string[]>>({});
   async function saveMappings() {
     if (!loaded.current) throw new Error("Class mappings are still loading.");
-    const resolved = Object.fromEntries(Object.entries(drafts).map(([source, record]) => {
+    const classes = editedTargetClasses(targetText, drafts, expected);
+    const renamed = Object.keys(classes).some(id => classes[id] !== expected[id]);
+    const all = {...drafts};
+    // Sources that already matched also need explicit ID maps after a shared rename.
+    if (renamed) for (const row of rows) {
+      if (row.source === "Central store" || all[row.mappingKey] || !Object.keys(row.classes).length) continue;
+      all[row.mappingKey] = {target_classes: classes, ids: Object.fromEntries(Object.entries(row.classes).map(([id,name]) =>
+        [id, Object.entries(expected).find(([,old]) => old === name)?.[0] ?? null]))};
+    }
+    const resolved = Object.fromEntries(Object.entries(all).map(([source, record]) => {
       const ids = {...record.ids};
-      for (const [id, text] of Object.entries(targetText[source] ?? {})) ids[id] = resolveClassTarget(text, expected);
-      return [source, {...record, ids}];
+      for (const [id, text] of Object.entries(targetText[source] ?? {})) {
+        try { ids[id] = resolveClassTarget(text, classes); }
+        catch {
+          if (text.trim() === classes[record.ids[id] ?? ""]) ids[id] = record.ids[id];
+          else ids[id] = resolveClassTarget(text, expected);
+        }
+      }
+      return [source, {...record, target_classes: classes, ids}];
     }));
-    await saveTrack2PullConfig({ source_class_mappings: resolved });
+    const {config} = await getTrack2PullControl();
+    await saveTrack2PullConfig({ source_class_mappings: resolved,
+      ...(renamed ? {dataset_assemble:{...config.dataset_assemble,label_classes:classes}} : {}) });
     setDrafts(resolved);
+    setExpected(classes);
+    setTargetText({});
+    if (renamed) post("dataset-classes-saved", classes);
+    post("data-sources-changed", {from:"class-mapping-editor"});
     setMessage("Class mappings saved. They apply to the next combined-store preparation.");
   }
   usePageSave("Source class mappings", saveMappings);
@@ -119,7 +140,7 @@ export function Track2CentralClasses({ bucket, folder }: { bucket: string; folde
     {!!rows.length && <div className="mt-2 overflow-x-auto"><table className="w-full text-left"><thead><tr><th>Source</th><th>Classes</th><th>Check</th></tr></thead><tbody>{rows.map(r=><tr key={r.path} className="border-t border-hairline"><td className="p-2">{r.source}<div className="break-all text-ink-muted">{r.path}</div></td><td className="p-2">{Object.entries(r.classes).map(([id,name])=><span key={id} className={`mr-2 inline-block ${expected[id] !== name ? "bg-amber-100 text-amber-900" : ""}`}>{id} {name}</span>)}</td><td className="p-2">{r.labelNote ? <span>{r.differences.length > 0 && <strong className="text-critical">{r.differences.join("; ")} — </strong>}{r.labelNote}</span> : !r.verified ? "Not verified: mapping unavailable" : r.differences.length ? <span className="text-amber-900">{r.differences.join("; ")}</span> : "Match"}</td></tr>)}</tbody></table></div>}
     <details className="mt-3 rounded border border-hairline p-3">
       <summary className="cursor-pointer font-medium">Edit source class IDs</summary>
-      <p className="my-2 text-ink-muted">Type a target class ID, name, or ID and name (for example: 0 helmet). Leave blank only for an unused ID. Changes are applied only to rebuilt combined-store training copies, never to originals. An ID marked unused will stop preparation if any processed label uses it. Save explicitly; editing does not start processing.</p>
+      <p className="my-2 text-ink-muted">Type a target class ID, name, or ID and name (for example: 0 helmets). A new name renames that target ID for all sources when you save. Leave blank only for an unused ID. Changes are applied only to rebuilt combined-store training copies, never to originals. An ID marked unused will stop preparation if any processed label uses it. Save explicitly; editing does not start processing.</p>
       {rows.filter(r => r.source !== "Central store").map(row => {
         const draft = drafts[row.mappingKey];
         const ids = [...new Set([...Object.keys(row.classes), ...Object.keys(draft?.ids ?? {}), ...(observed[row.mappingKey] ?? [])])].sort((a,b)=>Number(a)-Number(b));
