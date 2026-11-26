@@ -3512,6 +3512,8 @@ def load_settings_file(*, name: str = "pull_control", apply: bool = True,
     if apply:
         live = read_config()
         update = dict(config)
+        if scope == "dp":
+            update["source_class_mappings"] = config.get("source_class_mappings") or {}
         if scope == "at" and config.get("training_data_preparation"):
             recipe = config["training_data_preparation"].get("config") or {}
             update.update({key: recipe[key] for key in TRAINING_DATA_KEYS if key in recipe})

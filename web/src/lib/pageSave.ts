@@ -26,3 +26,16 @@ export function saveEntirePage():Promise<void>{
  })().finally(()=>{active=null;});
  return active;
 }
+
+let namedSave: (()=>Promise<string>)|null=null;
+export function useNamedPageSave(save:()=>Promise<string>){
+ const latest=useRef(save);latest.current=save;
+ useLayoutEffect(()=>{
+  const callback=()=>latest.current();namedSave=callback;
+  return()=>{if(namedSave===callback)namedSave=null;};
+ },[]);
+}
+export function saveNamedPage():Promise<string>{
+ if(!namedSave)return Promise.reject(new Error("Use Save at the top of Data Preparation to save these settings to a named file."));
+ return namedSave();
+}

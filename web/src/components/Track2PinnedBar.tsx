@@ -1,4 +1,4 @@
-import {saveEntirePage,usePageSave} from "../lib/pageSave";
+import {saveEntirePage,usePageSave,useNamedPageSave} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import { formatDayTime } from "../lib/format";
 import { Track2ChainStatusBar } from "./Track2ChainStatusBar";
@@ -137,6 +137,36 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
   const typed = name.trim();
   const canSave = Boolean(typed || currentExists);
 
+  async function saveNamedSettings():Promise<string> {
+    if(busy) throw new Error("A settings operation is already in progress.");
+    setBusy("Save");
+    try {
+            const target = typed || (currentExists ? current : "");
+            if (!target) {
+              throw new Error("Type a name at the top -- there is no current file to save over.");
+            }
+            // Capture all current card values before writing the named file.
+            await saveEntirePage();
+
+            try {
+              await saveTrack2SettingsFile(target, allowClash, scope);
+            } catch (err) {
+              if (err instanceof ApiError && err.status === 409) {
+                setClashed(true);
+              }
+              throw err;
+            }
+            const saved = withSuffix(target, scope);
+            setClashed(false);
+            setAllowClash(false);
+            setName("");
+            setNote(`Saved all page settings to ${saved}. Edits are saved only when you press Save.`);
+            await refresh();
+      return saved;
+    } finally {setBusy("");}
+  }
+  useNamedPageSave(saveNamedSettings);
+
   return (
     /* No sticky here: the page pins the whole band -- title and toolbar
        together -- and a second sticky context inside the first just
@@ -196,28 +226,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
           type="button"
           disabled={!!busy || !canSave}
           onClick={() => void run("Save", async () => {
-            const target = typed || (currentExists ? current : "");
-            if (!target) {
-              setError("Type a name -- there is no current file to save over.");
-              return;
-            }
-            // Capture all current card values before writing the named file.
-            await saveEntirePage();
-
-            try {
-              await saveTrack2SettingsFile(target, allowClash, scope);
-            } catch (err) {
-              if (err instanceof ApiError && err.status === 409) {
-                setClashed(true);
-              }
-              throw err;
-            }
-            const saved = withSuffix(target, scope);
-            setClashed(false);
-            setAllowClash(false);
-            setName("");
-            setNote(`Saved all page settings to ${saved}. Edits are saved only when you press Save.`);
-            await refresh();
+            await saveNamedSettings();
           })}
           className="rounded-md bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-40"
         >

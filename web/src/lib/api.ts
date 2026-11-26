@@ -2202,6 +2202,7 @@ export interface Track2PullRule {
 }
 
 export interface SourceClassMapping {
+  source_classes?: Record<string, string>;
   ids: Record<string, string | null>;
   target_classes: Record<string, string>;
 }
