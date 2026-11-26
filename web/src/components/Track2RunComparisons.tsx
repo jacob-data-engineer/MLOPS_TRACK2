@@ -1,6 +1,6 @@
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import {useEffect, useState} from 'react';
-import {ApiError, listRunComparisons, runBaselineComparison, type BaselineSelection,
+import {listVariantRuns, type VariantRunRecord, ApiError, listRunComparisons, runBaselineComparison, type BaselineSelection,
   type RunComparisonSummary} from '../lib/api';
 import {Track2BaselineComparison} from './Track2BaselineComparison';
 import {formatDayTime} from '../lib/format';
@@ -8,6 +8,10 @@ import {Track2BaselineChart} from './Track2BaselineChart';
 
 const metrics = ['mAP50-95', 'mAP50', 'precision', 'recall', 'f1'] as const;
 export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun?: string; onRunChange?: (id: string) => void} = {}) {
+  const [experiments,setExperiments]=useState<VariantRunRecord[]>([]);
+  const [experimentError,setExperimentError]=useState('');
+  useEffect(()=>{let active=true;async function load(){try{const result=await listVariantRuns();if(active){setExperiments(result.runs);setExperimentError('');}}catch{if(active)setExperimentError('Could not load experiment membership. Model counts are unavailable.');}}void load();const timer=window.setInterval(load,10000);return()=>{active=false;window.clearInterval(timer);};},[]);
+  const membership=(id:string)=>{const experiment=experiments.find(e=>e.variants.some(v=>v.run_id===id));return experiment?{experiment,variant:experiment.variants.find(v=>v.run_id===id)!}:undefined;};
   const [runs, setRuns] = useState<RunComparisonSummary[]>([]);
   const [selected, setSelected] = useState(initialRun);
   const [selection, setSelection] = useState<BaselineSelection>({enabled: false});
@@ -24,6 +28,7 @@ export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun
     return () => {active = false; window.clearInterval(timer);};
   }, []);
   const run = runs.find(r => r.id === selected);
+  const experimentRun=run?membership(run.id):undefined;
   const result = run?.comparison?.result;
   const waiting = run?.status === 'Running' || run?.status === 'Pending';
   async function start(retry: boolean) {
@@ -40,10 +45,12 @@ export function Track2RunComparisons({initialRun = '', onRunChange}: {initialRun
     <label className="block text-sm">Training run<select className="my-2 block w-full rounded border border-hairline bg-page p-2" value={selected}
       onChange={e => {setSelected(e.target.value); onRunChange?.(e.target.value); setSelection({enabled:false});}}>
       <option value="">Choose a saved training run</option>
-      {runs.map(r => <option key={r.id} value={r.id}>{r.run_number != null ? `Run ${r.run_number}` : r.id} · {r.label} · {formatDayTime(r.submitted_at)} · {r.status}</option>)}
+      {runs.map(r => {const member=membership(r.id);return <option key={r.id} value={r.id}>{r.run_number != null ? `Run ${r.run_number}` : r.id} / {r.label} / {formatDayTime(r.submitted_at)} / {member?`${member.variant.name} / ${member.experiment.variants.length} experimental models / ${member.experiment.state}`:r.status}</option>;})}
     </select></label>
+    {experimentError&&<p role="alert" className="text-xs text-critical">{experimentError}</p>}
+    {experimentRun&&<div className="my-2 border border-hairline p-3 text-sm"><p className="font-semibold">{experimentRun.experiment.variants.length} experimental models + 1 baseline</p><p>{experimentRun.experiment.name}: {experimentRun.variant.name}. {experimentRun.experiment.variants.filter(v=>v.state==='Succeeded').length} models trained successfully.</p><p>Shared baseline comparison: {experimentRun.experiment.comparison?.status??experimentRun.experiment.state}. Select “Experiment (all variants)” above to review the whole experiment.</p>{experimentRun.experiment.comparison?.error&&<p className="text-critical">{experimentRun.experiment.comparison.error}</p>}</div>}
     {run && <>
-      <p role="status" className="my-2 text-sm font-medium">{run.status}</p>
+      <p role="status" className="my-2 text-sm font-medium">{experimentRun ? experimentRun.experiment.state : run.status}</p>
       {run.comparison?.error && <p className="text-xs text-critical">{run.comparison.error}</p>}
       {run.can_compare && !waiting && <details>
         <summary className="cursor-pointer text-sm">Compare this completed run</summary>
