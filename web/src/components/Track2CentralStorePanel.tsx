@@ -212,6 +212,7 @@ export function Track2CentralStorePanel() {
  * far through it. Read from the server every 5 s, so it is right after the
  * page is closed and opened again -- the combine runs on the server. */
 const PHASES: Record<string, { step: number; label: string }> = {
+  class_mapping: { step: 2, label: "Applying saved class mappings" },
   listing: { step: 1, label: "Listing the sources and the store" },
   store: { step: 1, label: "Copying into the store" },
   clearing: { step: 2, label: "Removing files the decay no longer keeps" },

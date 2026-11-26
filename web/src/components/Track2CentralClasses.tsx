@@ -1,9 +1,22 @@
-import { useEffect, useState } from "react";
-import { getTrack2PullControl, readTrack2YamlClasses, inspectTrack2LabelClasses } from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { getTrack2PullControl, readTrack2YamlClasses, inspectTrack2LabelClasses, saveTrack2PullConfig, type SourceClassMapping } from "../lib/api";
+import { usePageSave } from "../lib/pageSave";
 import { listen } from "../lib/bus";
 
-type Row = { source: string; path: string; classes: Record<string, string>; differences: string[]; verified: boolean; labelNote?: string };
+type Row = { source: string; path: string; classes: Record<string, string>; differences: string[]; verified: boolean; labelNote?: string; mappingKey: string; labelBucket: string; labelPrefix: string };
 export function Track2CentralClasses({ bucket, folder }: { bucket: string; folder: string }) {
+  const [drafts, setDrafts] = useState<Record<string, SourceClassMapping>>({});
+  const loaded = useRef(false);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [scanNotes, setScanNotes] = useState<Record<string, string>>({});
+  const [observed, setObserved] = useState<Record<string, string[]>>({});
+  async function saveMappings() {
+    if (!loaded.current) throw new Error("Class mappings are still loading.");
+    await saveTrack2PullConfig({ source_class_mappings: drafts });
+    setMessage("Class mappings saved. They apply to the next combined-store preparation.");
+  }
+  usePageSave("Source class mappings", saveMappings);
   const [rows, setRows] = useState<Row[]>([]);
   const [expected, setExpected] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -18,6 +31,7 @@ export function Track2CentralClasses({ bucket, folder }: { bucket: string; folde
       const mapping = c.dataset_assemble?.label_classes ?? {};
       if (cancelled) return;
       setExpected(mapping);
+      if (!loaded.current) { setDrafts(c.source_class_mappings ?? {}); loaded.current = true; }
       const sources: { source: string; path: string; bucket: string; labels?: string }[] = [];
       const add = (source: string, path: string, home: string, labels?: string) => {
         if (path) sources.push({ source, path, bucket: home, labels });
@@ -54,12 +68,14 @@ export function Track2CentralClasses({ bucket, folder }: { bucket: string; folde
             if (Object.keys(result.classes).length) { classes = result.classes; yaml = name; break; }
           } catch { /* Missing or unreadable metadata is explicitly unverified. */ }
         }
+        const labelPath = source.labels || (prefix.includes("/labels") ? prefix :
+          prefix.includes("/images") ? prefix.replace(/\/images(?=\/|$)/, "/labels") : `${prefix}/labels`);
+        const labelUri = labelPath.match(/^s3:\/\/([^/]+)\/(.*)$/);
+        const labelBucket = labelUri ? labelUri[1] : home;
+        const labelPrefix = labelUri ? labelUri[2] : labelPath;
         let labelNote = "";
         let labelsAvailable = false;
         if (!Object.keys(classes).length) {
-          const labelPath = source.labels || (prefix.includes("/labels") ? prefix :
-            prefix.includes("/images") ? prefix.replace(/\/images(?=\/|$)/, "/labels") : `${prefix}/labels`);
-          const labelUri = labelPath.match(/^s3:\/\/([^/]+)\/(.*)$/);
           try {
             const scan = await inspectTrack2LabelClasses(labelUri ? labelUri[1] : home, labelUri ? labelUri[2] : labelPath);
             labelsAvailable = Object.keys(scan.counts).length > 0;
@@ -74,7 +90,7 @@ export function Track2CentralClasses({ bucket, folder }: { bucket: string; folde
         const differences = ids.filter(id => (yaml || id in classes) && mapping[id] !== classes[id]).map(id =>
           `${id}: source ${classes[id] ?? "missing"}; expected ${mapping[id] ?? "not configured"}`);
         results.push({ source: source.source, path: `s3://${key}/${yaml}`, classes, differences,
-          verified: !!yaml && !!Object.keys(mapping).length, labelNote: labelsAvailable || labelNote ? labelNote : undefined });
+          mappingKey: `s3://${key}`, labelBucket, labelPrefix, verified: !!yaml && !!Object.keys(mapping).length, labelNote: labelsAvailable || labelNote ? labelNote : undefined });
       }
       if (!cancelled) setRows(results);
     };
@@ -93,5 +109,36 @@ export function Track2CentralClasses({ bucket, folder }: { bucket: string; folde
     {!busy && !error && <p role="status" className={`mt-2 rounded border p-2 ${mismatches || unknown ? "border-amber-500 bg-amber-50 text-amber-900" : "border-green-600 text-green-800"}`}>
       {mismatches ? "Warning: class mappings differ. Review the highlighted differences before combining." : unknown ? "Not fully verified: one or more class mappings are missing or unreadable." : "All checked YAML class IDs and names match the configured dataset classes."}</p>}
     {!!rows.length && <div className="mt-2 overflow-x-auto"><table className="w-full text-left"><thead><tr><th>Source</th><th>Classes</th><th>Check</th></tr></thead><tbody>{rows.map(r=><tr key={r.path} className="border-t border-hairline"><td className="p-2">{r.source}<div className="break-all text-ink-muted">{r.path}</div></td><td className="p-2">{Object.entries(r.classes).map(([id,name])=><span key={id} className={`mr-2 inline-block ${expected[id] !== name ? "bg-amber-100 text-amber-900" : ""}`}>{id} {name}</span>)}</td><td className="p-2">{r.labelNote ? <span>{r.differences.length > 0 && <strong className="text-critical">{r.differences.join("; ")} — </strong>}{r.labelNote}</span> : !r.verified ? "Not verified: mapping unavailable" : r.differences.length ? <span className="text-amber-900">{r.differences.join("; ")}</span> : "Match"}</td></tr>)}</tbody></table></div>}
+    <details className="mt-3 rounded border border-hairline p-3">
+      <summary className="cursor-pointer font-medium">Edit source class IDs</summary>
+      <p className="my-2 text-ink-muted">Choose a target for each source ID. Changes are applied only to rebuilt combined-store training copies, never to originals. An ID marked unused will stop preparation if any processed label uses it. Save explicitly; editing does not start processing.</p>
+      {rows.filter(r => r.source !== "Central store").map(row => {
+        const draft = drafts[row.mappingKey];
+        const ids = [...new Set([...Object.keys(row.classes), ...Object.keys(draft?.ids ?? {}), ...(observed[row.mappingKey] ?? [])])].sort((a,b)=>Number(a)-Number(b));
+        return <div key={row.mappingKey} className="my-2 rounded border border-hairline p-2">
+          <div className="flex flex-wrap items-center gap-2"><strong>{row.source}</strong><span className="break-all">{row.mappingKey}</span>
+            <button type="button" className="rounded border px-2 py-1" onClick={() => {
+              setScanNotes(n=>({...n,[row.mappingKey]:"Scanning labels..."}));
+              inspectTrack2LabelClasses(row.labelBucket,row.labelPrefix).then(scan=>{
+                setObserved(n=>({...n,[row.mappingKey]:Object.keys(scan.counts)}));
+                setScanNotes(n=>({...n,[row.mappingKey]:`${scan.scanned}/${scan.total} files checked${scan.complete ? "" : " (partial)"}; ${scan.unreadable} unreadable; ${scan.invalid_lines} invalid lines. Boxes by ID: ${Object.entries(scan.counts).map(([id,count])=>`${id}: ${count}`).join(", ") || "none"}`}));
+              }).catch(()=>setScanNotes(n=>({...n,[row.mappingKey]:"Could not scan labels."})));
+            }}>Scan label IDs</button>
+            <button type="button" className="rounded border px-2 py-1" onClick={()=>{
+              if(draft) setDrafts(all=>{const next={...all};delete next[row.mappingKey];return next;});
+              else setDrafts(all=>({...all,[row.mappingKey]:{target_classes:{...expected},ids:Object.fromEntries(ids.map(id=>[id,Object.entries(expected).find(([,name])=>name===row.classes[id])?.[0] ?? null]))}}));
+              setMessage("Unsaved mapping changes.");
+            }}>{draft ? "Remove mapping" : "Edit mapping"}</button>
+          </div>
+          {scanNotes[row.mappingKey] && <p className="mt-1">{scanNotes[row.mappingKey]}</p>}
+          {draft && <><table className="mt-2 w-full text-left"><thead><tr><th>Source ID / name</th><th>Target class</th></tr></thead><tbody>{ids.map(id=><tr key={id}><td>{id} {row.classes[id] ?? "Name not recorded"}</td><td><select aria-label={`Target class for ${row.mappingKey} ID ${id}`} value={draft.ids[id] ?? ""} className="my-1 rounded border bg-page p-1" onChange={e=>{
+            const value=e.target.value;setDrafts(all=>({...all,[row.mappingKey]:{target_classes:{...expected},ids:{...all[row.mappingKey].ids,[id]:value || null}}}));setMessage("Unsaved mapping changes.");
+          }}><option value="">Unused / unresolved (must not occur in labels)</option>{Object.entries(expected).sort(([a],[b])=>Number(a)-Number(b)).map(([target,name])=><option key={target} value={target}>{target} {name}</option>)}</select></td></tr>)}</tbody></table>
+          {!ids.length && <p className="text-critical">No class IDs found. Scan labels before saving this mapping.</p>}</>}
+        </div>;
+      })}
+      <button type="button" disabled={saving || busy} className="mt-2 rounded bg-accent px-3 py-2 text-white disabled:opacity-40" onClick={()=>{setSaving(true);saveMappings().catch(e=>setMessage(e instanceof Error?e.message:"Could not save mappings.")).finally(()=>setSaving(false));}}>{saving?"Saving...":"Save class mappings"}</button>
+      {message && <p role="status" className="mt-2">{message}</p>}
+    </details>
   </div>;
 }

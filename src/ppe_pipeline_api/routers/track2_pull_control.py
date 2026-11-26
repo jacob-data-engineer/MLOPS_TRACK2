@@ -108,6 +108,7 @@ class ConfigRequest(BaseModel):
     # The SQL tab's Readiness flow card: which class it shows (2026-11-05).
     readiness_flow: dict | None = None
     # The central data store's bucket and folder (2026-10-29).
+    source_class_mappings: dict | None = None
     central_store: dict | None = None
     # Pull Control's weeks table: `{watching, show_all_weeks}`.
     pull_control_view: dict | None = None
@@ -295,6 +296,10 @@ def save_config(payload: ConfigRequest, session=Depends(require_session)) -> dic
             )
 
     try:
+        if "source_class_mappings" in patch:
+            from ..data.source_class_mapping import validate
+            names = (patch.get("dataset_assemble") or pc.read_config().get("dataset_assemble") or {}).get("label_classes") or {}
+            validate(patch["source_class_mappings"], names)
         saved = pc.write_config(patch)
         # Rebuilt from the picks rather than sent by the card, so there is
         # one rule for turning folders into sources and the card cannot

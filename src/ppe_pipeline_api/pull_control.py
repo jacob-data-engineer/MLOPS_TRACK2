@@ -190,6 +190,7 @@ DEFAULTS = {
     # rebuilds `<folder>_decay` from it through the retention policy, and
     # trains on that copy alone -- deleting it once the run has finished.
     "central_store": {},
+    "source_class_mappings": {},
     # Pull Control's weeks table (2026-11-13): `{watching, show_all_weeks}`
     # -- whether it re-reads the weeks on its own while open, and whether
     # it lists every week or only the recent window. How the card is read,
@@ -3064,7 +3065,7 @@ SCOPES = {
         "auto_create_weeks", "first_week_takes_all", "week_by",
         "image_extensions", "label_extensions", "overwrite",
         "retention", "golden_set", "dataset_assemble", "auto_training",
-        "sql_explorer", "readiness_flow", "central_store", "pull_control_view", "catalog_export", "catalog_pt_metadata", "catalog_export_destination", "comparison_export",
+        "sql_explorer", "readiness_flow", "central_store", "source_class_mappings", "pull_control_view", "catalog_export", "catalog_pt_metadata", "catalog_export_destination", "comparison_export",
     ),
     "at": (
         "mode", "schedule_expression", "schedule_every_days", "schedule_from",
@@ -3425,7 +3426,7 @@ TRAINING_DATA_KEYS = (
     "images_subpath", "labels_subpath", "week_prefix", "week_length_days",
     "auto_create_weeks", "first_week_takes_all", "week_by",
     "image_extensions", "label_extensions", "overwrite", "retention",
-    "golden_set", "dataset_assemble", "auto_training", "central_store",
+    "golden_set", "dataset_assemble", "auto_training", "central_store", "source_class_mappings",
 )
 
 

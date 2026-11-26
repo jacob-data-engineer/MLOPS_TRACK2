@@ -403,6 +403,9 @@ def _decay_plan(bucket: str, store: str, decayed: str, *, retention: dict, use_w
 
 def _apply_decay_plan(bucket, decayed, there, pairs, train, val, weeks_report, *,
                       now, for_run, stop, progress, config=None) -> dict:
+    from . import source_class_mapping
+    mapping_config = config if config is not None else pc.read_config()
+    source_class_mapping.preparation_maps(mapping_config, decayed, train, val)
     # Clear all working files, including names selected again. Never reuse
     # a previous run's decay copy. The build marker stays until completion.
     wanted = {dest for (_, _, dest) in pairs}
@@ -419,6 +422,13 @@ def _apply_decay_plan(bucket, decayed, there, pairs, train, val, weeks_report, *
         _check(stop)
         result = _copy(pairs, bucket, skip_existing=set(), stop=stop,
                        progress=progress, phase="decay")
+        if not result["failed"]:
+            source_class_mapping.apply(mapping_config, bucket, decayed, pairs, train, val,
+                s3=storage.s3, checkpoint=lambda: _check(stop),
+                progress=lambda phase, done, total: _report(progress, phase, done, total))
+    except ValueError as exc:
+        _write_marker(bucket, decayed, status="failed", error=str(exc), for_run=for_run)
+        raise
     except Stopped:
         # A half-built decayed copy is a dataset nobody chose. Remove it.
         delete_decayed(config=config)

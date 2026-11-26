@@ -2201,7 +2201,12 @@ export interface Track2PullRule {
   error?: string;
 }
 
+export interface SourceClassMapping {
+  ids: Record<string, string | null>;
+  target_classes: Record<string, string>;
+}
 export interface Track2PullConfig {
+  source_class_mappings?: Record<string, SourceClassMapping>;
   /** The Auto Training card's own selection: the root it is pointed at
    * and the weeks ticked out of it. Server-side so it rides along in the
    * settings file -- a selection that only exists in a tab is one nobody
