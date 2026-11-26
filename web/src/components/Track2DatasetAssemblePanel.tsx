@@ -63,20 +63,8 @@ interface AssembleSource {
  * one dataset. Stems that collide between them are suffixed rather than
  * overwritten -- see assemble_dataset.
  */
-function mb(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
-}
-
-/** The yaml as it would be written, and what the run would pay to use it.
- *
- * The second half is the one that is easy to miss. The common parent of
- * the chosen folders becomes the download prefix, and the trainer takes
- * EVERYTHING under it -- so two folders sharing nothing but a top-level
- * name make a run download all of it. That is invisible until a GPU has
- * been sitting idle for twenty minutes, so it is counted and shown here.
- */
-function YamlPreview({
+/** Report undeclared label classes without displaying generated YAML. */
+function DatasetClassWarnings({
   preview,
   dropUndeclared,
   onNameTheRest,
@@ -90,10 +78,9 @@ function YamlPreview({
    * edited where they are saved, on the Data Preparation tab. */
   onNameTheRest?: (indices: number[]) => void;
 }) {
-  const { download } = preview;
-  const wasteful = download.extra_objects > download.in_named_folders;
   const undeclared = preview.undeclared ?? [];
   const allIndices = Array.from(new Set(undeclared.flatMap((u) => u.indices))).sort((a, b) => a - b);
+  if (undeclared.length === 0) return null;
   return (
     <div className="mt-3 rounded-md border border-black/15 p-3">
       {/* LABELS THE YAML CANNOT NAME. A warning with its two answers in
@@ -131,93 +118,6 @@ function YamlPreview({
             </span>
           </div>
         </div>
-      )}
-      <p className="text-xs font-medium text-ink">
-        {preview.written ? "Written to" : "The run writes it to"}{" "}
-        <span className="tabular font-normal text-ink-secondary">{preview.uri}</span>
-      </p>
-      <pre className="tabular mt-2 max-h-64 overflow-auto rounded-sm border border-hairline bg-page p-2 text-xs leading-relaxed text-ink-secondary">
-        {preview.text}
-      </pre>
-      {/* WHAT THE RUN READS, in images, per folder. The download lines
-          below count objects under one prefix; they cannot describe a
-          run that reads several, and showed "0 objects" for training and
-          "55 objects" for a validation set of 1,748 images. */}
-      {preview.image_counts && (
-        <div className="tabular mt-2 grid gap-x-4 gap-y-0.5 text-xs text-ink-secondary sm:grid-cols-2">
-          {(["train", "val"] as const).map((split) => (
-            <div key={split}>
-              <p className="font-medium text-ink">
-                {split === "train" ? "Training" : "Validation"}:{" "}
-                {preview.image_counts?.[split].total?.toLocaleString() ?? "?"} images
-              </p>
-              {preview.image_counts?.[split].folders.map((row) => (
-                <div key={row.folder}>
-                <p className="truncate" title={row.folder}>
-                  {row.images === null ? "?" : row.images.toLocaleString()} &middot; {row.folder}
-                  {/* The retention list: the week folders, thinned. */}
-                  {row.retained_of != null && (
-                    <span className="text-ink-muted">
-                      {" "}(week folders -- retention keeps {row.images?.toLocaleString()} of{" "}
-                      {row.retained_of.toLocaleString()})
-                    </span>
-                  )}
-                </p>
-                {/* Every week the list draws from, by name -- the list
-                    file on its own says nothing about which weeks. */}
-                {row.weeks?.map((w) => (
-                  <p key={w.folder} className="truncate pl-4 text-ink-muted" title={w.folder}>
-                    {w.keep.toLocaleString()} of {w.available.toLocaleString()} &middot; {w.folder}
-                  </p>
-                ))}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
-      <p className="mt-2 text-xs text-ink-secondary">
-        The run downloads{" "}
-        <span className="tabular text-ink">{preview.download_prefix}</span> before
-        training &mdash; all of it, not only the folders named above.
-      </p>
-      {!preview.many_roots && <p className={`tabular mt-1 text-xs ${wasteful ? "text-critical" : "text-ink-muted"}`}>
-        {download.in_named_folders.toLocaleString()} objects in the folders you
-        picked ({mb(download.in_named_bytes)});{" "}
-        {download.extra_objects.toLocaleString()} more under that prefix
-        ({mb(download.extra_bytes)}) that the run downloads and does not train on.
-      </p>}
-      {wasteful && !preview.many_roots && (
-        <p className="mt-1 text-xs text-critical">
-          More than half of that download is unused. Picking folders that sit
-          closer together, or moving them under a tighter parent, would make
-          every run start faster.
-        </p>
-      )}
-      {preview.eval && (
-        <div className="mt-3 border-t border-hairline pt-2">
-          <p className="text-xs font-medium text-ink">
-            Validation is a second download{" "}
-            <span className="tabular font-normal text-ink-secondary">
-              {preview.eval.uri}
-            </span>
-          </p>
-          <p className="mt-1 text-xs text-ink-secondary">
-            It lives under a different prefix, which is fine &mdash; the
-            evaluation step reads it in its own container. That is where the
-            held-out numbers on the registered model come from. Folders
-            under other prefixes are fetched by the evaluator itself; the
-            image counts above include them.
-          </p>
-          <pre className="tabular mt-2 max-h-40 overflow-auto rounded-sm border border-hairline bg-page p-2 text-xs leading-relaxed text-ink-secondary">
-            {preview.eval.text}
-          </pre>
-        </div>
-      )}
-      {preview.existing?.ours && !preview.written && (
-        <p className="mt-1 text-xs text-ink-muted">
-          A data.yaml from an earlier build is already there; the run replaces it.
-        </p>
       )}
     </div>
   );
@@ -720,11 +620,6 @@ export function Track2DatasetAssemblePanel({
             placeholder="0 helmet, 1 gloves, 2 person"
             className="tabular mt-1 w-full rounded border border-black/15 bg-page px-2 py-1 text-sm text-ink" />
         </label>
-        <p className="mt-2 text-xs text-ink-secondary">
-          Data Preparation saves all dataset classes in data.yaml. Select the model's
-          classes later in Auto Training; that selection does not change this dataset.
-          Include every source class here. Missing classes block the build instead of dropping boxes.
-        </p>
       </div>
 
       {busy && <p className="mt-3 text-xs text-ink-muted">Checking...</p>}
@@ -743,7 +638,7 @@ export function Track2DatasetAssemblePanel({
       )}
 
       {preview && (
-        <YamlPreview
+        <DatasetClassWarnings
           preview={preview}
           dropUndeclared={dropUndeclared}
           onNameTheRest={previewOnly ? undefined : nameTheRest}
