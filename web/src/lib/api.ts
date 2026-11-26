@@ -1,4 +1,4 @@
-import { beginLoading } from "./loadingActivity";
+import { beginPageRequest } from "./loadingActivity";
 /**
  * Thin fetch wrapper for the ppe_pipeline_api FastAPI backend (see
  * src/ppe_pipeline_api/CONTRACT.md at the repo root -- this file should
@@ -146,7 +146,7 @@ async function request<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const finishLoading = beginLoading();
+  const finishLoading = beginPageRequest(path, init.method);
   try {
     const headers = new Headers(init.headers);
     if (!(init.body instanceof FormData) && init.body !== undefined) {
