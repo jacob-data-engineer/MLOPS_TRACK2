@@ -1,3 +1,4 @@
+import { beginLoading } from "./loadingActivity";
 /**
  * Thin fetch wrapper for the ppe_pipeline_api FastAPI backend (see
  * src/ppe_pipeline_api/CONTRACT.md at the repo root -- this file should
@@ -145,42 +146,45 @@ async function request<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const headers = new Headers(init.headers);
-  if (!(init.body instanceof FormData) && init.body !== undefined) {
-    headers.set("Content-Type", "application/json");
-  }
-  if (authToken) {
-    headers.set("Authorization", `Bearer ${authToken}`);
-  }
-
-  const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
-
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body?.detail ?? detail;
-    } catch {
-      // non-JSON error body -- fall back to statusText
+  const finishLoading = beginLoading();
+  try {
+    const headers = new Headers(init.headers);
+    if (!(init.body instanceof FormData) && init.body !== undefined) {
+      headers.set("Content-Type", "application/json");
     }
-    // A 401 USUALLY means the session ended -- but not always, and acting
-    // on it immediately meant one failing background poll signed the
-    // operator out mid-task. Confirm against /auth/session first, and
-    // only then fall back to sign-in.
-    //
-    // NOT for the login request itself: a wrong password is a 401 the
-    // login form must show, and logging out mid-login would wipe the
-    // error. Nor for the probe, which would recurse.
-    if (res.status === 401 && path !== "/auth/login" && path !== SESSION_PROBE_PATH) {
-      void confirmSessionIsDead();
+    if (authToken) {
+      headers.set("Authorization", `Bearer ${authToken}`);
     }
-    throw new ApiError(res.status, detail);
-  }
 
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return (await res.json()) as T;
+    const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body?.detail ?? detail;
+      } catch {
+        // non-JSON error body -- fall back to statusText
+      }
+      // A 401 USUALLY means the session ended -- but not always, and acting
+      // on it immediately meant one failing background poll signed the
+      // operator out mid-task. Confirm against /auth/session first, and
+      // only then fall back to sign-in.
+      //
+      // NOT for the login request itself: a wrong password is a 401 the
+      // login form must show, and logging out mid-login would wipe the
+      // error. Nor for the probe, which would recurse.
+      if (res.status === 401 && path !== "/auth/login" && path !== SESSION_PROBE_PATH) {
+        void confirmSessionIsDead();
+      }
+      throw new ApiError(res.status, detail);
+    }
+
+    if (res.status === 204) {
+      return undefined as T;
+    }
+    return (await res.json()) as T;
+  } finally { finishLoading(); }
 }
 
 /** GETs already in flight, by path.

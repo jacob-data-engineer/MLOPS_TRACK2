@@ -1,3 +1,4 @@
+import { PageLoadingIndicator } from "./components/PageLoadingIndicator";
 /*
  * THESIS: Every reviewed case gets a real stamped verdict, not a color-coded
  * pill — this surface owns the customs-inspection ritual the product already
@@ -45,6 +46,8 @@ import { Track2SyntheticPage } from "./routes/Track2SyntheticPage";
 
 export function App() {
   return (
+    <>
+    <PageLoadingIndicator />
     <Routes>
       <Route path="/login" element={<LoginPage />} />
 
@@ -126,5 +129,6 @@ export function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }
