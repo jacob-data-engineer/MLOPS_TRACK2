@@ -124,6 +124,7 @@ class ExportRequest(BaseModel):
     include_images: bool = True
     include_model: bool = False
     model_package_arn: str = ""
+    model_package_arns: list[str] | None = None
     metadata_groups: list[str] | None = None
 
 
@@ -149,7 +150,7 @@ def estimate_export(payload: ExportRequest, session=Depends(require_session)) ->
         bucket=payload.bucket, prefix=payload.prefix, format=payload.format,
         include_metadata=payload.include_metadata, include_images=payload.include_images,
         include_model=payload.include_model, metadata_groups=payload.metadata_groups,
-        model_package_arn=payload.model_package_arn))
+        model_package_arn=payload.model_package_arn, model_package_arns=payload.model_package_arns))
 
 
 @router.post("/exports")
@@ -160,7 +161,7 @@ def start_export(payload: ExportRequest, session=Depends(require_session)) -> di
         bucket=payload.bucket, prefix=payload.prefix, format=payload.format,
         include_metadata=payload.include_metadata, include_images=payload.include_images,
         include_model=payload.include_model, metadata_groups=payload.metadata_groups,
-        model_package_arn=payload.model_package_arn))
+        model_package_arn=payload.model_package_arn, model_package_arns=payload.model_package_arns))
 
 
 @router.get("/metadata")

@@ -1503,6 +1503,7 @@ export function previewTrack2BestVersion(body: {
  * straight to S3. */
 export function exportTrack2BestWeights(body: {
   model_package_arn?: string;
+  model_package_arns?: string[];
   group_name: string;
   criterion: string;
   destination: "local" | "s3";
@@ -1980,6 +1981,7 @@ export interface QueueInferenceRunParams {
   images_folder: string;
   output_folder: string;
   model_package_arn?: string;
+  model_package_arns?: string[];
   /** For weights_kind="s3": exactly one of these two. */
   weights_folder?: string;
   weights_key?: string;
@@ -2134,6 +2136,7 @@ export interface QueueEvalRunParams {
   data_folder: string;
   weights_kind: Track2EvalWeightsKind;
   model_package_arn?: string;
+  model_package_arns?: string[];
   s3_folder?: string;
 }
 
@@ -4182,6 +4185,7 @@ export interface CatalogExportDestination {
   include_images?: boolean;
   include_model?: boolean;
   model_package_arn?: string;
+  model_package_arns?: string[];
 }
 
 export interface CatalogMetadata {

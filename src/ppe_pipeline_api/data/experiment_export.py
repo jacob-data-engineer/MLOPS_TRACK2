@@ -37,3 +37,24 @@ def metadata(ident, arn):
         trained = cm.describe('run', c['member']['run_id'])
         result['groups']['Selected model training'] = trained['groups']
     return result
+
+
+def bundle(ident, arns):
+    selected = list(dict.fromkeys(arns))
+    if not selected:
+        raise ValueError('Choose at least one experiment model.')
+    members = [context(ident, arn) for arn in selected]
+    if len({m['dataset'] for m in members}) != 1:
+        raise ValueError('Selected models must share one experiment dataset.')
+    return {**members[0], 'members': members, 'label': f"run-{members[0]['job'].get('run_number') or ident}-experiment"}
+
+
+def bundle_metadata(ident, arns):
+    from . import catalog_metadata as cm
+    c = bundle(ident, arns)
+    result = cm.describe('version', c['dataset'])
+    result['label'] = c['label']
+    result['groups']['Experiment'] = {'id': ident, 'dataset_version_id': c['dataset'],
+        'selected_models': [m['arn'] for m in c['members']], 'shared_dataset_copies': 1}
+    result['models'] = {m['label']: metadata(ident, m['arn']) for m in c['members']}
+    return result

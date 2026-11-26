@@ -615,9 +615,10 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                             writer.writerow({**row, "missing": True, "note": note})
                             progress('Packing files', packed + missing)
                             continue
-                        if metadata and path == f"models/{label}.pt":
+                        if metadata and row.get("role") == "model":
                             check(True)
-                            body = catalog_metadata.embed(body, metadata, manifest.getvalue() if "File provenance" in metadata["groups"] else None)
+                            model_metadata = metadata.get("models", {}).get(path.removeprefix("models/").removesuffix(".pt"), metadata)
+                            body = catalog_metadata.embed(body, model_metadata, manifest.getvalue() if "File provenance" in model_metadata["groups"] else None)
                         zf.writestr(zipfile.ZipInfo(path, date_time=(2026, 1, 1, 0, 0, 0)), body)
                         packed += 1
                         progress('Packing files', packed + missing)
@@ -643,6 +644,8 @@ def _build(export_id: str, kind: str, ident: str, label: str, entries: list, nam
                 metadata["export_result"] = {"files_written": packed, "missing_files": missing,
                                              "completed_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
                 zf.writestr("metadata.json", catalog_metadata.dumps(metadata))
+                for model_label, model_metadata in metadata.get("models", {}).items():
+                    zf.writestr(f"models/{model_label}-metadata.json", catalog_metadata.dumps(model_metadata))
                 if "Evaluation" in metadata["groups"]:
                     zf.writestr("metrics.json", catalog_metadata.dumps(metadata["groups"]["Evaluation"]))
                 if "Training history" in metadata["groups"]:
@@ -758,7 +761,7 @@ def _run_export(*args):
 def start_export(kind: str, ident: str, *, destination: str = "local",
                  bucket: str = "", prefix: str = "", format: str | None = None,
                  include_metadata: bool = False, include_images: bool = True, include_model: bool = False,
-                 metadata_groups: list[str] | None = None, model_package_arn: str = "") -> dict:
+                 metadata_groups: list[str] | None = None, model_package_arn: str = "", model_package_arns: list[str] | None = None) -> dict:
     """Start building a zip of a run or a dataset version. Returns at once;
     `exports()` shows its progress."""
     if kind not in ("run", "version", "experiment"):
@@ -770,8 +773,11 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
     catalog.ensure_schema_once()          # it writes schema-9 columns
     entries, names, label = _plan(kind, ident)
     from . import experiment_export
-    experiment = experiment_export.context(ident, model_package_arn) if kind == 'experiment' else None
-    metadata = (experiment_export.metadata(ident, model_package_arn) if experiment else catalog_metadata.describe(kind, ident)) if include_metadata else None
+    if model_package_arns and kind != 'experiment':
+        raise ValueError('Multiple checkpoints require an experiment export.')
+    arns = model_package_arns or [model_package_arn]
+    experiment = experiment_export.bundle(ident, arns) if kind == 'experiment' and model_package_arns else experiment_export.context(ident, model_package_arn) if kind == 'experiment' else None
+    metadata = ((experiment_export.bundle_metadata(ident, arns) if model_package_arns else experiment_export.metadata(ident, model_package_arn)) if experiment else catalog_metadata.describe(kind, ident)) if include_metadata else None
     if experiment:
         label = experiment['label']
         checkpoint_uri = experiment['weights_uri']
@@ -801,8 +807,15 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
     if not include_images:
         entries = [("", uri, {**row, "included": False, "reason": "Not selected for export"}) for _, uri, row in entries]
     if include_model:
-        path = f"models/{label}.pt"
-        entries.append((path, checkpoint_uri, {"path": path, "source": checkpoint_uri, "role": "model", "included": True}))
+        checkpoints = experiment.get('members', [experiment]) if experiment else [{'label': label, 'weights_uri': checkpoint_uri}]
+        for checkpoint in checkpoints:
+            uri = checkpoint['weights_uri']
+            if not uri.startswith('s3://') or not uri.lower().endswith('.pt'):
+                raise ValueError('The selected experiment checkpoint is unavailable.')
+            b, k = _split_uri(uri)
+            storage.s3.head_object(Bucket=b, Key=k)
+            path = f"models/{checkpoint['label']}.pt"
+            entries.append((path, uri, {'path': path, 'source': uri, 'role': 'model', 'included': True}))
     if metadata:
         metadata["export_options"] = {"images": include_images, "model": include_model,
                                       "destination": destination, "format": format,
@@ -810,10 +823,13 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
         metadata["export_options"]["model_package_arn"] = model_package_arn
     if metadata and metadata_groups is not None:
         options = metadata["export_options"]
+        models = metadata.get('models')
         metadata = catalog_metadata.select_groups(metadata, metadata_groups)
+        if models:
+            metadata['models'] = {key: catalog_metadata.select_groups(value, metadata_groups) for key, value in models.items()}
         metadata["export_options"] = options
         if experiment:
-            metadata['groups']['Experiment'] = experiment_export.metadata(ident, model_package_arn)['groups']['Experiment']
+            metadata['groups']['Experiment'] = (experiment_export.bundle_metadata(ident, arns) if model_package_arns else experiment_export.metadata(ident, model_package_arn))['groups']['Experiment']
     if not metadata and not any(path for path, _, _ in entries):
         raise ValueError("Nothing to export: no files are recorded for it.")
     if not _building.acquire(blocking=False):
@@ -833,7 +849,7 @@ def start_export(kind: str, ident: str, *, destination: str = "local",
                  f"s3://{bucket}/" + "/".join(p for p in (prefix, f"{label}-{export_id}") if p) + "/", format,
                  json.dumps({'include_metadata': include_metadata, 'include_images': include_images,
                              'include_model': include_model, 'metadata_groups': metadata_groups,
-                             'experiment_id': ident if experiment else None, 'model_package_arn': model_package_arn})))
+                             'experiment_id': ident if experiment else None, 'model_package_arns': model_package_arns, 'model_package_arn': model_package_arn})))
             conn.commit()
         finally:
             conn.close()
@@ -1012,7 +1028,10 @@ def summary_json(value) -> str:
 def export_metadata(kind: str, ident: str, *, destination="local", bucket="", prefix="", metadata_groups=None):
     metadata = catalog_metadata.describe(kind, ident)
     if metadata_groups is not None:
+        models = metadata.get('models')
         metadata = catalog_metadata.select_groups(metadata, metadata_groups)
+        if models:
+            metadata['models'] = {key: catalog_metadata.select_groups(value, metadata_groups) for key, value in models.items()}
     bucket, prefix = _destination(destination, bucket, prefix)
     filename = metadata["label"] + "-metadata.json"
     key = "/".join(p for p in (prefix, metadata["label"] + "-" + uuid.uuid4().hex[:12], filename) if p)

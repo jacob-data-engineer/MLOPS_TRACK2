@@ -52,7 +52,8 @@ def test_shared_dataset_plan_recurses_only_to_recorded_version(experiment,monkey
     entries,names,label=plan('experiment','exp')
     assert label=='run-75' and entries[0][1]=='s3://saved/a'
 
-def test_export_build_receives_shared_files_and_selected_baseline(experiment,monkeypatch):
+@pytest.mark.parametrize("bundle", [False, True])
+def test_export_build_receives_shared_files_and_selected_baseline(experiment,monkeypatch,bundle):
     import threading
     monkeypatch.setattr(cv.catalog,'ensure_schema_once',lambda:None)
     statements=[]
@@ -64,9 +65,25 @@ def test_export_build_receives_shared_files_and_selected_baseline(experiment,mon
     monkeypatch.setattr(cv,'_building',threading.BoundedSemaphore(2))
     launched=[]
     monkeypatch.setattr(cv.threading,'Thread',lambda **kw:SimpleNamespace(start=lambda:launched.append(kw)))
-    cv.start_export('experiment','exp',include_model=True,model_package_arn='baseline')
+    cv.start_export('experiment','exp',include_model=True,model_package_arn='baseline', model_package_arns=['baseline','variant','baseline'] if bundle else None)
     args=launched[0]['args']
-    assert args[3]=='run-75-baseline'
+    assert args[3]==('run-75-experiment' if bundle else 'run-75-baseline')
     assert args[4][0][1]=='s3://preserved/a'
-    assert args[4][-1][1]=='s3://b/base.pt'
+    assert args[4][1][1]=='s3://b/base.pt'
+    assert len(args[4])==(3 if bundle else 2)
+    if bundle: assert args[4][2][1]=='s3://b/variant.pt'
     assert statements[0][1][1]=='experiment-data'
+
+
+def test_bundle_estimate_counts_shared_images_once(experiment,monkeypatch):
+    monkeypatch.setattr(cv,'_plan',lambda *a:([('images/train/a.jpg','s3://b/a',{})],{0:'helmet'},'run-75'))
+    monkeypatch.setattr(ee.storage,'s3',SimpleNamespace(head_object=lambda **k:{'ContentLength':100,'ETag':'x'}))
+    result=ee.estimate('experiment','exp',include_model=True,model_package_arns=['baseline','variant','baseline'])
+    assert result['files']==3
+    assert result['source_bytes']==300
+    assert result['model_bytes']==200
+
+
+def test_bundle_rejects_foreign_model(experiment):
+    with pytest.raises(ValueError,match='Select the baseline'):
+        ex.bundle('exp',['baseline','unrelated'])

@@ -123,8 +123,8 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
           const estimate = await estimateTrack2CatalogExport("experiment", experimentId, {...destination,
             format: destination.destination === "local" ? "zip" : destination.format,
             include_images: images, include_model: model, include_metadata: metadata,
-            metadata_groups: groups, model_package_arn: row.model_package_arn});
-          targets.push({row,run,estimate}); continue;
+            metadata_groups: groups, model_package_arns: arns});
+          targets.push({row,run,estimate}); break;
         }
 
         if (!run) {
@@ -167,7 +167,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
           continue;
         }
         const started = await startTrack2CatalogExport(experimentId ? "experiment" : "run", experimentId || target.run!.run_id,
-          { ...options, model_package_arn: target.row.model_package_arn });
+          { ...options, model_package_arn: target.row.model_package_arn, ...(experimentId ? {model_package_arns: chosen} : {}) });
         let finished = false;
         while (!finished && !cancel.current) {
           const result = await getTrack2CatalogExports(experimentId ? undefined : { kind: "run", id: target.run!.run_id });
@@ -254,7 +254,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
         <label><input type="checkbox" checked={images} onChange={e => setImages(e.target.checked)} /> Actual images and labels</label>
         <label><input type="checkbox" checked={metadata} onChange={e => setMetadata(e.target.checked)} /> Metadata</label>
       </div>
-      <p className="text-xs text-ink-muted">Each model gets its own package with data.yaml and a file manifest. Unselected dataset files are referenced only. Metadata is also embedded in the .pt when both are selected.</p>
+      <p className="text-xs text-ink-muted">{experimentId ? "Selected models share one package and one copy of the experiment images and labels, with separate checkpoints and metadata." : "Each model gets its own package with data.yaml and a file manifest."} Unselected dataset files are referenced only. Metadata is also embedded in the .pt when both are selected.</p>
       {metadata && <details><summary className="cursor-pointer text-xs">Metadata categories ({groups.length})</summary><div className="grid gap-1 text-xs md:grid-cols-2">{Object.keys(METADATA_CATEGORIES).map(g => <label key={g}><input type="checkbox" checked={groups.includes(g)} onChange={e => setGroups(old => e.target.checked ? [...old, g] : old.filter(x => x !== g))} /> {g}</label>)}</div></details>}
       <div className="space-y-3 rounded border border-hairline p-3 text-xs">
         <label>Export destination <select className="rounded border p-1" aria-label="Package destination" value={destination.destination} onChange={e => setDestination({ ...destination, destination: e.target.value as "local" | "s3" })}><option value="local">Download ZIP to this computer</option><option value="s3">S3 bucket and folder</option></select></label>
@@ -267,7 +267,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
           {folderError && <p role="status">{folderError}</p>}
           <label>Export as <select className="rounded border p-1" aria-label="Package format" value={destination.format} onChange={e => setDestination({ ...destination, format: e.target.value as "zip" | "folder" })}><option value="zip">ZIP file</option><option value="folder">Files directly into a folder</option></select></label>
           <p className="break-all">Destination: s3://{destination.bucket || "[choose bucket]"}/{destination.prefix.replace(/\/+$/, "")}{destination.prefix ? "/" : ""}</p>
-          <p>Each model gets its own uniquely named {destination.format === "zip" ? "ZIP file" : "subfolder"} inside this folder.</p>
+          <p>{experimentId ? "Selected models share one uniquely named" : "Each model gets its own uniquely named"} {destination.format === "zip" ? "ZIP file" : "subfolder"} inside this folder.</p>
         </> : <p>Your browser controls the download location. Choose S3 bucket and folder to export ZIP files or unpacked files into a specific folder.</p>}
       </div>
       <button className={button} disabled={invalid || !ranked.some(r => chosen.includes(r.model_package_arn))} onClick={() => void review(chosen)}>{busy ? "Checking availability..." : "Review selected packages"}</button>
@@ -277,10 +277,10 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
     {preview.length > 0 && <div className="space-y-2 rounded border border-hairline p-3 text-xs">
       <p className="font-medium">Ready to export these exact versions:</p>
       <table className="w-full text-left" aria-label="Package storage estimate"><thead><tr><th>Model / run</th><th>Files</th><th>Estimated package size</th><th>Suggested space</th></tr></thead>
-        <tbody>{preview.map(t => <tr key={t.row.model_package_arn} className="border-t border-hairline"><td>{modelLabel(t.row)} / {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint"}</td><td>{t.estimate?.files ?? "Unknown"}</td><td>{t.estimate?.estimated_bytes != null ? bytes(t.estimate.estimated_bytes) : `Unknown${t.estimate ? ` (${t.estimate.unknown_files} file sizes unavailable; ${bytes(t.estimate.source_bytes)} known)` : ""}`}</td><td>{t.estimate?.recommended_bytes != null ? bytes(t.estimate.recommended_bytes) : "Unknown"}</td></tr>)}</tbody>
+        <tbody>{preview.map(t => <tr key={t.row.model_package_arn} className="border-t border-hairline"><td>{experimentId ? `${chosen.length} models / shared experiment dataset` : modelLabel(t.row)} / {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint"}</td><td>{t.estimate?.files ?? "Unknown"}</td><td>{t.estimate?.estimated_bytes != null ? bytes(t.estimate.estimated_bytes) : `Unknown${t.estimate ? ` (${t.estimate.unknown_files} file sizes unavailable; ${bytes(t.estimate.source_bytes)} known)` : ""}`}</td><td>{t.estimate?.recommended_bytes != null ? bytes(t.estimate.recommended_bytes) : "Unknown"}</td></tr>)}</tbody>
       </table>
       <p className="font-medium">Total suggested space: {sizeComplete ? bytes(totalSpace) : "Unknown — one or more packages could not be fully measured"}</p>
-      <p>Includes estimated generated files and 10% headroom. ZIP exports are not compressed. Each model has its own package, so shared data is counted for each package. This estimates required storage; it does not check free space.</p>
+      <p>{experimentId ? `${chosen.length} selected models in one shared-data package. ` : ""}Includes estimated generated files and 10% headroom. ZIP exports are not compressed. {experimentId ? "Shared experiment data is counted once for all selected models." : "Each model has its own package, so data is counted for each package."} This estimates required storage; it does not check free space.</p>
       {preview.map(t => <p className="break-all" key={t.row.model_package_arn}>{modelLabel(t.row)} · {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint only"} · {t.row.model_package_arn}</p>)}
       <p>{model ? ".pt; " : ""}{images ? "images and labels; " : "dataset references only; "}{metadata ? `${groups.length} metadata categories; ` : ""}{destination.destination === "local" ? "downloadable ZIP" : `s3://${destination.bucket}/${destination.prefix}`}</p>
       <button className={button} disabled={running} onClick={() => void exportPackages()}>Export {preview.length} package(s)</button>

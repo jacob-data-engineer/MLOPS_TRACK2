@@ -9,7 +9,7 @@ from .. import storage
 
 def estimate(kind, ident, *, destination="local", bucket="", prefix="", format=None,
              include_images=True, include_model=False, include_metadata=False,
-             metadata_groups=None, model_package_arn=""):
+             metadata_groups=None, model_package_arn="", model_package_arns=None):
     if kind not in ("run", "version", "experiment"):
         raise ValueError("Export a run or a dataset version.")
     format = format or ("zip" if destination == "local" else "folder")
@@ -19,7 +19,7 @@ def estimate(kind, ident, *, destination="local", bucket="", prefix="", format=N
     record = {}
     if kind == 'experiment':
         from . import experiment_export
-        experiment = experiment_export.context(ident, model_package_arn)
+        experiment = experiment_export.bundle(ident, model_package_arns) if model_package_arns else experiment_export.context(ident, model_package_arn)
         record = {'weights_uri': experiment['weights_uri']}
         label = experiment['label']
     if kind == "run":
@@ -31,10 +31,12 @@ def estimate(kind, ident, *, destination="local", bucket="", prefix="", format=N
             record = json.loads(record)
     wanted = list(entries) if include_images else []
     if include_model:
-        uri = record.get("weights_uri", "")
-        if not uri.startswith("s3://") or not uri.lower().endswith(".pt"):
-            raise ValueError("No .pt checkpoint has been published for this run.")
-        wanted.append((f"models/{label}.pt", uri, {"role": "model"}))
+        checkpoints = experiment.get('members', [experiment]) if kind == 'experiment' else [{'label': label, 'weights_uri': record.get('weights_uri', '')}]
+        for checkpoint in checkpoints:
+            uri = checkpoint['weights_uri']
+            if not uri.startswith('s3://') or not uri.lower().endswith('.pt'):
+                raise ValueError('No .pt checkpoint has been published for this run.')
+            wanted.append((f"models/{checkpoint['label']}.pt", uri, {'role': 'model'}))
     wanted = [e for e in wanted if e[0]]
 
     def head(uri):
@@ -70,16 +72,19 @@ def estimate(kind, ident, *, destination="local", bucket="", prefix="", format=N
     generated = manifest + len(json.dumps(names, default=str).encode()) + 8192
     generated += len(catalog_metadata.dumps(catalog_metadata.clean(record.get("reproducibility") or {})).encode())
     if include_metadata:
-        metadata = experiment_export.metadata(ident, model_package_arn) if kind == 'experiment' else catalog_metadata.describe(kind, ident)
+        metadata = (experiment_export.bundle_metadata(ident, model_package_arns) if model_package_arns else experiment_export.metadata(ident, model_package_arn)) if kind == 'experiment' else catalog_metadata.describe(kind, ident)
         if metadata_groups is not None:
+            models = metadata.get('models')
             metadata = catalog_metadata.select_groups(metadata, metadata_groups)
+            if models:
+                metadata['models'] = {key: catalog_metadata.select_groups(value, metadata_groups) for key, value in models.items()}
         metadata_bytes = len(catalog_metadata.dumps(metadata).encode()) + 8192
         generated += metadata_bytes
         for group in ("Evaluation", "Training history"):
             if group in metadata.get("groups", {}):
                 generated += len(catalog_metadata.dumps(metadata["groups"][group]).encode())
         if include_model:
-            generated += metadata_bytes + (manifest if "File provenance" in metadata.get("groups", {}) else 0)
+            generated += metadata_bytes * max(1, len(model_package_arns or [])) + (manifest if "File provenance" in metadata.get("groups", {}) else 0)
     if format == "zip":
         generated += sum(256 + 2 * len(path.encode()) for path, _, _ in wanted) + 4096
     estimated = known + generated
