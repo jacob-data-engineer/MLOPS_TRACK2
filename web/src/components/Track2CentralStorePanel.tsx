@@ -133,6 +133,7 @@ export function Track2CentralStorePanel() {
               onChange={setFolder}
               bucket={bucket}
               allowCreate
+              showSelectedDelete
             />
           ) : (
             <p className="mt-6 text-xs text-ink-muted">Pick a bucket to choose a folder in it.</p>
