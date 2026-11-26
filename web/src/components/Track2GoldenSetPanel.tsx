@@ -14,7 +14,6 @@ import {
   type Track2Bucket,
 } from "../lib/api";
 import { Card } from "./Card";
-import { Track2DatasetClassesSummary } from "./Track2DatasetClassesSummary";
 // Both, deliberately. The SOURCE pair is the Assemble card's shape --
 // collapsed fields with one browser opened under whichever was clicked.
 // The TARGET folder keeps the always-open field: it is one folder, not a
@@ -430,8 +429,6 @@ export function Track2GoldenSetPanel() {
               ) : null}
             </div>
           </div>
-
-          <Track2DatasetClassesSummary />
 
           {/* --------------------------------------------- the split ---- */}
           <div className="rounded-md border border-hairline p-3">

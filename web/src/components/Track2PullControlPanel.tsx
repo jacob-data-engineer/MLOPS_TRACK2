@@ -1,4 +1,3 @@
-import { Track2DatasetClassesSummary } from "./Track2DatasetClassesSummary";
 import {usePageSave} from "../lib/pageSave";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCardOpen } from "../lib/cardState";
@@ -1586,7 +1585,6 @@ export function Track2PullControlPanel({
           {/* ------------------------------------ 7. what fires a pull */}
           <div className="rounded-md border border-hairline p-3">
             <p className="mb-1 text-xs font-medium text-ink">Pull</p>
-            <div className="mb-3"><Track2DatasetClassesSummary /></div>
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <button type="button"
                 disabled={!!busy || !anyPicked || unpaired || run?.status === "running"}
