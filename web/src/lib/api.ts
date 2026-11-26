@@ -4462,3 +4462,11 @@ export type TrainingControl = {halted:boolean;message?:string;problems?:string[]
 export function getTrainingControl():Promise<TrainingControl>{return apiGet('/track2/models/train/control');}
 export function stopAllTraining():Promise<TrainingControl>{return apiPost('/track2/models/train/stop-all',{});}
 export function enableTrainingAutomation():Promise<TrainingControl>{return apiPost('/track2/models/train/enable-automation',{});}
+
+export interface Track2LabelClasses {
+  counts: Record<string, number>;
+  total: number; scanned: number; unreadable: number; invalid_lines: number; complete: boolean;
+}
+export function inspectTrack2LabelClasses(bucket: string, prefix: string): Promise<Track2LabelClasses> {
+  return apiPost("/track2/pull-control/label-classes", { bucket, prefix });
+}

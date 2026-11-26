@@ -1194,3 +1194,17 @@ def combine_central_store_status(session=Depends(require_session)) -> dict:
     """What the last combine did, and whether one is running."""
     from ..chain import retrain_schedule as rs
     return rs.combine_job()
+
+class LabelClassesRequest(BaseModel):
+    bucket: str
+    prefix: str
+
+
+@router.post("/label-classes")
+def label_classes(payload: LabelClassesRequest, session=Depends(require_session)) -> dict:
+    """Read class IDs from up to 200 label files; report scan coverage explicitly."""
+    from ..data.label_class_inspection import inspect_labels
+    try:
+        return inspect_labels(payload.bucket, payload.prefix)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not inspect labels: {exc}")
