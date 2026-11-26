@@ -3787,6 +3787,7 @@ export interface Track2SplitResult extends Track2SplitPlan {
 }
 
 export interface Track2SplitRequest {
+  use_central_store?: boolean;
   source: string;
   /** Where the LABELS are, when they do not live under `source`.
    *

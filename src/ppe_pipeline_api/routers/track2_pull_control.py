@@ -1076,6 +1076,7 @@ def schedule(session=Depends(require_session)) -> dict:
 # ---------------------------------------------------------------------------
 
 class SplitRequest(BaseModel):
+    use_central_store: bool = False
     source: str = ""
     #: Where the LABELS are, when they do not live under `source`.
     #:
@@ -1093,10 +1094,23 @@ class SplitRequest(BaseModel):
     labels_subpath: str = "labels"
 
 
+def _central_split_target(payload):
+    if not payload.use_central_store:
+        return
+    store = pc.read_config().get("central_store") or {}
+    folder = str(store.get("folder") or "").strip().strip("/")
+    bucket = str(store.get("bucket") or "").strip()
+    if not bucket or not folder:
+        raise ValueError("Choose and save the Central data store first.")
+    payload.target_bucket = bucket
+    payload.target_folder = folder + "/golden"
+
+
 @router.post("/split/preview")
 def split_preview(payload: SplitRequest, session=Depends(require_session)) -> dict:
     """What the split would produce. Copies nothing."""
     try:
+        _central_split_target(payload)
         return gs.plan(
             source=payload.source, labels_source=payload.labels_source,
             bucket=payload.bucket,
@@ -1114,13 +1128,20 @@ def split_preview(payload: SplitRequest, session=Depends(require_session)) -> di
 def split_build(payload: SplitRequest, session=Depends(require_session)) -> dict:
     """Copies the split into the target folder."""
     try:
-        return gs.build(
+        _central_split_target(payload)
+        result = gs.build(
             source=payload.source, labels_source=payload.labels_source,
             bucket=payload.bucket,
             target_folder=payload.target_folder, target_bucket=payload.target_bucket,
             split=payload.split, train_percent=payload.train_percent,
             images_subpath=payload.images_subpath, labels_subpath=payload.labels_subpath,
         )
+        if payload.use_central_store and not result.get("errors"):
+            pc.write_config({"golden_set": {**(pc.read_config().get("golden_set") or {}),
+                "target_bucket": payload.target_bucket, "target_folder": payload.target_folder,
+                "source": payload.source, "labels_source": payload.labels_source,
+                "bucket": payload.bucket, "split": payload.split, "train_percent": payload.train_percent}})
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

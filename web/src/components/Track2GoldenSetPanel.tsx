@@ -1,5 +1,5 @@
 import {usePageSave} from "../lib/pageSave";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useCardOpen } from "../lib/cardState";
 import { announceGolden, onGoldenChanged } from "../lib/useGoldenSync";
 import {
@@ -23,12 +23,10 @@ import { Card } from "./Card";
 // The TARGET folder keeps the always-open field: it is one folder, not a
 // pair, and it is the one picker here that may create a folder that does
 // not exist yet.
-import { S3FolderField } from "./S3FolderField";
 import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
 
 /** Buckets the stack grants writes to. Mirrors `dataset_write_buckets` in
  * terraform/app; a bucket in neither simply cannot be chosen. */
-const WRITABLE = ["track2-s3", "safety-model-dataset-dev", "safety-model-dataset"];
 
 /**
  * Split a folder you curated into train and val.
@@ -70,8 +68,8 @@ export function Track2GoldenSetPanel() {
     ReturnType<typeof checkTrack2Pairing>> | null>(null);
   const [pairingBusy, setPairingBusy] = useState(false);
 
-  const [targetBucket, setTargetBucket] = useState("track2-s3");
-  const [targetFolder, setTargetFolder] = useState("golden_set");
+  const [targetBucket, setTargetBucket] = useState("");
+  const [targetFolder, setTargetFolder] = useState("");
   const [split, setSplit] = useState(true);
   const [trainPercent, setTrainPercent] = useState(80);
 
@@ -122,8 +120,9 @@ export function Track2GoldenSetPanel() {
         if (g.bucket) setBucket(g.bucket);
         if (g.source) setSource(g.source);
         if (g.labels_source) setLabelsSource(g.labels_source);
-        if (g.target_bucket) setTargetBucket(g.target_bucket);
-        if (g.target_folder) setTargetFolder(g.target_folder);
+        const store = s.config.central_store;
+        setTargetBucket(store?.bucket || "");
+        setTargetFolder(store?.folder ? `${store.folder.replace(/\/+$/, "")}/golden` : "");
         if (typeof g.split === "boolean") setSplit(g.split);
         if (typeof g.train_percent === "number") setTrainPercent(g.train_percent);
       })
@@ -164,11 +163,12 @@ export function Track2GoldenSetPanel() {
   // Debounced: dragging the split slider is one decision, not forty.
   usePageSave("Track2GoldenSetPanel", async () => {
     if (!loaded) throw new Error("Settings are still loading.");
+      const destination = await request();
       await saveTrack2PullConfig({
         golden_set: {
           bucket, source, labels_source: labelsSource,
-          target_bucket: targetBucket,
-          target_folder: targetFolder, split, train_percent: trainPercent,
+          target_bucket: destination.target_bucket,
+          target_folder: destination.target_folder, split, train_percent: trainPercent,
         },
       });
 
@@ -208,12 +208,16 @@ export function Track2GoldenSetPanel() {
     getTrack2Buckets().then((r) => setBuckets(r.buckets)).catch(() => undefined);
   }, [open]);
 
-  const request = useCallback(() => ({
-    source, labels_source: labelsSource,
-    bucket, target_bucket: targetBucket, target_folder: targetFolder,
-    split, train_percent: trainPercent,
-  }), [source, labelsSource, bucket, targetBucket, targetFolder, split,
-       trainPercent]);
+  async function request() {
+    const status = await getTrack2PullControl();
+    const store = status.config.central_store;
+    const folder = store?.folder?.trim().replace(/^\/+|\/+$/g, "");
+    if (!store?.bucket || !folder) throw new Error("Choose and save the Central data store before building the Golden Set split.");
+    const target = `${folder}/golden`;
+    setTargetBucket(store.bucket); setTargetFolder(target);
+    return {use_central_store: true, source, labels_source: labelsSource, bucket, target_bucket: store.bucket,
+      target_folder: target, split, train_percent: trainPercent};
+  }
 
   async function withBusy(label: string, work: () => Promise<void>) {
     setBusy(label);
@@ -484,31 +488,14 @@ export function Track2GoldenSetPanel() {
             )}
           </div>
 
-          {/* -------------------------------------------- the target ---- */}
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-xs text-ink-muted">Target bucket</span>
-              <select className="w-full rounded-md border border-black/15 bg-page px-3 py-2 text-xs"
-                      value={targetBucket} onChange={(e) => setTargetBucket(e.target.value)}>
-                {WRITABLE.map((name) => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-            </label>
-            <S3FolderField
-              label="Target folder"
-              hint="(where the split is written, e.g. golden_set)"
-              value={targetFolder}
-              onChange={setTargetFolder}
-              bucket={targetBucket}
-              allowCreate
-            />
-          </div>
+          <p className="break-all text-xs text-ink-secondary">
+            Central store destination: {targetBucket && targetFolder ? `s3://${targetBucket}/${targetFolder}/` : "Choose and save the Central data store first."}
+          </p>
 
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" disabled={!!busy || !source}
               onClick={() => withBusy("Looking...", async () => {
-                const got = await previewTrack2Split(request());
+                const got = await previewTrack2Split(await request());
                 setPlan(got);
                 setNote(`${got.pairs.toLocaleString()} pair(s) found.`);
               })}
@@ -517,7 +504,7 @@ export function Track2GoldenSetPanel() {
             </button>
             <button type="button" disabled={!!busy || !plan?.ready}
               onClick={() => withBusy("Copying...", async () => {
-                const got = await buildTrack2Split(request());
+                const got = await buildTrack2Split(await request());
                 setPlan(got);
                 setNote(`Copied ${got.copied.toLocaleString()} files to ${got.uri}`
                   + `${got.errors.length ? ` -- ${got.errors.length} failed` : ""}.`);
@@ -533,7 +520,7 @@ export function Track2GoldenSetPanel() {
                 {plan.membership_locked
                   ? `Existing split preserved. ${plan.new_training_pairs ?? 0} new pairs will join training.`
                   : "First build freezes validation membership. Future additions go to training, so the original percentage may change."}
-                {" "}Changing sources or split settings requires a new target folder.
+                {" "}Changing sources or split settings requires a new Central data store location.
               </p>
               {plan.benchmark_id && <p className="mb-2 break-all text-xs text-ink-muted">Benchmark: {plan.benchmark_id}</p>}
               {plan.problems.map((problem) => (

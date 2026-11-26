@@ -167,7 +167,7 @@ def _copy(pairs: list, dest_bucket: str, *, skip_existing: set, stop=None,
     the copies not yet started are skipped and `Stopped` is raised.
 
     `progress(phase, done, total)`, when given, hears after every copy."""
-    todo = [p for p in pairs if p[2] not in skip_existing]
+    todo = [p for p in pairs if p[2] not in skip_existing and not (p[0] == dest_bucket and p[1] == p[2])]
     skipped = object()
     count = {"done": 0}
     count_lock = threading.Lock()
