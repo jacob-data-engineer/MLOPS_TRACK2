@@ -498,3 +498,36 @@ def test_list_summaries_omits_manifests_but_preserves_full_records(store, monkey
     assert result[0]['variants'][0]['training_job_number']==77
     assert e.read(p['id'])['dataset']['file_provenance']==['large manifest']
     assert 'dataset' in e.public(e.read(p['id']))
+
+def test_empty_queue_during_handoff_does_not_fail_or_submit_again(store,monkeypatch):
+    j=job(store);j['baseline']={'uri':'pinned'}
+    j['variants'][0].update(state='Queued',run_id='run-a',entry_id='a')
+    monkeypatch.setattr(e.t2,'queue_snapshot',lambda:{'pending':[],'running':None})
+    monkeypatch.setattr(e,'prepare_variant',lambda *a:pytest.fail('Advanced past unresolved submission'))
+    e.advance(j)
+    saved=e.read(j['id'])['variants'][0]
+    assert saved['state']=='Queued'
+    assert saved['training_status']=='Waiting for training record'
+
+
+def test_legacy_false_failure_reconciles_success_without_retraining(store,monkeypatch):
+    j=job(store);j['baseline']={'uri':'pinned'}
+    j['variants'][0].update(state='Failed',run_id='run-a',entry_id='a',error=e.MISSING_QUEUE_ERROR)
+    j['variants'][1].update(state='Queued',run_id='run-b',entry_id='b')
+    store[1].put_item(Item={'id':'run-a','status':'Succeeded','model':{'model_package_arn':ARN}})
+    store[1].put_item(Item={'id':'run-b','status':'Executing'})
+    monkeypatch.setattr(e.t2,'queue_snapshot',lambda:{})
+    monkeypatch.setattr(e,'prepare_variant',lambda *a:pytest.fail('Duplicate submission'))
+    e.advance(j)
+    saved=e.read(j['id'])['variants'][0]
+    assert saved['state']=='Succeeded' and saved['error']==''
+    assert saved['model_package_arn']==ARN
+
+
+def test_reconciliation_preserves_real_failures_and_missing_evidence(store):
+    j=job(store)
+    j['variants'][0].update(state='Failed',run_id='run-a',error='CUDA out of memory')
+    j['variants'][1].update(state='Failed',run_id='run-b',error=e.MISSING_QUEUE_ERROR)
+    store[1].put_item(Item={'id':'run-a','status':'Succeeded','model':{'model_package_arn':ARN}})
+    assert not e.reconcile_queue_failure(j)
+    assert all(v['state']=='Failed' for v in j['variants'])

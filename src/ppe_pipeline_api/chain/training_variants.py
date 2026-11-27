@@ -289,7 +289,33 @@ def compare(job, successful):
         job['state']='Comparing'
     save(job)
 
+MISSING_QUEUE_ERROR = 'Queue entry was removed before training started. Retry this variant to submit a new attempt.'
+
+
+def reconcile_queue_failure(job):
+    """Recover only the legacy queue-absence error using durable audit evidence."""
+    changed = False
+    for variant in job['variants']:
+        if variant.get('state') != 'Failed' or variant.get('error') != MISSING_QUEUE_ERROR:
+            continue
+        audit = t2.training_audit_table().get_item(Key={'id': variant['run_id']}).get('Item')
+        if not audit:
+            continue
+        status = audit.get('status', 'Queued')
+        arn = (audit.get('model') or {}).get('model_package_arn', '')
+        if status == 'Succeeded' and not arn:
+            continue
+        variant.update(state=status if status in t2.TERMINAL_EXECUTION_STATUSES else 'Queued',
+                       error=audit.get('failure_reason') or '', training_status=status,
+                       model_package_arn=arn)
+        changed = True
+    if changed:
+        save(job)
+    return changed
+
+
 def advance(job):
+    reconcile_queue_failure(job)
     if not job.get('baseline'):
         job['baseline']=pin(job['baseline_arn'],'baseline','Baseline: '+job['baseline_arn'].split('/')[-2]+'/'+job['baseline_arn'].split('/')[-1])
         save(job)
@@ -312,7 +338,9 @@ def advance(job):
                 if progress.get('entry_id')==variant['entry_id'] and progress.get('resource_wait'):
                     variant['training_status']='Waiting for resources'
                 if not audit and not any(e['id']==variant['entry_id'] for e in snapshot.get('pending',[])) and not snapshot.get('running'):
-                    variant.update(state='Failed',error='Queue entry was removed before training started. Retry this variant to submit a new attempt.')
+                    # Queue snapshots are process-local and can be empty during handoff.
+                    # Absence is not proof of cancellation or failed AWS submission.
+                    variant['training_status']='Waiting for training record'
                 job['stage']=f"{variant['name']}: {variant.get('training_status','Queued')}";save(job);return
     successful=[v for v in job['variants'] if v['state']=='Succeeded']
     if successful:
