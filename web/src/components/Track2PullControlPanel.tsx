@@ -1137,13 +1137,13 @@ export function Track2PullControlPanel({
               same date against upload time and against capture time can
               put the same file in different weeks. */}
           <div className="rounded-md border border-hairline p-3">
-            <p className="mb-1.5 text-xs font-medium text-ink">Date each file by</p>
+            <p className="mb-1.5 text-xs font-medium text-ink">Group files into weeks using</p>
             <div className="flex flex-col gap-1.5">
               {([
-                ["file_time", "When it was uploaded to S3",
-                 "Uses the S3 upload or last-modified time to assign each file to a week."],
-                ["scan", "All of it into the current week",
-                 "One week for the whole sweep, whatever the files' dates. For a source that carries no dates at all."],
+                ["file_time", "Original capture date (recommended)",
+                 "Uses the capture date saved from Track 1. If unavailable, uses the S3 upload or last-modified date."],
+                ["scan", "Current week for all files",
+                 "Places every file pulled in this batch into the current week, regardless of capture date."],
               ] as const).map(([value, label, why]) => (
                 <label key={value} className="flex items-start gap-2 text-xs text-ink-secondary">
                   <input type="radio" name="week-by" className="mt-0.5"
@@ -1161,10 +1161,7 @@ export function Track2PullControlPanel({
 
           <label className="block">
             <span className="mb-1 block text-xs text-ink-muted">
-              Cut-off date{" "}
-              <span className="text-ink-muted/70">
-                {weekBy === "file_time" ? "(compared with the S3 upload time)" : "(start of the week schedule)"}
-              </span>
+              Week 1 ends on
             </span>
             <input
               type="date"
@@ -1177,15 +1174,13 @@ export function Track2PullControlPanel({
                 warn about any more. */}
             {!anchorToIso(anchorText) ? (
               <p className="mt-1 text-xs text-ink-muted">
-                Without one there is only {firstWeek} -- nothing has said when the
-                baseline stops, so nothing can be after it.
+                Choose a date to define the weekly schedule. Without one, all files go into {firstWeek}.
               </p>
             ) : (
               <p className="mt-1 text-xs text-ink-muted">
-                Everything captured <span className="font-medium">on or before{" "}
-                {readableDate(anchorText)}</span> goes into {firstWeek}, however old.{" "}
-                {weekPrefix}2 starts the next day and runs{" "}
-                {weekDays} day{weekDays === 1 ? "" : "s"}, and so on.
+                Files dated <span className="font-medium">on or before{" "}
+                {readableDate(anchorText)}</span> go into {firstWeek}. Later files are grouped into{" "}
+                {weekDays}-day weeks.
               </p>
             )}
           </label>
