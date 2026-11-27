@@ -25,6 +25,8 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
   const [audits, setAudits] = useState<Track2TrainingAudit[] | null>(null);
   const [runs,setRuns]=useState<VariantRunRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [limit,setLimit]=useState(3);
+  const [loading,setLoading]=useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const [historyHeight, setHistoryHeight] = useState<number>();
 
@@ -45,15 +47,17 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
   }, [audits]);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const [res,experiments] = await Promise.all([getTrack2TrainingAudit(200),listVariantRuns()]);
+      const experimentsRequest=listVariantRuns();
+      const [res,experiments] = await Promise.all([getTrack2TrainingAudit(limit,experimentsRequest),experimentsRequest]);
       setRuns(experiments.runs);
       setAudits(res.audits);
       setError(null);
     } catch {
       setError("Could not load the training history.");
-    }
-  }, []);
+    } finally {setLoading(false);}
+  }, [limit]);
 
   useEffect(() => {
     load();
@@ -63,7 +67,7 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
 
   return (
     <div className="mt-4">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">History</p>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">History</p><p className="mb-2 text-xs text-ink-muted">The latest 3 training records load first. Load 5 more to see older records. Records from the same experiment are grouped together.</p>
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
       {audits === null ? (
         <p className="text-sm text-ink-muted">Loading...</p>
@@ -76,6 +80,7 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
             <AuditRow key={group.id} audit={group.audits[0]} onDeleted={load}/>)}
         </div>
       )}
+      {audits!==null&&<div className="mt-3 flex items-center gap-3 text-xs"><span>{audits.length} training records loaded{limit>=200?' (200-record limit)':''}.</span>{audits.length>=limit&&limit<200&&<button type="button" className="rounded border border-hairline px-3 py-1" disabled={loading} onClick={()=>setLimit(current=>Math.min(200,current+5))}>{loading?'Loading...':'Load 5 more'}</button>}{error&&<button type="button" disabled={loading} onClick={()=>void load()}>Retry</button>}</div>}
     </div>
   );
 }

@@ -610,8 +610,8 @@ export interface Track2TrainingAudit {
   execution_arn: string;
 }
 
-export async function getTrack2TrainingAudit(limit = 50): Promise<{ audits: Track2TrainingAudit[] }> {
-  const [result,experiments]=await Promise.all([apiGet<{audits:Track2TrainingAudit[]}>(`/track2/models/audit?limit=${limit}`),listVariantRuns()]);
+export async function getTrack2TrainingAudit(limit = 50, experimentsRequest = listVariantRuns()): Promise<{ audits: Track2TrainingAudit[] }> {
+  const [result,experiments]=await Promise.all([apiGet<{audits:Track2TrainingAudit[]}>(`/track2/models/audit?limit=${limit}`),experimentsRequest]);
   const identities=experimentIdentity(experiments.runs);
   return {audits:result.audits.map(a=>displayRun(a,a.id,identities))};
 }
