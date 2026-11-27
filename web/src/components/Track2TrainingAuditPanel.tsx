@@ -151,8 +151,8 @@ export function AuditRow({ audit }: { audit: Track2TrainingAudit; onDeleted?: ()
           <Badge tone={statusTone(audit.status)} label={audit.status} />
           <span className="text-xs text-ink-muted">{audit.comparison_status || 'No comparisons'}</span>
           <span className="tabular shrink-0 text-sm font-semibold text-ink"
-                title={audit.run_number == null ? "A run number appears after the catalog syncs." : "Same run number as Data Catalog"}>
-            {audit.run_number == null ? "Run number pending" : `Run ${audit.run_number}`}
+                title={audit.run_number == null ? "A run number appears after the catalog syncs." : "Experiment run number"}>
+            {audit.run_number == null ? "Run number pending" : `Run ${audit.run_number}`}{audit.variant_name ? ` / ${audit.variant_name}` : ""}
           </span>
           {/* The MODEL NAME, not the generation/size pair.
               For a custom-class run `generation` is the literal string

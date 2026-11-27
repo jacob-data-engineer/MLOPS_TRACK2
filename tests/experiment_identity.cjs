@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('../web/node_modules/typescript');
+const scope={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('web/src/lib/experimentIdentity.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,scope);
+const {experimentIdentity,displayRun}=scope.exports;
+const identities=experimentIdentity([{id:'exp',run_number:77,variants:[{run_id:'job1',name:'Epoch1'},{run_id:'job2',name:'Epoch50'}]}]);
+const a={run_id:'job1',run_number:81,model_package_arn:'model/5'};
+const b={run_id:'job2',run_number:82,model_package_arn:'model/6'};
+const x=displayRun(a,a.run_id,identities),y=displayRun(b,b.run_id,identities);
+assert.equal(x.run_number,77);assert.equal(y.run_number,77);assert.equal(x.variant_name,'Epoch1');assert.equal(y.variant_name,'Epoch50');
+assert.equal(x.run_id,'job1');assert.equal(x.model_package_arn,'model/5');assert.equal(y.run_id,'job2');assert.equal(y.model_package_arn,'model/6');assert.equal(a.run_number,81);
+assert.equal(displayRun(a,'legacy',identities),a);
+assert.equal(experimentIdentity([{id:'unknown',variants:[{run_id:'job1',name:'x'}]}]).size,0);
+console.log('Unified run labels, variant names, immutable originals, legacy history and stable export identities passed');

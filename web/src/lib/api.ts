@@ -1,3 +1,4 @@
+import {experimentIdentity,displayRun} from "./experimentIdentity";
 import { beginPageRequest } from "./loadingActivity";
 /**
  * Thin fetch wrapper for the ppe_pipeline_api FastAPI backend (see
@@ -540,6 +541,7 @@ export interface Track2TrainingAuditDataset {
 }
 
 export interface Track2TrainingAudit {
+  variant_name?:string; experiment_id?:string;
   comparison_status?: string;
   id: string;
   dataset_version_id?: string;
@@ -608,8 +610,10 @@ export interface Track2TrainingAudit {
   execution_arn: string;
 }
 
-export function getTrack2TrainingAudit(limit = 50): Promise<{ audits: Track2TrainingAudit[] }> {
-  return apiGet(`/track2/models/audit?limit=${limit}`);
+export async function getTrack2TrainingAudit(limit = 50): Promise<{ audits: Track2TrainingAudit[] }> {
+  const [result,experiments]=await Promise.all([apiGet<{audits:Track2TrainingAudit[]}>(`/track2/models/audit?limit=${limit}`),listVariantRuns()]);
+  const identities=experimentIdentity(experiments.runs);
+  return {audits:result.audits.map(a=>displayRun(a,a.id,identities))};
 }
 
 /** Removes the run from the history and deletes the model version it
@@ -4106,6 +4110,7 @@ export interface Track2CatalogExport {
 
 /** The run behind one registered version, from the catalog. */
 export interface Track2RunForModel {
+  variant_name?:string; experiment_id?:string;
   run_number: number;
   run_id: string;
   submitted_at: string | null;
@@ -4119,8 +4124,10 @@ export interface Track2RunForModel {
 
 /** Keyed on model package ARN. A few kilobytes, where the training
  * history carries every run's file lists (~10 MB). */
-export function getTrack2RunsByModel(): Promise<{ runs: Record<string, Track2RunForModel> }> {
-  return apiGet("/track2/catalog/runs-by-model");
+export async function getTrack2RunsByModel(): Promise<{ runs: Record<string, Track2RunForModel> }> {
+  const [result,experiments]=await Promise.all([apiGet<{runs:Record<string,Track2RunForModel>}>("/track2/catalog/runs-by-model"),listVariantRuns()]);
+  const identities=experimentIdentity(experiments.runs);
+  return {runs:Object.fromEntries(Object.entries(result.runs).map(([arn,r])=>[arn,displayRun(r,r.run_id,identities)]))};
 }
 
 /** Catalog search. Applied by the server across the whole table, not to

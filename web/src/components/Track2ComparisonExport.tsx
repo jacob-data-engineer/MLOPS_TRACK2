@@ -17,9 +17,9 @@ type Metric = typeof METRICS[number];
 type Target = { row: Track2MetricsRow; run?: Track2RunForModel; estimate?: PackageSizeEstimate };
 const message = (e: unknown) => e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "Export failed.";
 
-export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSelect = false, onOpenRun, settings, onChange, stateKey="models", experimentId, experimentRunNumber }: {
+export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSelect = false, onOpenRun, settings, onChange, stateKey="models", experimentId, experimentRunNumber, variantLabels={} }: {
   rows: Track2MetricsRow[]; runs: Record<string, Track2RunForModel>; browseAll?: boolean;
-  autoSelect?: boolean; stateKey?: string; experimentId?: string; experimentRunNumber?:number|null;
+  variantLabels?:Record<string,string>; autoSelect?: boolean; stateKey?: string; experimentId?: string; experimentRunNumber?:number|null;
   onOpenRun?: (id:string)=>void;
   settings: Track2ExportSettings; onChange: (value: Track2ExportSettings) => void;
 }) {
@@ -102,7 +102,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
   const typedModels = namedModels.filter(row => !generationFilter || row.generation === generationFilter);
   const sizes = [...new Set(typedModels.map(row => row.size).filter(Boolean))].sort((a, b) => "nslmx".indexOf(a) - "nslmx".indexOf(b));
   const matchingModels = showBy === "model" ? typedModels.filter(row => !sizeFilter || row.size === sizeFilter) : ranked;
-  const visibleRows = matchingModels.filter(row => `${nameOf(row)} ${displayName(nameOf(row))} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+  const visibleRows = matchingModels.filter(row => `${variantLabels[row.model_package_arn]||runs[row.model_package_arn]?.variant_name||""} ${nameOf(row)} ${displayName(nameOf(row))} ${row.group_name} ${modelLabel(row)} ${row.status} ${runs[row.model_package_arn]?.status ?? ""} Run ${runs[row.model_package_arn]?.run_number ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const selectionKey = rows.map(r => r.model_package_arn).join("|");
   useEffect(() => {
     if (autoSelect) setChosen(selectionKey ? selectionKey.split('|') : []);
@@ -223,16 +223,16 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
       <div className="max-h-[calc(22rem+2px)] overflow-auto rounded border border-hairline" tabIndex={0} role="region" aria-label="Models available for manual export">
         <table className="tabular min-w-full whitespace-nowrap text-xs [&_tr]:h-8">
           <thead className="sticky top-0 bg-surface text-left text-ink"><tr>
-            {["Export", "Run", "Submitted", "Status", "Model name", "Model type", "Size", "Model version", "Dataset version", "Images", "Registered as", metric, "Validation images"].map(h =>
+            {["Export", "Run", "Variant / model", "Submitted", "Status", "Model name", "Model type", "Size", "Model version", "Dataset version", "Images", "Registered as", metric, "Validation images"].map(h =>
               <th key={h} className="border-b border-hairline px-2 py-1.5 font-medium">{h}</th>)}
           </tr></thead>
           <tbody>{visibleRows.map(row => {
             const run = runs[row.model_package_arn];
             const selected = chosen.includes(row.model_package_arn);
             return <tr key={row.model_package_arn} className={`border-b border-hairline/50 hover:bg-black/[0.03] [&_td]:px-2 [&_td]:py-1 ${selected ? "bg-accent-subtle" : ""}`}>
-              <td><input aria-label={`Export ${modelLabel(row)}`} type="checkbox" checked={selected} onChange={e => setChosen(old => e.target.checked ? [...old, row.model_package_arn] : old.filter(a => a !== row.model_package_arn))} /></td>
+              <td><input aria-label={`Export ${variantLabels[row.model_package_arn]||run?.variant_name||""} ${modelLabel(row)}`} type="checkbox" checked={selected} onChange={e => setChosen(old => e.target.checked ? [...old, row.model_package_arn] : old.filter(a => a !== row.model_package_arn))} /></td>
               <td className="font-medium text-ink">{experimentId ? `Run ${experimentRunNumber??"pending"}` : run ? onOpenRun ? <button type="button" className="rounded px-1 underline focus-visible:outline focus-visible:outline-2" aria-label={`Open Run ${run.run_number} in Run Central`} onClick={() => onOpenRun(run.run_id)}>Run {run.run_number}</button> : `Run ${run.run_number}` : "No run recorded"}</td>
-              <td>{formatSgt(run?.submitted_at, "--")}</td>
+              <td>{variantLabels[row.model_package_arn]||run?.variant_name||modelLabel(row)}</td><td>{formatSgt(run?.submitted_at, "--")}</td>
               <td>{run?.status || (isSeedVersion(row.description) ? "Seed" : statusLabel(row.status))}</td>
               <td>{run?.detector || row.registry}</td>
               <td>{row.generation ? `YOLO${row.generation}` : "--"}</td>
@@ -281,7 +281,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
       </table>
       <p className="font-medium">Total suggested space: {sizeComplete ? bytes(totalSpace) : "Unknown — one or more packages could not be fully measured"}</p>
       <p>{experimentId ? `${chosen.length} selected models in one shared-data package. ` : ""}Includes estimated generated files and 10% headroom. ZIP exports are not compressed. {experimentId ? "Shared experiment data is counted once for all selected models." : "Each model has its own package, so data is counted for each package."} This estimates required storage; it does not check free space.</p>
-      {preview.map(t => <p className="break-all" key={t.row.model_package_arn}>{modelLabel(t.row)} · {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint only"} · {t.row.model_package_arn}</p>)}
+      {preview.map(t => <p className="break-all" key={t.row.model_package_arn}>{variantLabels[t.row.model_package_arn]||t.run?.variant_name||modelLabel(t.row)} · {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint only"} · {t.row.model_package_arn}</p>)}
       <p>{model ? ".pt; " : ""}{images ? "images and labels; " : "dataset references only; "}{metadata ? `${groups.length} metadata categories; ` : ""}{destination.destination === "local" ? "downloadable ZIP" : `s3://${destination.bucket}/${destination.prefix}`}</p>
       <button className={button} disabled={running} onClick={() => void exportPackages()}>Export {preview.length} package(s)</button>
     </div>}

@@ -106,7 +106,7 @@ export function Track2ModelPicker({
   audits?: Record<string, Track2TrainingAudit>;
   onAuditDeleted?: () => void;
   /** Which training run registered each version, keyed on package ARN. */
-  runs?: Record<string, { run_number: number }>;
+  runs?: Record<string, { run_number: number; variant_name?:string }>;
 }) {
   const [classFilter, setClassFilter] = useState("all");
   const [generationFilter, setGenerationFilter] = useState("all");
@@ -229,7 +229,7 @@ export function Track2ModelPicker({
                           the score, and what it was measured on. */}
                       v{r.version} &middot; {versionLabel(r)} &middot; mAP50 {metric(r, "mAP50")}
                       {n != null ? ` · ${n} val images` : " · not evaluated"}
-                      {runs?.[r.model_package_arn] ? ` · Run ${runs[r.model_package_arn].run_number}` : " · no run recorded"}
+                      {runs?.[r.model_package_arn] ? ` · Run ${runs[r.model_package_arn].run_number}${runs[r.model_package_arn].variant_name ? ` / ${runs[r.model_package_arn].variant_name}` : ""}` : " · no run recorded"}
                       {selected.includes(rowKey(r)) ? " · selected" : ""}
                     </option>
                   );
