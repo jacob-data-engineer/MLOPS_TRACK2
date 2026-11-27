@@ -23,14 +23,6 @@ import { formatSgt } from "../lib/format";
 /** Where each section of this long page starts, for the jump links in the
  * pinned toolbar. `scroll-mt` on each target keeps its heading clear of
  * that toolbar. */
-const JUMPS: { id: string; label: string }[] = [
-  { id: "comparison", label: "Comparison" },
-  { id: "model-export", label: "Model export" },
-];
-
-function jump(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
 
 /** Four, because four is the most the palette can separate. See
  * TRACK2_COMPARE_COLORS: a fifth slot failed the normal-vision floor
@@ -482,13 +474,6 @@ export function Track2MetricsPage() {
           onChange={setExportSettings}
           defaults={EXPORT_DEFAULTS}
         />
-        <nav aria-label="Jump to a section" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-hairline pt-2 text-xs">
-          <span className="text-ink-muted">Jump to</span>
-          {JUMPS.map((j) => (
-            <a key={j.id} href={`#${j.id}`} className="font-medium text-accent underline"
-               onClick={(e) => { e.preventDefault(); jump(j.id); }}>{j.label}</a>
-          ))}
-        </nav>
         </Card>
       </div>
 

@@ -406,7 +406,7 @@ export function Track2SqlPage() {
         Track2 SQL Database Query
       </h1>
 
-      <Card title="Settings and schedule" stateKey="sql settings and schedule" keepMounted>
+      <Card title="Settings and schedule" stateKey="sql settings and schedule" collapsible={false} keepMounted>
       <Track2SqlSettingsBar initialPreset={initialPreset} disabled={!settingsRead || pulling} onLoad={loadPageSettings}
         settings={pageSettings} />
       <Track2SqlSensorPanel schedule={schedule} onChange={setSchedule}
