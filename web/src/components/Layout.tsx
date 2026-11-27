@@ -139,15 +139,10 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
             className={({ isActive }) =>
               `flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors ${
                 isActive ? "bg-accent-subtle font-medium" : "hover:bg-black/[0.04]"
-              } ${
-                // The status colour REPLACES the neutral ink rather than
-                // sitting beside it: two text colours on one element are
-                // settled by the stylesheet's order, not this string's.
-                status ? STATUS_STYLE[status].className : isActive ? "text-ink" : "text-ink-secondary"
-              }`
+              } text-black`
             }
           >
-            <Icon size={16} strokeWidth={2} />
+            <Icon size={16} strokeWidth={2} className={status ? STATUS_STYLE[status].className : undefined} />
             {label}
           </NavLink>
         ))}

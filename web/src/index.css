@@ -1,104 +1,27 @@
 @import "tailwindcss";
 
-/*
- * Design tokens for the PPE Safety Violation Judge frontend.
- *
- * DIRECTION: customs case-file & manifest stamps (own-world pick over the
- * generic clean-SaaS-dashboard default this frontend shipped once already
- * -- see the THESIS/OWN-WORLD/STORY block in App.tsx for the full brief).
- *
- * Committed color strategy, not restrained: manila/kraft/carbon-paper
- * neutrals are the ground for every surface, hairline, and body of text --
- * ONE real saturated hue exists anywhere in this system, alarm-red ink,
- * and it is spent exclusively on stamped verdicts (VerdictStamp.tsx) and
- * on "something needs attention right now" states (form/API errors) that
- * share the same "this needs a human's eyes" register as a stamp. There is
- * no second accent, no green/amber status triad living alongside it -- the
- * old restrained blue-accent + good/warning/critical/serious triad tokens
- * are retired outright, not kept alongside these for compatibility.
- * `--color-accent*` keeps its old name (for the primary-action utility
- * classes already written against it) but is now an ink/umber tone, not
- * blue -- there is no accent color left in this system besides ink and the
- * one stamp red.
- */
+/* Jurong Port inspired white/turquoise layout. Semantic status and verdict
+   colours remain independent of branding. Dark teal keeps white buttons readable. */
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  /* Real, widely-available monospace stack (no webfont needed) for every
-     case ID, coordinate, count, and timestamp -- never reached for as a
-     "technical" costume, only for what is actually data/measurement. */
   --font-mono: ui-monospace, "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
-  /* Header-only display face: a real manual-typewriter face (Special
-     Elite, loaded via index.html), reserved for page titles and top-level
-     section headers (h1/h2 -- see the rule below). This is the case-file
-     world's own material, a typewriter stamping out customs paperwork --
-     not a second brand voice, and never applied to body copy, labels, or
-     .tabular data. Degrades to a real monospace stack with zero network
-     if the webfont request fails or is blocked. */
-  --font-display: "Special Elite", ui-monospace, "Courier New", monospace;
-
-  /* Manila/kraft ground -- warm off-white paper, not cool SaaS gray. */
-  --color-page: #efe7d4;
-  --color-surface: #f8f2e4;
-  --color-ink: #241d16;
-  --color-ink-secondary: #5b5142;
-  /* 5.4:1 on --color-surface, 4.9:1 on --color-page -- clears WCAG AA body
-     text (4.5:1) while staying visibly lighter than --color-ink-secondary. */
-  --color-ink-muted: #736a58;
-  --color-hairline: #cdbfa0;
-  --color-baseline: #b0a07c;
-
-  /* "Primary action ink" -- renamed in spirit from the old blue accent.
-     Same token names (existing utility classes read these), now a deep
-     umber/ink rather than a second hue. */
-  --color-accent: #2e2417;
-  --color-accent-hover: #1a130a;
-  --color-accent-subtle: #e4d6b3;
-
-  /* The one alarm-red ink. Reserved for stamped verdicts (CLEARED / HOLD /
-     ESCALATE -- VerdictStamp.tsx) and for "needs attention" feedback
-     (form/API errors) that shares that same register. Never a tinted
-     status pill, never decorative, never paired with a second accent. */
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-page: #f3f9f8;
+  --color-surface: #ffffff;
+  --color-ink: #111111;
+  --color-ink-secondary: #374545;
+  --color-ink-muted: #526262;
+  --color-hairline: #cddfdd;
+  --color-baseline: #8bafac;
+  --color-accent: #087f7a;
+  --color-accent-hover: #06645f;
+  --color-accent-subtle: #dff5f3;
   --color-critical: #9c1c17;
   --color-critical-subtle: #f1ddd4;
-
-  /* INFORMATIONAL BLUE. For a notice that tells you where something
-     already is, rather than one that blocks you.
-
-     Deliberately added against the One Red Rule above, which said red is
-     the only saturated hue. The rule earns its keep where red means
-     "stop", and it was costing the opposite: a card saying "a Model Name
-     has already been picked" was printed in the same alarm ink as a
-     refusal, so a message whose whole job was to reassure read as a
-     failure. Blue is the answer to "where is it", red stays the answer
-     to "you cannot".
-
-     The same hue the escalate verdict already uses, so this adds a
-     meaning to the palette rather than a colour. */
   --color-info: #1c4f9c;
-
-  /* THE VERDICT INKS. CEO decision, 1 Sep: "Violation is in Red, No Violation
-     is in green and Escalation is in Blue" -- which replaces the One Red Rule
-     and the No Triad Rule for verdicts (see DESIGN.md).
-
-     Three inks of one family, not three arbitrary hues: each is a dark,
-     desaturated pigment chosen to sit on the cream paper at the same weight
-     as the existing alarm red, so the three stamps read as one physical set
-     of dies rather than as a status light. Violation keeps the exact red the
-     system already spends -- the hue nobody had to learn.
-
-     Contrast on --color-page (#efe7d4): red 5.6:1, green 5.1:1, blue 6.4:1,
-     all past 4.5:1 for the stamp's own text. Colour is never the only
-     carrier: every stamp says its verdict in words. */
   --color-verdict-violation: #9c1c17;
   --color-verdict-clear: #1f6b3a;
   --color-verdict-escalate: #1c4f9c;
-
-  /* HOW FINISHED EACH TAB IS, on the sidebar (2026-10-28). Green: in use.
-     Yellow: a prototype, still changing. Red: kept in view, not worked on.
-     The same dark-ink family as the verdicts, so they sit on the paper
-     at one weight; the amber is new, darkened until it clears 4.5:1 on
-     both the page (5.8:1) and the highlighted row (4.9:1). Words carry
-     it too -- "prototype", "(KIV)", and the tooltip -- never colour alone. */
   --color-status-ready: #1f6b3a;
   --color-status-prototype: #7a4f00;
   --color-status-kiv: #9c1c17;
@@ -106,20 +29,8 @@
 
 :root {
   color-scheme: light;
-
-  /* Paper grain -- a self-contained, inline SVG fractal-noise pattern, not
-     a raster asset: a few percent of black speckle tiled over the page,
-     giving the manila/kraft ground real fiber depth instead of a flat
-     fill (the CEO's "only the color scheme changed" note, addressed
-     without a single new network request or image byte). --texture-page
-     is the visible-desk grain; --texture-surface is a finer, roughly
-     half-strength version for cards/sidebar/table rows, matching the
-     existing "surface is one step cleaner than page" rule in DESIGN.md --
-     a case-file sheet reads as slightly less textured than the desk it
-     sits on, never as more. Both tile at 240px so the pattern never
-     visibly seams or drifts under scroll. */
-  --texture-page: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  --texture-surface: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.018 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --texture-page: none;
+  --texture-surface: none;
 }
 
 body {
@@ -170,8 +81,8 @@ body {
 h1,
 h2 {
   font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: 0.02em;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 /* Theme the browser surfaces we didn't otherwise draw, from the same
