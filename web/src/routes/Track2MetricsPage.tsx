@@ -107,7 +107,7 @@ const DEFAULT_METRIC_KEYS = new Set(METRICS.filter((m) => m.on).map((m) => m.key
  * shares one scale, so bar height means the same thing in all of them
  * and across every comparison anybody runs.
  */
-const GRID_LINES = [0, 25, 50, 75, 100];
+
 
 
 /** "Run 58", or a plain statement that none is recorded. */
@@ -119,94 +119,17 @@ function Track2MetricsBarChart({ rows, metrics, runs }: {
   rows: Track2MetricsRow[]; metrics: MetricKey[];
   runs: Record<string, Track2RunForModel>;
 }) {
-  return (
-    <div className="flex flex-col gap-6">
-      {/* Each compared version with the run that made it, and the way to
-          that run's exports: .pt, dataset, metadata or a complete package. */}
-      <div className="flex flex-wrap gap-x-5 gap-y-2">
-        {rows.map((row, i) => {
-          const run = runs[row.model_package_arn];
-          return (
-            <span key={rowKey(row)} className="flex flex-wrap items-center gap-1.5 text-xs text-ink-secondary">
-              <span
-                className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                style={{ background: TRACK2_COMPARE_COLORS[i] }}
-              />
-              {modelLabel(row)} ({row.status}) &middot; <span className="tabular font-medium text-ink">{runLabel(run)}</span>
-
-            </span>
-          );
-        })}
-      </div>
-      {metrics.map((key) => {
-        const label = METRICS.find((m) => m.key === key)?.label ?? key;
-        const values = rows.map((r) => r.metrics?.[key] ?? null);
-        return (
-          <div key={key} className="rounded-sm border border-hairline bg-page p-4">
-            <p className="mb-3 text-sm font-semibold text-ink">{label}</p>
-            {/* A GUTTER for the scale, rather than labels hung off the
-                left of the plot. `-left-7` put them outside the element
-                they were positioned against, which is outside the card
-                -- so every number sat on the border, half cut off.
-                The gridlines start at 2.5rem and the labels live in the
-                space before it: `right-full` ends a label exactly where
-                its line begins, so nothing can overlap whatever the
-                number's width turns out to be. */}
-            <div className="relative h-44">
-              {GRID_LINES.map((pct) => (
-                <div
-                  key={pct}
-                  className="absolute left-10 right-0 border-t border-hairline/70"
-                  style={{ bottom: `${pct}%` }}
-                >
-                  {/* The scale, stated. A fixed axis nobody can see is
-                      the same as no axis at all. */}
-                  <span className="tabular absolute right-full top-[-0.55rem] mr-1.5 text-[10px] text-ink-muted">
-                    {(pct / 100).toFixed(2)}
-                  </span>
-                </div>
-              ))}
-              <div className="relative ml-10 flex h-full items-end gap-4 px-1">
-                {rows.map((row, i) => {
-                  const value = values[i];
-                  // Against 1.0, the metric's own ceiling.
-                  const heightPct = value != null ? Math.max(1, Math.min(1, value) * 100) : 0;
-                  return (
-                    <div key={rowKey(row)} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
-                      <span className="tabular text-xs font-medium text-ink">
-                        {value != null ? value.toFixed(3) : "--"}
-                      </span>
-                      <div className="flex w-full flex-1 items-end px-[1px]">
-                        <div
-                          className="w-full rounded-t-md transition-[height] duration-300"
-                          style={{
-                            height: `${heightPct}%`,
-                            background: value != null ? TRACK2_COMPARE_COLORS[i] : "transparent",
-                          }}
-                          title={`${modelLabel(row)}: ${value != null ? value.toFixed(3) : "no data"}`}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            {/* The same 2.5rem gutter as the plot above, or the names
-                stop sitting under the bars they name. */}
-            <div className="mt-2 ml-10 flex gap-4 px-1">
-              {rows.map((row) => (
-                <span key={rowKey(row)} className="tabular flex-1 truncate text-center text-[11px] text-ink-muted">
-                  {runLabel(runs[row.model_package_arn])} &middot; {modelLabel(row)}
-                </span>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+  const labelFor=(row:Track2MetricsRow)=>`${modelLabel(row)} (${row.status}) · ${runLabel(runs[row.model_package_arn])}`;
+  return <div className="space-y-3">
+    <div className="flex flex-wrap gap-4 text-xs">{rows.map((row,i)=><span key={rowKey(row)} className="flex items-center gap-2"><span className="h-3 w-3 shrink-0" style={{backgroundColor:TRACK2_COMPARE_COLORS[i]}}/>{labelFor(row)}</span>)}</div>
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{metrics.map(key=><section key={key} className="border border-hairline p-3">
+      <h4 className="mb-2 font-semibold">{METRICS.find(m=>m.key===key)?.label??key} <span className="text-xs font-normal">(higher is better)</span></h4>
+      {rows.map((row,i)=>{const value=row.metrics?.[key];const known=typeof value==='number'&&Number.isFinite(value);return <div key={rowKey(row)} className="mb-3 text-xs">
+        <p>{labelFor(row)}</p><div className="flex items-center gap-2">{known?<><div className="h-5 flex-1 rounded bg-black/5" role="img" aria-label={`${labelFor(row)}, ${key}: ${(value*100).toFixed(2)}%`}><div className="h-full rounded" style={{width:`${Math.max(0,Math.min(100,value*100))}%`,backgroundColor:TRACK2_COMPARE_COLORS[i]}}/></div><span>{(value*100).toFixed(2)}%</span></>:<span className="text-ink-muted">Not measured</span>}</div>
+      </div>;})}<p className="text-xs text-ink-muted">Scale: 0–100%</p>
+    </section>)}</div>
+  </div>;
 }
-
 export function Track2MetricsPage() {
   const [rows, setRows] = useState<Track2MetricsRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
