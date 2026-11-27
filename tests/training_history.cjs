@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('../web/node_modules/typescript');
+const scope={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('web/src/lib/trainingHistory.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,scope);
+const {groupTrainingHistory,splitCommonSettings}=scope.exports;
+const runs=[{id:'experiment-a',variants:[{run_id:'a'},{run_id:'b'}]},{id:'experiment-b',variants:[{run_id:'c'}]}];
+const grouped=groupTrainingHistory([{id:'b'},{id:'c'},{id:'a'},{id:'legacy'}],runs);
+assert.equal(grouped.length,3);assert.equal(grouped[0].audits.length,2);assert.equal(grouped[1].id,'experiment-b');assert.equal(grouped[2].id,'legacy');
+const settings=splitCommonSettings([{epochs:1,batch:16,hyperparams:{lr0:.01,momentum:.9}},{epochs:50,batch:16,hyperparams:{lr0:.02,momentum:.9},seed:42}]);
+assert.equal(settings.common.batch,16);assert.equal(settings.common['hyperparams.momentum'],.9);assert.equal(settings.common.epochs,undefined);assert(settings.different.includes('epochs'));assert(settings.different.includes('hyperparams.lr0'));assert(settings.different.includes('seed'));
+assert.equal(groupTrainingHistory([{id:'a'}],runs)[0].run.variants.length,2);
+console.log('History grouping, distinct experiments, legacy runs, partial audits and common/differing parameter checks passed');

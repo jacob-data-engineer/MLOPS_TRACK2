@@ -1,9 +1,11 @@
+import {ExperimentHistory} from "./ExperimentHistory";
+import {groupTrainingHistory} from "../lib/trainingHistory";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCardOpen } from "../lib/cardState";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, type BadgeTone } from "./Badge";
 import {
-  getTrack2TrainingAudit,
+  getTrack2TrainingAudit, listVariantRuns, type VariantRunRecord,
   type Track2TrainingAudit,
   type Track2TrainingAuditDataset,
 } from "../lib/api";
@@ -21,6 +23,7 @@ import {
  */
 export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number }) {
   const [audits, setAudits] = useState<Track2TrainingAudit[] | null>(null);
+  const [runs,setRuns]=useState<VariantRunRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const [historyHeight, setHistoryHeight] = useState<number>();
@@ -43,7 +46,8 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
 
   const load = useCallback(async () => {
     try {
-      const res = await getTrack2TrainingAudit(50);
+      const [res,experiments] = await Promise.all([getTrack2TrainingAudit(200),listVariantRuns()]);
+      setRuns(experiments.runs);
       setAudits(res.audits);
       setError(null);
     } catch {
@@ -67,9 +71,9 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
         <div ref={historyRef} role="region" aria-label="Training history" tabIndex={0}
           className="flex flex-col gap-2 overflow-y-auto overscroll-contain [&>div]:shrink-0"
           style={{ maxHeight: historyHeight }}>
-          {audits.map((audit) => (
-            <AuditRow key={audit.id} audit={audit} onDeleted={load} />
-          ))}
+          {groupTrainingHistory(audits,runs).map(group=>group.run?
+            <ExperimentHistory key={group.id} run={group.run} audits={group.audits}>{group.audits.map(a=><AuditRow key={a.id} audit={a} onDeleted={load}/>)}</ExperimentHistory>:
+            <AuditRow key={group.id} audit={group.audits[0]} onDeleted={load}/>)}
         </div>
       )}
     </div>
