@@ -1596,7 +1596,7 @@ export function Track2DetectorsPanel({
           snapshot, and by the scheduled retrain. They used to live in
           the form, which meant the schedule kept its own copy and the
           two could differ without anything saying so. */}
-      <fieldset disabled={trainingDisabled} aria-label="Single model Training Settings" id="track2-training-parameters" className={`mt-4 min-w-0 rounded-md border border-black/15 p-3 ${trainingDisabled ? "opacity-40" : ""}`}>
+      {!trainingDisabled && <fieldset aria-label="Single model Training Settings" id="track2-training-parameters" className={`mt-4 min-w-0 rounded-md border border-black/15 p-3 ${trainingDisabled ? "opacity-40" : ""}`}>
         <div className="mb-2 flex items-baseline justify-between gap-2">
           <span className="text-xs font-medium text-ink">Training Settings</span>
           <span className="text-[11px] text-ink-muted">
@@ -1659,7 +1659,7 @@ export function Track2DetectorsPanel({
           }}
           onCommit={() => void saveShape()}
         />
-      </fieldset>
+      </fieldset>}
 
       {/* Below the list, because a checkpoint you import needs a Model Name
           to belong to -- the order on screen is the order of the
