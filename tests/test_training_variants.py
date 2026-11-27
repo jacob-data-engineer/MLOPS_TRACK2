@@ -18,6 +18,8 @@ class Table:
 
 @pytest.fixture
 def store(monkeypatch):
+    from ppe_pipeline_api.data import pt_view
+    monkeypatch.setattr(pt_view,'inspect_registered',lambda arn:{'classes':[{'id':0,'name':'helmet'}]})
     table,audits=Table(),Table()
     monkeypatch.setattr(e,'table',lambda:table)
     monkeypatch.setattr(e.t2,'training_audit_table',lambda:audits)
@@ -569,3 +571,23 @@ def test_worker_candidates_load_only_schedule_fields(store,monkeypatch):
     assert e.worker_candidates()==[{'id':'a','state':'Training','retry_at':'','error':''}]
     assert 'jsonb_build_object' in queries[0][0]
     assert "payload->'dataset'" not in queries[0][0]
+
+def test_create_rejects_actual_checkpoint_class_mismatch_before_queueing(store,monkeypatch):
+    from ppe_pipeline_api.data import pt_view
+    monkeypatch.setattr(pt_view,'inspect_registered',lambda arn:{'classes':[{'id':0,'name':'person'}]})
+    with pytest.raises(ValueError,match='Missing from baseline: helmet.*Extra baseline classes: person'):
+        e.create(payload())
+    assert not store[0].rows
+
+
+def test_baseline_class_check_allows_reordered_names(monkeypatch):
+    from ppe_pipeline_api.data import pt_view
+    monkeypatch.setattr(pt_view,'inspect_registered',lambda arn:{'classes':[{'id':0,'name':'person'},{'id':1,'name':'helmet'}]})
+    e.validate_baseline_classes(ARN,{'0':'helmet','1':'person'})
+
+
+def test_create_rejects_unverifiable_classes_before_queueing(store,monkeypatch):
+    from ppe_pipeline_api.data import pt_view
+    monkeypatch.setattr(pt_view,'inspect_registered',lambda arn:(_ for _ in ()).throw(ValueError('unreadable checkpoint')))
+    with pytest.raises(ValueError,match='could not be verified'):e.create(payload())
+    assert not store[0].rows

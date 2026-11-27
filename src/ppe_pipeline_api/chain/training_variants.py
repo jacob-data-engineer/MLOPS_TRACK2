@@ -127,6 +127,24 @@ def settings(raw):
     out['hyperparams'] = t2.normalize_hyperparams(out.get('hyperparams') or {})
     return out
 
+def validate_baseline_classes(arn, expected):
+    from ..data import pt_view
+    from ..training.comparison_runner import class_mapping
+    try:
+        actual = {row['id']:row['name'] for row in pt_view.inspect_registered(arn)['classes']}
+    except Exception as exc:
+        raise ValueError('Baseline classes could not be verified. Inspect the checkpoint before submitting an experiment.') from exc
+    try:
+        class_mapping(expected, actual)
+    except ValueError as exc:
+        missing = sorted(set(expected.values()) - set(actual.values()))
+        extra = sorted(set(actual.values()) - set(expected.values()))
+        raise ValueError('Baseline comparison class mismatch. Missing from baseline: '
+                         + (', '.join(missing) or 'none') + '. Extra baseline classes: '
+                         + (', '.join(extra) or 'none')
+                         + '. Select a compatible comparison baseline; starting weights alone do not establish compatibility.') from exc
+
+
 def create(payload, *, preparation_config=None, trigger="manual"):
     data.require_training_sql()
     control.checkpoint()
@@ -150,6 +168,7 @@ def create(payload, *, preparation_config=None, trigger="manual"):
     package = t2.sm.describe_model_package(ModelPackageName=baseline)
     if package.get('ModelPackageStatus') != 'Completed':
         raise ValueError('The baseline model is not ready.')
+    validate_baseline_classes(baseline, detector['classes'])
     mode=payload.get('data_mode','saved')
     if mode not in ('saved','prepared'):
         raise ValueError('Choose saved or freshly prepared data.')

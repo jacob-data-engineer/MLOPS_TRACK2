@@ -1,3 +1,4 @@
+import {BaselineClassWarning} from "./BaselineClassWarning";
 import {usePageSave} from "../lib/pageSave";
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import {useEffect,useState,useImperativeHandle,type Ref} from "react";
@@ -13,10 +14,11 @@ const flatten=(s:VariantSettingsSnapshot):Record<string,unknown>=>{const {hyperp
 const copyJson=<T,>(value:T):T=>JSON.parse(JSON.stringify(value));
 const show=(v:unknown)=>v===undefined?'—':JSON.stringify(v);
 
-export function Track2TrainingVariants({active=true,detector,architecture,baseline,dataset,dataMode='saved',settings,queueRef,onQueueState}:{active?:boolean;detector:string;architecture:string;baseline:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot;queueRef?:Ref<{start:()=>Promise<string>}>;onQueueState?:(state:{count:number;blocked:boolean;name:string})=>void}){
+export function Track2TrainingVariants({active=true,expectedClasses,detector,architecture,baseline,dataset,dataMode='saved',settings,queueRef,onQueueState}:{active?:boolean;expectedClasses?:Record<string,string>;detector:string;architecture:string;baseline:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot;queueRef?:Ref<{start:()=>Promise<string>}>;onQueueState?:(state:{count:number;blocked:boolean;name:string})=>void}){
  const [draft,setDraft]=useState<TrainingVariantDraft|null>(null),[loaded,setLoaded]=useState(false);
  const [variantName,setVariantName]=useState(''),[editing,setEditing]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [classBlocked,setClassBlocked]=useState(true);
  const [runId,setRunId]=useState(uuid);
  const [localSettings,setLocalSettings]=useState(()=>copyJson(settings));
  useEffect(()=>setLocalSettings(copyJson(settings)),[JSON.stringify(settings)]);
@@ -62,7 +64,7 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
  const payload={id:runId,name:runName,...context,shared:selected[0]?.settings??frozen,
   evaluation:{imgsz:selected[0]?.settings.img_size??640,confidence:.25,ap_conf:.001,nms_iou:.7,max_det:300},
   variants:selected.map(v=>({name:v.name,overrides:v.settings}))};
- const batchBlocked=!ready||!loaded||busy||!selected.length;
+ const batchBlocked=classBlocked||!ready||!loaded||busy||!selected.length;
  useImperativeHandle(queueRef,()=>({start}));
  useEffect(()=>{onQueueState?.({count:variants.length,blocked:batchBlocked,name:runName});},[variants.length,batchBlocked,runName,onQueueState]);
  async function start(){if(!active||batchBlocked){throw new Error('Select at least one saved variant and a base model first.');}setBusy(true);setError('');try{await startVariantRun(payload);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');return `Submitted ${selected.length} variants. The background worker will prepare the shared data, train each variant, then compare with the base model. Training entries appear in the queue after preparation.`;}catch(e){setError(message(e));throw e;}finally{setBusy(false);}}
@@ -73,6 +75,8 @@ export function Track2TrainingVariants({active=true,detector,architecture,baseli
   <h3 className="font-semibold">Save training setups as variants</h3>
   <p className="text-xs">Pick a model and baseline above, choose newly prepared data or a saved SQL dataset, then adjust Training Settings below and save each setup here. Every variant starts from that same baseline and uses the same train/validation images.</p>
   {!ready&&<p role="status" className="text-xs">You can enter names now. To save or run variants, choose a registered starting version and either newly prepared data or a saved SQL dataset above.</p>}
+  <BaselineClassWarning arns={baseline?[baseline]:[]} expected={expectedClasses} onChecked={setClassBlocked}/>
+  {classBlocked&&baseline&&<p role="status" className="text-xs">Add to Queue is unavailable until baseline comparison classes are verified and compatible.</p>}
   <button type="button" disabled={busy} className="underline text-xs" onClick={()=>void refreshDraft()}>Refresh saved variants</button>
   <fieldset disabled={busy} className="min-w-0 space-y-3">
    <p className="break-all text-xs">Baseline: {baseline||'Not selected'}<br/>Dataset: {dataMode==='prepared'?'Freshly prepared once when this batch starts; shared by all variants':dataset||'Not selected'}</p>

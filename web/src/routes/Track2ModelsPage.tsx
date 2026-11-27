@@ -901,7 +901,7 @@ export function TrainingForm({
       </fieldset>
       {allowVariants && <fieldset aria-label="Experiment variant setups" disabled={!experiments} className={!experiments ? "opacity-40" : ""}><Track2TrainingVariants active={experiments} queueRef={variantQueueRef} onQueueState={setVariantQueue}
         key={`${detectorSlug}|${architecture}|${basePackageArn}|${dataChoice.mode}|${dataChoice.id}`}
-        detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
+        expectedClasses={chosenDetector?.classes} detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
         dataMode={dataChoice.mode}
         dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
         settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} /></fieldset>}

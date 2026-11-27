@@ -89,3 +89,39 @@ def inspect(file, filename):
                     'notice': '' if classes else 'Class names are not recorded in this checkpoint. A weights-only state dictionary cannot supply class names.'}
     except (ValueError, zipfile.BadZipFile, pickle.UnpicklingError, EOFError, TypeError, AttributeError, OverflowError) as exc:
         raise ValueError(f'Could not inspect checkpoint: {exc}') from exc
+
+
+def inspect_registered(arn):
+    """Read actual checkpoint classes, not the registry's target class labels."""
+    import tarfile
+    from . import pt_view
+    from ..training import track2_shared as t2
+    package = t2.sm.describe_model_package(ModelPackageName=arn)
+    uri = package['InferenceSpecification']['Containers'][0]['ModelDataUrl']
+    if not uri.startswith('s3://'):
+        raise ValueError('This registered model has no supported S3 artifact.')
+    bucket, key = uri[5:].split('/', 1)
+    obj = t2.s3.get_object(Bucket=bucket, Key=key)
+    body = obj['Body']
+    try:
+        if obj.get('ContentLength', 0) > pt_view.MAX_FILE:
+            raise ValueError('Model artifact exceeds the 512 MB inspection limit.')
+        content = body.read(pt_view.MAX_FILE + 1)
+    finally:
+        body.close()
+    if len(content) > pt_view.MAX_FILE:
+        raise ValueError('Model artifact exceeds the 512 MB inspection limit.')
+    if key.lower().endswith('.pt'):
+        result = pt_view.inspect(io.BytesIO(content), key.rsplit('/', 1)[-1])
+    else:
+        with tarfile.open(fileobj=io.BytesIO(content), mode='r:*') as archive:
+            members = [m for m in archive if m.isfile() and m.name.lower().endswith('.pt')]
+            preferred = [m for m in members if m.name.rsplit('/', 1)[-1] == 'best.pt']
+            member = preferred[0] if len(preferred) == 1 else members[0] if len(members) == 1 else None
+            if member is None or member.size > pt_view.MAX_FILE:
+                raise ValueError('No unique checkpoint found, or checkpoint exceeds 512 MB.')
+            with archive.extractfile(member) as stream:
+                result = pt_view.inspect(io.BytesIO(stream.read(pt_view.MAX_FILE + 1)), member.name)
+    result['registry'] = {'arn': arn, 'artifact': uri, 'status': package.get('ModelApprovalStatus'),
+                          'metadata': package.get('CustomerMetadataProperties', {})}
+    return result
