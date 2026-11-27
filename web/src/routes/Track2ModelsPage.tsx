@@ -902,6 +902,7 @@ export function TrainingForm({
       {allowVariants && <fieldset aria-label="Experiment variant setups" disabled={!experiments} className={!experiments ? "opacity-40" : ""}><Track2TrainingVariants active={experiments} queueRef={variantQueueRef} onQueueState={setVariantQueue}
         key={`${detectorSlug}|${architecture}|${basePackageArn}|${dataChoice.mode}|${dataChoice.id}`}
         expectedClasses={chosenDetector?.classes} detector={detectorSlug} architecture={architecture} baseline={basePackageArn}
+        comparisonBaseline={selection.comparison?.enabled ? selection.comparison.baseline_arn : undefined}
         dataMode={dataChoice.mode}
         dataset={dataChoice.mode === 'saved' ? dataChoice.id : ''}
         settings={{epochs,img_size:imgSize,batch,seed,patience,hyperparams}} /></fieldset>}
@@ -910,7 +911,7 @@ export function TrainingForm({
         <button
           type="button"
           onClick={handleAddToQueue}
-          disabled={experiments ? busy||preparing||!variantQueue.count||variantQueue.blocked : busy || preparing || restoringComparison || !!comparisonRestoreError || baseSelectionIncomplete || analysis.blocking || !!(selection.comparison?.enabled && !selection.comparison.baseline_arn)}
+          disabled={experiments ? busy||preparing||restoringComparison||!!comparisonRestoreError||!!(selection.comparison?.enabled&&!selection.comparison.baseline_arn)||!variantQueue.count||variantQueue.blocked : busy || preparing || restoringComparison || !!comparisonRestoreError || baseSelectionIncomplete || analysis.blocking || !!(selection.comparison?.enabled && !selection.comparison.baseline_arn)}
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
           {busy || preparing

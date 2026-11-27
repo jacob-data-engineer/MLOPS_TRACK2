@@ -168,7 +168,10 @@ def create(payload, *, preparation_config=None, trigger="manual"):
     package = t2.sm.describe_model_package(ModelPackageName=baseline)
     if package.get('ModelPackageStatus') != 'Completed':
         raise ValueError('The baseline model is not ready.')
-    validate_baseline_classes(baseline, detector['classes'])
+    comparison_arn = payload.get('comparison_baseline_arn', baseline)
+    if comparison_arn:
+        cmp._arn(comparison_arn)
+        validate_baseline_classes(comparison_arn, detector['classes'])
     mode=payload.get('data_mode','saved')
     if mode not in ('saved','prepared'):
         raise ValueError('Choose saved or freshly prepared data.')
@@ -186,6 +189,7 @@ def create(payload, *, preparation_config=None, trigger="manual"):
            'created_at':now(),'updated_at':now(),'state':'Pending','detector':detector,
            'run_number':catalog_view.reserve_experiment_number(ident),
            'architecture':payload['architecture'],'baseline_arn':baseline,
+           **({'comparison_baseline_arn':comparison_arn} if 'comparison_baseline_arn' in payload else {}),
            'data_mode':mode,'preparation_config':config,'trigger':trigger,
            'dataset_version_id':payload['dataset_version_id'] if mode=='saved' else '', 'dataset':check,'shared':shared,
            'evaluation':payload['evaluation'],'variants':variants,'comparison_attempt':0}
@@ -203,6 +207,10 @@ def create(payload, *, preparation_config=None, trigger="manual"):
 def public(job, numbers=None):
     value=copy.deepcopy(job)
     value.pop('request_digest',None)
+    if 'comparison_baseline_arn' in value:
+        value['starting_model_arn']=value['baseline_arn']
+        value['baseline_arn']=value['comparison_baseline_arn'] or ''
+        value['baseline']=value.get('comparison_baseline')
     ids=[v['run_id'] for v in value['variants'] if v.get('run_id')]
     if numbers is None:
         numbers=catalog_view.run_numbers(ids)
@@ -307,7 +315,13 @@ def compare(job, successful):
     audit=audit_table.get_item(Key={'id':ident}).get('Item')
     if not audit:
         anchor=cmp._read(successful[0]['run_id'])
-        models=[{k:job['baseline'][k] for k in ('id','uri','etag','role','label')}]
+        comparison_arn=job.get('comparison_baseline_arn',job['baseline_arn'])
+        models=[]
+        if comparison_arn:
+            if 'comparison_baseline' not in job:
+                job['comparison_baseline']=pin(comparison_arn,'baseline','Comparison baseline: '+comparison_arn.split('/')[-2]+'/'+comparison_arn.split('/')[-1]) if 'comparison_baseline_arn' in job else job['baseline']
+                save(job)
+            models.append({k:job['comparison_baseline'][k] for k in ('id','uri','etag','role','label')})
         for variant in successful[1:]:
             pinned=pin(variant['model_package_arn'],'other',variant['name'])
             models.append({k:pinned[k] for k in ('id','uri','etag','role','label')})
@@ -354,6 +368,10 @@ def reconcile_queue_failure(job):
 
 def advance(job):
     reconcile_queue_failure(job)
+    if job.get('comparison_baseline_arn') and not job.get('comparison_baseline'):
+        arn=job['comparison_baseline_arn']
+        job['comparison_baseline']=pin(arn,'baseline','Comparison baseline: '+arn.split('/')[-2]+'/'+arn.split('/')[-1])
+        save(job)
     if not job.get('baseline'):
         job['baseline']=pin(job['baseline_arn'],'baseline','Baseline: '+job['baseline_arn'].split('/')[-2]+'/'+job['baseline_arn'].split('/')[-1])
         save(job)
@@ -547,6 +565,8 @@ def scheduled_payload(config, ident):
     snapshots=[settings(v['settings']) for v in variants]
     return {'id':ident,'name':f"Scheduled {selected['detector_slug']} variants {ident[:8]}",
             **{k:selected[k] for k in ('detector_slug','architecture','baseline_arn')},
+            **({'comparison_baseline_arn':selected['comparison_baseline_arn']} if 'comparison_baseline_arn' in selected else
+               {'comparison_baseline_arn':(pages[prefix+'training-data'].get('comparison') or {}).get('baseline_arn') if (pages[prefix+'training-data'].get('comparison') or {}).get('enabled') else None} if prefix+'training-data' in pages else {}),
             'data_mode':'prepared','dataset_version_id':'','shared':snapshots[0],
             'evaluation':{'imgsz':snapshots[0]['img_size'],'confidence':.25,'ap_conf':.001,'nms_iou':.7,'max_det':300},
             'variants':[{'name':name,'overrides':snapshot} for name,snapshot in zip(names,snapshots)]}

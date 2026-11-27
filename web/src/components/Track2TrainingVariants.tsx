@@ -14,7 +14,7 @@ const flatten=(s:VariantSettingsSnapshot):Record<string,unknown>=>{const {hyperp
 const copyJson=<T,>(value:T):T=>JSON.parse(JSON.stringify(value));
 const show=(v:unknown)=>v===undefined?'—':JSON.stringify(v);
 
-export function Track2TrainingVariants({active=true,expectedClasses,detector,architecture,baseline,dataset,dataMode='saved',settings,queueRef,onQueueState}:{active?:boolean;expectedClasses?:Record<string,string>;detector:string;architecture:string;baseline:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot;queueRef?:Ref<{start:()=>Promise<string>}>;onQueueState?:(state:{count:number;blocked:boolean;name:string})=>void}){
+export function Track2TrainingVariants({active=true,expectedClasses,detector,architecture,baseline,comparisonBaseline,dataset,dataMode='saved',settings,queueRef,onQueueState}:{active?:boolean;expectedClasses?:Record<string,string>;detector:string;architecture:string;baseline:string;comparisonBaseline?:string;dataset:string;dataMode?:"saved"|"prepared";settings:VariantSettingsSnapshot;queueRef?:Ref<{start:()=>Promise<string>}>;onQueueState?:(state:{count:number;blocked:boolean;name:string})=>void}){
  const [draft,setDraft]=useState<TrainingVariantDraft|null>(null),[loaded,setLoaded]=useState(false);
  const [variantName,setVariantName]=useState(''),[editing,setEditing]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -29,7 +29,7 @@ export function Track2TrainingVariants({active=true,expectedClasses,detector,arc
  async function refreshDraft(){setLoaded(false);try{const result=await listTrainingVariantDrafts();const found=result.drafts.find(matches)??null;setDraft(found);setLoaded(true);setError('');}catch(e){setError(message(e));}}
  useEffect(()=>{void refreshDraft();},[]);
  const variants=draft?.variants??[], selected=variants.filter(v=>v.selected);
- usePageSnapshot('scheduled-experiment',{enabled:active,...context,variants:selected},()=>{},loaded);
+ usePageSnapshot('scheduled-experiment',{enabled:active,...context,comparison_baseline_arn:comparisonBaseline||null,variants:selected},()=>{},loaded);
  const saveBlocked=!detector||!architecture?'Choose a model name and model type above.':!baseline?'Choose a registered starting model version above.':dataMode==='saved'&&!dataset?'Choose Saved SQL dataset above and select a dataset before saving a variant.':!loaded?'Saved variants have not loaded. Use Refresh saved variants to retry.':!variantName.trim()?'Enter a variant name.':'';
  const frozen:VariantSettingsSnapshot={...localSettings,hyperparams:{...effectiveHyperparams({},true),...localSettings.hyperparams}};
  async function persist(rows:SavedTrainingVariant[],name=draft?.batch_name??''){
@@ -61,10 +61,10 @@ export function Track2TrainingVariants({active=true,expectedClasses,detector,arc
   if(!(await persist(variants)))throw new Error('Could not save the variant batch. See the variants card.');
  });
  const runName=`${detector} variants ${runId.slice(0,8)}`;
- const payload={id:runId,name:runName,...context,shared:selected[0]?.settings??frozen,
+ const payload={id:runId,name:runName,...context,comparison_baseline_arn:comparisonBaseline||null,shared:selected[0]?.settings??frozen,
   evaluation:{imgsz:selected[0]?.settings.img_size??640,confidence:.25,ap_conf:.001,nms_iou:.7,max_det:300},
   variants:selected.map(v=>({name:v.name,overrides:v.settings}))};
- const batchBlocked=classBlocked||!ready||!loaded||busy||!selected.length;
+ const batchBlocked=(!!comparisonBaseline&&classBlocked)||!ready||!loaded||busy||!selected.length;
  useImperativeHandle(queueRef,()=>({start}));
  useEffect(()=>{onQueueState?.({count:variants.length,blocked:batchBlocked,name:runName});},[variants.length,batchBlocked,runName,onQueueState]);
  async function start(){if(!active||batchBlocked){throw new Error('Select at least one saved variant and a base model first.');}setBusy(true);setError('');try{await startVariantRun(payload);setRunId(uuid());setNotice('Selected variants submitted. The background worker continues when this page is closed.');return `Submitted ${selected.length} variants. The background worker will prepare the shared data, train each variant, then compare with the base model. Training entries appear in the queue after preparation.`;}catch(e){setError(message(e));throw e;}finally{setBusy(false);}}
@@ -73,13 +73,13 @@ export function Track2TrainingVariants({active=true,expectedClasses,detector,arc
  const columns=[...new Set(['epochs','img_size','batch','seed','patience','lr0','optimizer',...changedKeys])];
  return <section aria-label="Saved training variants" className="mt-5 space-y-4 rounded border border-hairline p-4">
   <h3 className="font-semibold">Save training setups as variants</h3>
-  <p className="text-xs">Pick a model and baseline above, choose newly prepared data or a saved SQL dataset, then adjust Training Settings below and save each setup here. Every variant starts from that same baseline and uses the same train/validation images.</p>
+  <p className="text-xs">Pick a model and baseline above, choose newly prepared data or a saved SQL dataset, then adjust Training Settings below and save each setup here. Every variant starts from the same starting model and uses the same train/validation images.</p>
   {!ready&&<p role="status" className="text-xs">You can enter names now. To save or run variants, choose a registered starting version and either newly prepared data or a saved SQL dataset above.</p>}
-  <BaselineClassWarning arns={baseline?[baseline]:[]} expected={expectedClasses} onChecked={setClassBlocked}/>
-  {classBlocked&&baseline&&<p role="status" className="text-xs">Add to Queue is unavailable until baseline comparison classes are verified and compatible.</p>}
+  <BaselineClassWarning key={comparisonBaseline} arns={comparisonBaseline?[comparisonBaseline]:[]} expected={expectedClasses} onChecked={setClassBlocked}/>
+  {classBlocked&&comparisonBaseline&&<p role="status" className="text-xs">Add to Queue is unavailable until baseline comparison classes are verified and compatible.</p>}
   <button type="button" disabled={busy} className="underline text-xs" onClick={()=>void refreshDraft()}>Refresh saved variants</button>
   <fieldset disabled={busy} className="min-w-0 space-y-3">
-   <p className="break-all text-xs">Baseline: {baseline||'Not selected'}<br/>Dataset: {dataMode==='prepared'?'Freshly prepared once when this batch starts; shared by all variants':dataset||'Not selected'}</p>
+   <p className="break-all text-xs">Starting model: {baseline||'Not selected'}<br/>Dataset: {dataMode==='prepared'?'Freshly prepared once when this batch starts; shared by all variants':dataset||'Not selected'}</p>
    <div className="rounded-md border border-black/15 p-3" aria-label="Variant Training Settings">
     <h4 className="mb-2 text-xs font-medium text-ink">Training Settings</h4>
     <p className="mb-2 text-xs text-ink-muted">Edit this variant here, then Save as variant. These edits do not change the main training settings or other saved variants.</p>
@@ -102,7 +102,7 @@ export function Track2TrainingVariants({active=true,expectedClasses,detector,arc
    <div className="overflow-auto"><table className="w-full text-left text-xs"><thead><tr><th>Run?</th><th>Variant</th>{columns.map(k=><th key={k} className="px-2">{k}</th>)}<th>Actions</th></tr></thead><tbody>{variants.map(v=><tr key={v.id} className="border-t"><td><input aria-label={`Run ${v.name}`} type="checkbox" checked={v.selected} onChange={e=>changeRows(variants.map(row=>row.id===v.id?{...row,selected:e.target.checked}:row))}/></td><th className="p-2">{v.name}</th>{columns.map(k=><td key={k} className={`p-2 ${show(flatten(v.settings)[k])!==show(first[k])?'bg-amber-100':''}`}>{show(flatten(v.settings)[k])}</td>)}<td className="whitespace-nowrap space-x-3"><button type="button" className="underline" onClick={()=>edit(v)}>Edit</button><button type="button" disabled={variants.length>=20} className="underline" onClick={()=>duplicate(v)}>Duplicate</button><button type="button" className="underline" onClick={()=>changeRows(variants.filter(row=>row.id!==v.id))}>Remove</button></td></tr>)}</tbody></table></div>
    <details><summary>All recorded variant settings</summary><pre className="max-h-72 overflow-auto text-xs">{JSON.stringify(variants,null,2)}</pre></details>
    <p className="text-xs">For scheduled experiments, select the variants and use Save at the top of this page. Each scheduled occurrence pulls fresh data once and prepares a new shared dataset for those saved variants.</p>
-   <p className="text-xs">Add to Queue automatically trains the selected variants, then compares the trained models with the chosen base model on the same validation images. The background worker continues when this page is closed. Save or update each variant before queueing; unsaved edits in the settings form are not included.</p>
+   <p className="text-xs">Add to Queue automatically trains the selected variants, then compares the trained models with the selected comparison baseline on the same validation images. The background worker continues when this page is closed. Save or update each variant before queueing; unsaved edits in the settings form are not included.</p>
    {selected.length>0&&<p className="text-xs">{selected.length} selected: {selected.map(v=>`${v.name} (${v.settings.epochs} epochs)`).join(', ')}</p>}
    {variants.length>0&&batchBlocked&&<p className="text-xs">Choose a base model and select at least one saved variant before adding to the queue.</p>}
   </fieldset>

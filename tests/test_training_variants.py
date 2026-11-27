@@ -591,3 +591,45 @@ def test_create_rejects_unverifiable_classes_before_queueing(store,monkeypatch):
     monkeypatch.setattr(pt_view,'inspect_registered',lambda arn:(_ for _ in ()).throw(ValueError('unreadable checkpoint')))
     with pytest.raises(ValueError,match='could not be verified'):e.create(payload())
     assert not store[0].rows
+
+
+def test_separate_comparison_baseline_does_not_validate_starting_classes(store,monkeypatch):
+    p=payload();p['comparison_baseline_arn']=ARN.replace('yolo26s-helmet','yolo-baseline-track2-dev')
+    checked=[]
+    monkeypatch.setattr(e,'validate_baseline_classes',lambda arn,classes:checked.append(arn))
+    result=e.create(p)
+    assert checked==[p['comparison_baseline_arn']]
+    assert e.read(p['id'])['baseline_arn']==ARN
+    assert result['starting_model_arn']==ARN
+    assert result['baseline_arn']==p['comparison_baseline_arn']
+
+
+def test_comparison_pins_selected_baseline_not_training_seed(store,monkeypatch):
+    j=job(store);selected=ARN.replace('yolo26s-helmet','yolo-baseline-track2-dev')
+    j['comparison_baseline_arn']=selected
+    j['baseline']={'id':ARN,'uri':'s3://b/seed','etag':'seed','role':'baseline','label':'Seed'}
+    for i,v in enumerate(j['variants']):
+        v.update(state='Succeeded',run_id=f'run-{i}',model_package_arn=f'{ARN[:-1]}{i+10}')
+    monkeypatch.setattr(e.cmp,'_read',lambda ident:{'id':ident,'model':{},'reproducibility':{}})
+    pins=[]
+    monkeypatch.setattr(e,'pin',lambda arn,role,label:pins.append(arn) or {'id':arn,'uri':'s3://b/selected','etag':'fixed','role':role,'label':label})
+    monkeypatch.setattr(e.cmp,'advance',lambda audit:None)
+    e.compare(j,j['variants']);e.compare(e.read(j['id']),j['variants'])
+    assert pins==[selected,j['variants'][1]['model_package_arn']]
+    models=next(iter(store[1].rows.values()))['comparison']['selection']['models']
+    assert models[0]['id']==selected and all(m['id']!=ARN for m in models)
+
+
+def test_explicit_no_comparison_baseline_skips_starting_class_check(store,monkeypatch):
+    p=payload();p['comparison_baseline_arn']=None
+    monkeypatch.setattr(e,'validate_baseline_classes',lambda *a:pytest.fail('Starting weights are not an evaluation baseline'))
+    assert e.create(p)['baseline_arn']==''
+
+
+def test_schedule_preserves_separate_comparison_selection():
+    config=scheduled_config();pages=config['page_state'];prefix='/track2/multi-auto-training/'
+    selected=ARN.replace('yolo26s-helmet','yolo-baseline-track2-dev')
+    pages[prefix+'training-data']={'comparison':{'enabled':True,'baseline_arn':selected}}
+    assert e.scheduled_payload(config,str(uuid.uuid4()))['comparison_baseline_arn']==selected
+    pages[prefix+'scheduled-experiment']['comparison_baseline_arn']=None
+    assert e.scheduled_payload(config,str(uuid.uuid4()))['comparison_baseline_arn'] is None

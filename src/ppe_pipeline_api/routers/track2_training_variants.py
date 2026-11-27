@@ -25,6 +25,7 @@ class VariantBatch(BaseModel):
     detector_slug:str
     architecture:str
     baseline_arn:str
+    comparison_baseline_arn:str|None=None
     dataset_version_id:str=""
     data_mode:Literal["saved","prepared"]="saved"
     shared:dict=Field(default_factory=dict)
@@ -64,7 +65,7 @@ def listing(session=Depends(require_session)):
     return {'runs':e.list_summaries(), 'preparations':pending_summaries()}
 @router.post('')
 def create(payload:VariantBatch,session=Depends(require_session)):
-    return call(lambda:e.create(payload.model_dump(mode='json')))
+    return call(lambda:e.create(payload.model_dump(mode='json',exclude_unset=True)))
 @router.post('/{ident}/retry')
 def retry(ident:str,payload:Retry,session=Depends(require_session)):
     result=call(lambda:e.retry(ident,payload.index))
