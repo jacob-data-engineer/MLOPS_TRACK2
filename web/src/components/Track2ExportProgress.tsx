@@ -8,6 +8,19 @@ export function archiveSize(bytes: number): string {
   return `${(bytes / 1024 ** unit).toLocaleString(undefined, { maximumFractionDigits: unit ? 2 : 0 })} ${units[unit]}`;
 }
 
+/** Unknown work is animated, never presented as a measured percentage. */
+export function ExportWorkBar({ label, percent }: { label: string; percent?: number }) {
+  return <div className="space-y-1 text-xs">
+    <div className="flex justify-between gap-3"><span>{label}</span><span>{percent == null ? "In progress" : `${percent}%`}</span></div>
+    <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
+      aria-valuenow={percent} aria-valuetext={percent == null ? "In progress; percentage not yet available" : `${percent}%`}
+      className="h-2 overflow-hidden rounded bg-black/10">
+      <div className={`h-full rounded bg-green-600 ${percent == null ? "w-1/3 animate-pulse motion-reduce:animate-none" : ""}`}
+        style={percent == null ? undefined : {width: `${percent}%`}} />
+    </div>
+  </div>;
+}
+
 /** WHERE AN EXPORT HAS GOT TO, from what the server measured (2026-11-18).
  *
  * The stage it reports, files processed of files planned, and when that was
@@ -23,7 +36,7 @@ export function Track2ExportProgress({ exp, starting = false, onChanged }: {
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState("");
   if (!exp) {
-    return starting ? <p className="mt-3 text-xs" role="status">Starting the export on the server...</p> : null;
+    return starting ? <ExportWorkBar label="Starting the export on the server..." /> : null;
   }
   const active = exp.state === "building" || exp.state === "stopping";
   const total = exp.total_files ?? exp.files ?? null;
@@ -51,13 +64,8 @@ export function Track2ExportProgress({ exp, starting = false, onChanged }: {
             {counted && <> &middot; <span className="tabular">{processed!.toLocaleString()} / {total!.toLocaleString()} files</span></>}
             {finalizing && " -- every file is packed; the archive is being written to S3"}
           </p>
-          <div role="progressbar" aria-label="Export progress" aria-valuemin={0}
-               aria-valuemax={counted ? total! : undefined} aria-valuenow={counted ? processed! : undefined}
-               aria-valuetext={counted ? `${processed} of ${total} files` : stage}
-               className="h-2 overflow-hidden rounded-sm border border-hairline bg-page">
-            <div className={`h-full bg-ink ${counted ? "" : "w-full animate-pulse opacity-40 motion-reduce:animate-none"}`}
-                 style={counted ? { width: `${fraction * 100}%` } : undefined} />
-          </div>
+          <ExportWorkBar label={finalizing ? "Finalizing export" : "Generating package"}
+            percent={counted ? Math.floor(fraction * 100) : undefined} />
           <p className="text-ink-muted">
             Last progress report {formatSgt(exp.updated_at, "not received yet")}. The ZIP size is known only once it is finalized.
           </p>
@@ -71,10 +79,10 @@ export function Track2ExportProgress({ exp, starting = false, onChanged }: {
         </>
       )}
       {exp.state === "ready" && (
-        <p className="font-medium text-ink">
+        <><ExportWorkBar label="Export complete" percent={100} /><p className="font-medium text-ink">
           Ready &middot; {(exp.files ?? 0).toLocaleString()} file(s) packed
           {exp.format === "zip" && <> &middot; final ZIP size <span className="tabular" title={exp.bytes != null ? `${exp.bytes.toLocaleString()} bytes` : undefined}>{exp.bytes != null ? archiveSize(exp.bytes) : "not recorded"}</span></>}
-        </p>
+        </p></>
       )}
       {exp.state === "partial" && (
         <p className="font-medium text-critical">

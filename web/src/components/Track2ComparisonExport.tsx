@@ -6,7 +6,7 @@ import { ApiError, checkCatalogDataset, getTrack2CatalogMetadata, getTrack2Catal
   type Track2RunForModel, type Track2CatalogExport, type CatalogExportDestination } from "../lib/api";
 import { modelLabel } from "./Track2ModelPicker";
 import { METADATA_CATEGORIES } from "./Track2CatalogMetadata";
-import { Track2ExportProgress } from "./Track2ExportProgress";
+import { ExportWorkBar, Track2ExportProgress } from "./Track2ExportProgress";
 import { Track2S3FolderBrowser } from "./Track2S3FolderBrowser";
 import { isSeedVersion, statusLabel } from "../lib/slug";
 
@@ -300,8 +300,8 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
       <button className={button} disabled={invalid || !ranked.some(r => chosen.includes(r.model_package_arn))} onClick={() => void review(chosen)}>{busy ? "Checking availability..." : "Review selected packages"}</button>
       <p className="text-xs text-muted">Package options are saved with the named file using Save at the top of this page.</p>
     </fieldset>
-    {busy && <div role="status" className="flex items-center gap-3 text-xs">
-      <span>{reviewStage}</span>
+    {busy && <div role="status" className="space-y-2 rounded border border-hairline p-3 text-xs">
+      <ExportWorkBar label={reviewStage} />
       <button type="button" className={button} onClick={() => reviewController.current?.abort("cancelled")}>Cancel review</button>
     </div>}
     {notes.map((note, i) => <p className="text-xs" key={i}>{note}</p>)}
@@ -316,7 +316,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
       <p>{model ? ".pt; " : ""}{images ? "images and labels; " : "dataset references only; "}{metadata ? `${groups.length} metadata categories; ` : ""}{destination.destination === "local" ? "downloadable ZIP" : `s3://${destination.bucket}/${destination.prefix}`}</p>
       <button className={button} disabled={running} onClick={() => void exportPackages()}>Export {preview.length} package(s)</button>
     </div>}
-    {running && <p className="text-xs" role="status">Exporting packages sequentially. Keep this page open for remaining packages; completed exports also appear in the catalog.</p>}
+    {running && <div className="space-y-2 rounded border border-hairline p-3" role="status"><ExportWorkBar label="Processing export packages" /><p className="text-xs">Exporting packages sequentially. Keep this page open for remaining packages; completed exports also appear in the catalog.</p></div>}
     {error && <p className="text-xs text-critical" role="alert">{error}</p>}
     {direct.map((result,i)=><p key={i} className="text-xs">{result.label}: {result.url?<a className="underline" href={result.url}>Download .pt</a>:result.uri}</p>)}
     {jobs.map(job => <div key={job.id} className="rounded border border-hairline p-2"><p className="text-xs">{job.label} · {job.id}</p><Track2ExportProgress exp={job} />
