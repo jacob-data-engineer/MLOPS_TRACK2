@@ -1,7 +1,9 @@
-import { Factory, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+
+import jurongPortLogo from "../assets/jurong-port-logo.png";
 
 export function LoginPage() {
   const { login, loading, error, isAuthenticated, sessionExpired } = useAuth();
@@ -26,7 +28,9 @@ export function LoginPage() {
     <div className="flex min-h-svh items-center justify-center bg-page px-4">
       <div className="w-full max-w-sm rounded-sm border border-hairline bg-surface p-8">
         <div className="mb-6 flex flex-col items-center gap-2">
-          <Factory size={28} className="text-accent" strokeWidth={1.75} />
+          <div className="mb-3 rounded-md bg-[#173b40] px-6 py-4">
+            <img src={jurongPortLogo} alt="Jurong Port" width={290} height={110} className="h-auto w-56 max-w-full object-contain" />
+          </div>
           <h1 className="text-lg font-semibold text-ink">Training and Development</h1>
           <p className="text-center text-sm text-ink-secondary">
             {sessionExpired

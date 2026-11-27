@@ -1,0 +1,1 @@
+Jurong Port logo: downloaded unchanged from https://www.jp.com.sg/wp-content/uploads/2017/02/jurong-port-t.png (official website header) on 2026-11-27. Trademark belongs to Jurong Port. Bundled locally for the login page.
