@@ -1,6 +1,6 @@
 import {usePageSnapshot} from "../lib/pageSnapshot";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, checkCatalogDataset, getTrack2CatalogMetadata, getTrack2CatalogExports,
+import { ApiError, getTrack2CatalogMetadata, getTrack2CatalogExports,
   estimateTrack2CatalogExport, type PackageSizeEstimate, type Track2ExportSettings, type ModelPackageOptions, exportTrack2BestWeights, getTrack2Detectors, type Track2Detector, getTrack2Buckets, listTrack2Folders,
   getTrack2CatalogExportUrl, startTrack2CatalogExport, type Track2MetricsRow,
   type Track2RunForModel, type Track2CatalogExport, type CatalogExportDestination } from "../lib/api";
@@ -56,6 +56,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
     return () => { disposed = true; };
   }, [destination.destination, destination.bucket, destination.prefix]);
   const [busy, setBusy] = useState(false);
+  const [allowPartial, setAllowPartial] = useState(false);
   const [reviewStage, setReviewStage] = useState("");
   const reviewController = useRef<AbortController | null>(null);
   useEffect(() => () => reviewController.current?.abort("cancelled"), []);
@@ -117,17 +118,12 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
     reviewController.current?.abort("cancelled"); reviewController.current = controller;
     const signal = controller.signal;
     const timeout = window.setTimeout(() => controller.abort("timeout"), 180000);
-    setBusy(true); setPreview([]); setError(""); setNotes([]); setReviewStage("Checking selected packages...");
+    setBusy(true); setAllowPartial(false); setPreview([]); setError(""); setNotes([]); setReviewStage("Checking selected packages...");
     try {
       const targets: Target[] = []; const warnings: string[] = [];
       for (const row of ranked.filter(r => arns.includes(r.model_package_arn))) {
         const run = runs[row.model_package_arn];
         if (experimentId) {
-          if (images) {
-            setReviewStage("Checking the experiment dataset...");
-            const availability = await checkCatalogDataset("experiment", experimentId, signal);
-            if (["unavailable","check_failed"].includes(availability.state)) throw new Error(availability.detail);
-          }
           setReviewStage("Calculating storage required for the experiment...");
           const estimate = await estimateTrack2CatalogExport("experiment", experimentId, {...destination,
             format: destination.destination === "local" ? "zip" : destination.format,
@@ -143,16 +139,10 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
         setReviewStage(`Run ${run.run_number}: checking checkpoint and metadata...`);
         const info = await getTrack2CatalogMetadata("run", run.run_id, signal);
         if (model && !info.checkpoint_available) throw new Error(`Run ${run.run_number} has no published checkpoint.`);
-        if (images) {
-          setReviewStage(`Run ${run.run_number}: checking preserved images and labels...`);
-          const availability = await checkCatalogDataset("run", run.run_id, signal);
-          if (availability.state === "unavailable" || availability.state === "check_failed") throw new Error(`Run ${run.run_number}: ${availability.detail}`);
-          warnings.push(`Run ${run.run_number}: ${availability.detail}`);
-        }
         if (metadata && info.unavailable.length) warnings.push(`Run ${run.run_number}: metadata not recorded for ${info.unavailable.join(", ")}.`);
         targets.push({ row, run });
       }
-      // Check every selected dataset before doing expensive file-size scans.
+      // The estimate checks every selected file and returns a consolidated issue list.
       if (!experimentId) for (const target of targets) {
         if (!target.run) continue;
         const {row, run} = target;
@@ -164,7 +154,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
             metadata_groups: groups, model_package_arn: row.model_package_arn}, signal);
         } catch (e) {
           if (signal.aborted) throw e;
-          warnings.push(`Run ${run.run_number}: storage estimate unavailable. Required space is unknown.`);
+          throw new Error(`Run ${run.run_number}: package review could not finish. ${message(e)}`);
         }
       }
       if (!targets.length) throw new Error("Choose at least one model to export.");
@@ -180,6 +170,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
   }
 
   async function exportPackages() {
+    if (reviewBlocked || (unavailableFiles.length > 0 && !allowPartial)) return;
     setRunning(true); setError(""); cancel.current = false;
     const targets = [...preview]; setPreview([]);
     const options = { ...destination, format: destination.destination === "local" ? "zip" as const : destination.format, include_images: images, include_model: model,
@@ -202,7 +193,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
           if (job) {
             setJobs(previous => [...previous.filter(e => e.id !== job.id), job]);
             finished = !["building", "stopping"].includes(job.state);
-            if (finished && job.state !== "ready") throw new Error(`Batch paused: ${job.label} is ${job.state}. Review its result before exporting the remaining models.`);
+            if (finished && job.state !== "ready" && !(allowPartial && job.state === "partial")) throw new Error(`Batch paused: ${job.label} is ${job.state}. Review its result before exporting the remaining models.`);
           }
           if (!finished) await new Promise(resolve => window.setTimeout(resolve, 3000));
         }
@@ -210,6 +201,10 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
     } catch (e) { setError(message(e)); }
     finally { setRunning(false); }
   }
+  const unavailableFiles = preview.flatMap(t => (t.estimate?.unavailable_files ?? []).map(f => ({...f, package: t.run ? `Run ${t.run.run_number}` : modelLabel(t.row)})));
+  const missingCount = unavailableFiles.filter(f => f.reason === "missing").length;
+  const changedCount = unavailableFiles.filter(f => f.reason === "changed").length;
+  const reviewBlocked = unavailableFiles.some(f => f.reason === "check_failed" || f.role === "model");
   const bytes = (value: number) => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(2)} GiB` : value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(2)} MiB` : `${(value / 1024).toFixed(1)} KiB`;
   const sizeComplete = preview.every(t => t.estimate?.recommended_bytes != null);
   const totalSpace = preview.reduce((sum, t) => sum + (t.estimate?.recommended_bytes ?? 0), 0);
@@ -306,7 +301,16 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
     </div>}
     {notes.map((note, i) => <p className="text-xs" key={i}>{note}</p>)}
     {preview.length > 0 && <div className="space-y-2 rounded border border-hairline p-3 text-xs">
-      <p className="font-medium">Ready to export these exact versions:</p>
+      <p className="font-medium">Package review:</p>
+      {unavailableFiles.length > 0 && <div role="alert" className="space-y-2 rounded border border-yellow-600 bg-yellow-50 p-3">
+        <p>{missingCount} missing file(s); {changedCount} changed file(s); {unavailableFiles.filter(f => f.reason === "check_failed").length} file(s) could not be checked across the selected packages.</p>
+        <details><summary className="cursor-pointer">View all unavailable files ({unavailableFiles.length})</summary>
+          <div className="max-h-64 overflow-auto"><table className="w-full text-left"><thead><tr><th>Package</th><th>File</th><th>Problem</th></tr></thead><tbody>
+            {unavailableFiles.map((f,i) => <tr key={i}><td>{f.package}</td><td className="break-all">{f.uri}<br/>{f.path}</td><td>{f.reason}</td></tr>)}
+          </tbody></table></div>
+        </details>
+        {reviewBlocked ? <p>Resolve inaccessible files or missing model checkpoints and review again before exporting.</p> : <label className="flex items-start gap-2"><input type="checkbox" checked={allowPartial} onChange={e => setAllowPartial(e.target.checked)} />Proceed with available files only. The export will be incomplete; missing or changed files will be listed in its manifest.</label>}
+      </div>}
       <table className="w-full text-left" aria-label="Package storage estimate"><thead><tr><th>Model / run</th><th>Files</th><th>Estimated package size</th><th>Suggested space</th></tr></thead>
         <tbody>{preview.map(t => <tr key={t.row.model_package_arn} className="border-t border-hairline"><td>{experimentId ? `${chosen.length} models / shared experiment dataset` : modelLabel(t.row)} / {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint"}</td><td>{t.estimate?.files ?? "Unknown"}</td><td>{t.estimate?.estimated_bytes != null ? bytes(t.estimate.estimated_bytes) : `Unknown${t.estimate ? ` (${t.estimate.unknown_files} file sizes unavailable; ${bytes(t.estimate.source_bytes)} known)` : ""}`}</td><td>{t.estimate?.recommended_bytes != null ? bytes(t.estimate.recommended_bytes) : "Unknown"}</td></tr>)}</tbody>
       </table>
@@ -314,7 +318,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
       <p>{experimentId ? `${chosen.length} selected models in one shared-data package. ` : ""}Includes estimated generated files and 10% headroom. ZIP exports are not compressed. {experimentId ? "Shared experiment data is counted once for all selected models." : "Each model has its own package, so data is counted for each package."} This estimates required storage; it does not check free space.</p>
       {preview.map(t => <p className="break-all" key={t.row.model_package_arn}>{variantLabels[t.row.model_package_arn]||t.run?.variant_name||modelLabel(t.row)} · {t.run ? `Run ${t.run.run_number}` : "Registered checkpoint only"} · {t.row.model_package_arn}</p>)}
       <p>{model ? ".pt; " : ""}{images ? "images and labels; " : "dataset references only; "}{metadata ? `${groups.length} metadata categories; ` : ""}{destination.destination === "local" ? "downloadable ZIP" : `s3://${destination.bucket}/${destination.prefix}`}</p>
-      <button className={button} disabled={running} onClick={() => void exportPackages()}>Export {preview.length} package(s)</button>
+      <button className={button} disabled={running || reviewBlocked || (unavailableFiles.length > 0 && !allowPartial)} onClick={() => void exportPackages()}>Export {preview.length} package(s)</button>
     </div>}
     {running && <div className="space-y-2 rounded border border-hairline p-3" role="status"><ExportWorkBar label="Processing export packages" /><p className="text-xs">Exporting packages sequentially. Keep this page open for remaining packages; completed exports also appear in the catalog.</p></div>}
     {error && <p className="text-xs text-critical" role="alert">{error}</p>}

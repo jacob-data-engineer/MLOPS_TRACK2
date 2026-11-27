@@ -4233,6 +4233,8 @@ export interface PackageSizeEstimate {
   source_bytes: number; model_bytes: number; generated_bytes_estimate: number;
   estimated_bytes: number | null; recommended_bytes: number | null;
   files: number; unknown_files: number; format: string; note: string;
+  missing_files?: number; changed_files?: number; check_failed_files?: number;
+  unavailable_files?: {path: string; uri: string; reason: string; role: string}[];
 }
 export function estimateTrack2CatalogExport(kind: "run" | "version" | "experiment", id: string, options: CatalogExportDestination, signal?: AbortSignal): Promise<PackageSizeEstimate> {
   return request("/track2/catalog/exports/estimate", {method:"POST",body:JSON.stringify({kind, id, ...options}),signal});

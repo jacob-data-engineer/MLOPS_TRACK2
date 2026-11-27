@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import math
+from botocore.exceptions import ClientError
 
 from . import catalog_view as cv, catalog_metadata
 from .. import storage
@@ -43,26 +44,42 @@ def estimate(kind, ident, *, destination="local", bucket="", prefix="", format=N
         try:
             b, k = cv._split_uri(uri)
             return storage.s3.head_object(Bucket=b, Key=k)
-        except Exception:
-            return None
+        except ClientError as exc:
+            if exc.response.get('Error', {}).get('Code') in ('404', 'NoSuchKey', 'NotFound'):
+                return None
+            raise
 
     def size(key):
         uri, stored, expected = key
-        obj = head(stored or uri)
-        if stored and expected:
-            if obj is None or obj.get("ETag", "").strip('"') != expected.strip('"'):
-                return None
-        elif stored and obj is None:
-            obj = head(uri)
-            frozen = stored.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-            if obj is None or obj.get("ETag", "").strip('"') != frozen:
-                return None
-        return int(obj["ContentLength"]) if obj is not None and "ContentLength" in obj else None
+        try:
+            obj = head(stored or uri)
+            if stored and expected:
+                if obj is None:
+                    return None, 'missing'
+                if obj.get('ETag', '').strip('"') != expected.strip('"'):
+                    return None, 'changed'
+            elif stored and obj is None:
+                obj = head(uri)
+                frozen = stored.rsplit('/', 1)[-1].rsplit('.', 1)[0]
+                if obj is None:
+                    return None, 'missing'
+                if obj.get('ETag', '').strip('"') != frozen:
+                    return None, 'changed'
+            if obj is None:
+                return None, 'missing'
+            return (int(obj['ContentLength']), '') if 'ContentLength' in obj else (None, 'check_failed')
+        except Exception:
+            # Access/network errors are not evidence that a file is missing.
+            return None, 'check_failed'
 
     keys = [(uri, row.get("stored", ""), row.get("stored_etag", "")) for _, uri, row in wanted]
     unique = list(dict.fromkeys(keys))
     with ThreadPoolExecutor(max_workers=16) as pool:
-        sizes = dict(zip(unique, pool.map(size, unique)))
+        checks = dict(zip(unique, pool.map(size, unique)))
+    sizes = {key: result[0] for key, result in checks.items()}
+    unavailable = [{"path": path, "uri": row.get("stored") or uri, "reason": checks[key][1],
+                    "role": row.get("role", "data")}
+                   for (path, uri, row), key in zip(wanted, keys) if checks[key][1]]
     known = sum(sizes[key] or 0 for key in keys)
     unknown = sum(sizes[key] is None for key in keys)
     model_bytes = sum(sizes[key] or 0 for entry, key in zip(wanted, keys) if entry[2].get("role") == "model")
@@ -92,4 +109,8 @@ def estimate(kind, ident, *, destination="local", bucket="", prefix="", format=N
             "estimated_bytes": estimated if not unknown else None,
             "recommended_bytes": math.ceil(estimated * 1.1) if not unknown else None,
             "files": len(wanted), "unknown_files": unknown, "format": format,
+            "unavailable_files": unavailable,
+            "missing_files": sum(item["reason"] == "missing" for item in unavailable),
+            "changed_files": sum(item["reason"] == "changed" for item in unavailable),
+            "check_failed_files": sum(item["reason"] == "check_failed" for item in unavailable),
             "note": "Source sizes checked in S3. Generated files are estimated; suggested space includes 10% headroom. ZIP exports use no compression. Sizes can change before export."}

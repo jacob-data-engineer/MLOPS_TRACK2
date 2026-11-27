@@ -53,3 +53,34 @@ def test_metadata_selection_and_embedding_budget(setup, monkeypatch):
     enriched = ee.estimate("run", "r", include_images=False, include_model=True, include_metadata=True, metadata_groups=["Identity"])
     assert enriched["source_bytes"] == basic["source_bytes"]
     assert enriched["generated_bytes_estimate"] > basic["generated_bytes_estimate"]
+
+def test_all_missing_files_are_reported_separately_from_access_errors(setup, monkeypatch):
+    from botocore.exceptions import ClientError
+    entries, _ = setup
+    entries.extend([('images/other.jpg', 's3://b/other', {}), ('images/private.jpg', 's3://b/private', {})])
+    def head(**kw):
+        raise ClientError({'Error': {'Code': '403' if kw['Key'] == 'private' else '404'}}, 'HeadObject')
+    monkeypatch.setattr(ee.storage, 's3', SimpleNamespace(head_object=head))
+    result = ee.estimate('run', 'r')
+    assert result['missing_files'] == 3
+    assert result['check_failed_files'] == 1
+    assert len(result['unavailable_files']) == 4
+    assert {f['uri'] for f in result['unavailable_files']} == {'s3://b/a','s3://b/l','s3://b/other','s3://b/private'}
+
+
+def test_changed_file_is_reported_and_checkpoint_issues_identified(setup):
+    entries, _ = setup
+    entries[0] = ('images/train/a.jpg', 's3://b/a', {'stored': 's3://b/a', 'stored_etag': 'changed'})
+    result = ee.estimate('run', 'r', include_model=True)
+    assert result['changed_files'] == 1
+    assert result['missing_files'] == 0
+    assert result['unavailable_files'][0]['reason'] == 'changed'
+
+def test_missing_checkpoint_is_identified_as_model(setup, monkeypatch):
+    from botocore.exceptions import ClientError
+    def head(**kw):
+        raise ClientError({'Error': {'Code': '404'}}, 'HeadObject')
+    monkeypatch.setattr(ee.storage, 's3', SimpleNamespace(head_object=head))
+    result = ee.estimate('run', 'r', include_model=True, include_images=False)
+    assert result['missing_files'] == 1
+    assert result['unavailable_files'][0]['role'] == 'model'
