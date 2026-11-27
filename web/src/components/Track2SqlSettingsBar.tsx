@@ -1,3 +1,4 @@
+import {SaveSection} from "./SaveSection";
 import {saveEntirePage} from "../lib/pageSave";
 import {capturePageSnapshot,restorePageSnapshot} from "../lib/pageSnapshot";
 import { useEffect, useState } from "react";
@@ -66,7 +67,7 @@ export function Track2SqlSettingsBar({ settings, onLoad, disabled, initialPreset
   const locked = disabled || busy;
   const saveName = name.trim() ? name.trim().replace(/_sql$/i, "") + "_sql" : loaded;
   const button = "rounded-md border border-black/15 px-2.5 py-1 text-xs font-medium text-ink-secondary disabled:opacity-40";
-  return <section className="mb-4 border-b border-hairline pb-4" aria-label="Database query saved settings">
+  return <SaveSection><section className="mb-4 border-b border-hairline pb-4" aria-label="Database query saved settings">
     <div className="flex flex-wrap items-center gap-2">
       <button className={button} disabled={locked} onClick={() => { onLoad(SQL_DEFAULTS); setLoaded(""); setSavedAt(""); setName(""); setMessage(""); setError(""); }}>New</button>
       <label className="text-xs">Save as <input aria-label="SQL settings name" value={name} disabled={locked} onChange={e => setName(e.target.value)} placeholder="name (saved as name_sql)" className="ml-2 w-44 rounded-sm border border-black/15 bg-page px-2 py-1 text-xs" /></label>
@@ -92,5 +93,5 @@ export function Track2SqlSettingsBar({ settings, onLoad, disabled, initialPreset
     <p className="mt-1.5 text-xs text-ink-muted">{savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : "Not saved yet"}<span className="ml-5 font-mono">Loaded: {loaded || "no file loaded"}</span></p>
     {message && <p role="status" className="mt-1 text-xs">{message}</p>}
     {error && <p role="alert" className="mt-1 text-xs text-critical">{error}</p>}
-  </section>;
+  </section></SaveSection>;
 }

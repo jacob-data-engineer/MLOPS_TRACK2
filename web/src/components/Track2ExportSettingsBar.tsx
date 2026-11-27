@@ -1,3 +1,4 @@
+import {SaveSection} from "./SaveSection";
 import {capturePageSnapshot,restorePageSnapshot} from "../lib/pageSnapshot";
 import {saveEntirePage} from "../lib/pageSave";
 import { useEffect, useState } from "react";
@@ -116,7 +117,7 @@ export function Track2ExportSettingsBar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
+    <SaveSection><div className="flex flex-wrap items-center gap-2 text-xs">
       <button
         type="button"
         disabled={!!busy}
@@ -220,6 +221,6 @@ export function Track2ExportSettingsBar({
           </span>
         )}
       </span>
-    </div>
+    </div></SaveSection>
   );
 }

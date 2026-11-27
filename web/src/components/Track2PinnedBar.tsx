@@ -1,3 +1,4 @@
+import {SaveSection} from "./SaveSection";
 import {saveEntirePage,usePageSave,useNamedPageSave} from "../lib/pageSave";
 import { useEffect, useState } from "react";
 import { formatDayTime } from "../lib/format";
@@ -171,7 +172,7 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
     /* No sticky here: the page pins the whole band -- title and toolbar
        together -- and a second sticky context inside the first just
        fights it. This is a plain strip. */
-    <div className="rounded-md border border-hairline bg-surface px-2.5 py-2">
+    <SaveSection><div className="rounded-md border border-hairline bg-surface px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
         {/* ---- start a fresh one ---- First in the row, because it is
              where a new file begins: New, then name it, then Save. */}
@@ -388,6 +389,6 @@ export function Track2PinnedBar({ scope }: { scope: Track2SettingsScope }) {
       {scope === "at" && <Track2ChainStatusBar />}
       {/* Training spend belongs with the training schedule. */}
       {scope === "at" && <Track2TrainingCostToday />}
-    </div>
+    </div></SaveSection>
   );
 }
