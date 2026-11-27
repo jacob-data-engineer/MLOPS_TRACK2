@@ -476,9 +476,6 @@ const NOTIFICATION_STEPS: StepList = [
         Type it into <strong>Add a subscriber</strong> and tick the kinds of
         email it should get: <strong>Training started</strong>,{" "}
         <strong>Training ended</strong> and <strong>Errors</strong>.{" "}
-        <strong>Evaluation metrics</strong> is marked <em>KIV</em> &mdash;
-        kept in view, not sent yet &mdash; and cannot be ticked until the
-        evaluation step publishes its metrics.
       </>
     ),
   },

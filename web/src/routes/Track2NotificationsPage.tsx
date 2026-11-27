@@ -35,7 +35,7 @@ function EventTicks({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      {events.map((ev) => (
+      {events.filter((ev) => !ev.kiv).map((ev) => (
         <label key={ev.key}
                className={`flex items-start gap-2 text-xs ${ev.kiv ? "text-ink-muted" : "text-ink"}`}>
           <input
@@ -47,20 +47,7 @@ function EventTicks({
               ? [...chosen, ev.key]
               : chosen.filter((k) => k !== ev.key))}
           />
-          <span>
-            {ev.label}
-            {ev.kiv && (
-              <span className="ml-1.5 rounded-sm border border-black/15 bg-page px-1 py-px text-[10px] font-medium uppercase tracking-wide">
-                KIV
-              </span>
-            )}
-            {ev.kiv && (
-              <span className="block text-[11px] text-ink-muted">
-                Kept in view -- not sent yet. It becomes selectable once the
-                evaluation step publishes its metrics.
-              </span>
-            )}
-          </span>
+          <span>{ev.label}</span>
         </label>
       ))}
     </div>
