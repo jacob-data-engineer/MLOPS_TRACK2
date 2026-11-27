@@ -4216,8 +4216,8 @@ export interface CatalogMetadata {
   file_manifest?: string;
 }
 
-export function getTrack2CatalogMetadata(kind: "run" | "version", id: string): Promise<CatalogMetadata> {
-  return apiGet(`/track2/catalog/metadata?${new URLSearchParams({ kind, id })}`);
+export function getTrack2CatalogMetadata(kind: "run" | "version", id: string, signal?: AbortSignal): Promise<CatalogMetadata> {
+  return request(`/track2/catalog/metadata?${new URLSearchParams({ kind, id })}`, {signal});
 }
 
 export function exportTrack2CatalogMetadata(kind: "run" | "version", id: string, options: CatalogExportDestination): Promise<{url?: string; uri?: string}> {
@@ -4234,8 +4234,8 @@ export interface PackageSizeEstimate {
   estimated_bytes: number | null; recommended_bytes: number | null;
   files: number; unknown_files: number; format: string; note: string;
 }
-export function estimateTrack2CatalogExport(kind: "run" | "version" | "experiment", id: string, options: CatalogExportDestination): Promise<PackageSizeEstimate> {
-  return apiPost("/track2/catalog/exports/estimate", {kind, id, ...options});
+export function estimateTrack2CatalogExport(kind: "run" | "version" | "experiment", id: string, options: CatalogExportDestination, signal?: AbortSignal): Promise<PackageSizeEstimate> {
+  return request("/track2/catalog/exports/estimate", {method:"POST",body:JSON.stringify({kind, id, ...options}),signal});
 }
 
 export function startTrack2CatalogExport(kind: "run" | "version" | "experiment", id: string,
@@ -4261,8 +4261,8 @@ export interface DatasetAvailability {
   problem?: 'sql_membership' | 'files' | 'version';
   version_id?: string; version_number?: number | null; train_images?: number | null; val_images?: number | null;
 }
-export function checkCatalogDataset(kind: 'run' | 'version' | 'experiment', id: string): Promise<DatasetAvailability> {
-  return apiGet(`/track2/catalog/dataset-availability?kind=${kind}&id=${encodeURIComponent(id)}`);
+export function checkCatalogDataset(kind: 'run' | 'version' | 'experiment', id: string, signal?: AbortSignal): Promise<DatasetAvailability> {
+  return request(`/track2/catalog/dataset-availability?kind=${kind}&id=${encodeURIComponent(id)}`, {signal});
 }
 
 export function stopTrack2CatalogExport(exportId: string): Promise<{ id: string; state: string }> {

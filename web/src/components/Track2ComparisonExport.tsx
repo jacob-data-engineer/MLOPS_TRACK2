@@ -56,6 +56,9 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
     return () => { disposed = true; };
   }, [destination.destination, destination.bucket, destination.prefix]);
   const [busy, setBusy] = useState(false);
+  const [reviewStage, setReviewStage] = useState("");
+  const reviewController = useRef<AbortController | null>(null);
+  useEffect(() => () => reviewController.current?.abort("cancelled"), []);
   const [running, setRunning] = useState(false);
   const [jobs, setJobs] = useState<Track2CatalogExport[]>([]);
   const [search, setSearch] = useState("");
@@ -110,20 +113,26 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
   useEffect(() => { setPreview([]); }, [selectionKey, chosen, images, model, metadata, groups, destination, metric]);
 
   async function review(arns: string[]) {
-    setBusy(true); setPreview([]); setError(""); setNotes([]);
+    const controller = new AbortController();
+    reviewController.current?.abort("cancelled"); reviewController.current = controller;
+    const signal = controller.signal;
+    const timeout = window.setTimeout(() => controller.abort("timeout"), 180000);
+    setBusy(true); setPreview([]); setError(""); setNotes([]); setReviewStage("Checking selected packages...");
     try {
       const targets: Target[] = []; const warnings: string[] = [];
       for (const row of ranked.filter(r => arns.includes(r.model_package_arn))) {
         const run = runs[row.model_package_arn];
         if (experimentId) {
           if (images) {
-            const availability = await checkCatalogDataset("experiment", experimentId);
+            setReviewStage("Checking the experiment dataset...");
+            const availability = await checkCatalogDataset("experiment", experimentId, signal);
             if (["unavailable","check_failed"].includes(availability.state)) throw new Error(availability.detail);
           }
+          setReviewStage("Calculating storage required for the experiment...");
           const estimate = await estimateTrack2CatalogExport("experiment", experimentId, {...destination,
             format: destination.destination === "local" ? "zip" : destination.format,
             include_images: images, include_model: model, include_metadata: metadata,
-            metadata_groups: groups, model_package_arns: arns});
+            metadata_groups: groups, model_package_arns: arns}, signal);
           targets.push({row,run,estimate}); break;
         }
 
@@ -131,25 +140,43 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
           if (images || metadata || !model) throw new Error(`${modelLabel(row)} has no recorded training run. Select only Model (.pt) to export its registered checkpoint.`);
           targets.push({row}); continue;
         }
-        const info = await getTrack2CatalogMetadata("run", run.run_id);
+        setReviewStage(`Run ${run.run_number}: checking checkpoint and metadata...`);
+        const info = await getTrack2CatalogMetadata("run", run.run_id, signal);
         if (model && !info.checkpoint_available) throw new Error(`Run ${run.run_number} has no published checkpoint.`);
         if (images) {
-          const availability = await checkCatalogDataset("run", run.run_id);
+          setReviewStage(`Run ${run.run_number}: checking preserved images and labels...`);
+          const availability = await checkCatalogDataset("run", run.run_id, signal);
           if (availability.state === "unavailable" || availability.state === "check_failed") throw new Error(`Run ${run.run_number}: ${availability.detail}`);
           warnings.push(`Run ${run.run_number}: ${availability.detail}`);
         }
         if (metadata && info.unavailable.length) warnings.push(`Run ${run.run_number}: metadata not recorded for ${info.unavailable.join(", ")}.`);
-        let estimate: PackageSizeEstimate | undefined;
+        targets.push({ row, run });
+      }
+      // Check every selected dataset before doing expensive file-size scans.
+      if (!experimentId) for (const target of targets) {
+        if (!target.run) continue;
+        const {row, run} = target;
+        setReviewStage(`Run ${run.run_number}: calculating storage required...`);
         try {
-          estimate = await estimateTrack2CatalogExport("run", run.run_id, {...destination, format: destination.destination === "local" ? "zip" : destination.format,
-            include_images: images, include_model: model, include_metadata: metadata, metadata_groups: groups, model_package_arn: row.model_package_arn});
-        } catch { warnings.push(`Run ${run.run_number}: storage estimate unavailable. Required space is unknown.`); }
-        targets.push({ row, run, estimate });
+          target.estimate = await estimateTrack2CatalogExport("run", run.run_id, {...destination,
+            format: destination.destination === "local" ? "zip" : destination.format,
+            include_images: images, include_model: model, include_metadata: metadata,
+            metadata_groups: groups, model_package_arn: row.model_package_arn}, signal);
+        } catch (e) {
+          if (signal.aborted) throw e;
+          warnings.push(`Run ${run.run_number}: storage estimate unavailable. Required space is unknown.`);
+        }
       }
       if (!targets.length) throw new Error("Choose at least one model to export.");
       setNotes(warnings); setPreview(targets);
-    } catch (e) { setError(message(e)); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setError(signal.aborted ? (signal.reason === "timeout"
+        ? "Package review timed out after 3 minutes. Try fewer models or retry. No export was started."
+        : "Package review cancelled. No export was started.") : message(e));
+    } finally {
+      window.clearTimeout(timeout);
+      if (reviewController.current === controller) { reviewController.current = null; setBusy(false); setReviewStage(""); }
+    }
   }
 
   async function exportPackages() {
@@ -273,6 +300,10 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
       <button className={button} disabled={invalid || !ranked.some(r => chosen.includes(r.model_package_arn))} onClick={() => void review(chosen)}>{busy ? "Checking availability..." : "Review selected packages"}</button>
       <p className="text-xs text-muted">Package options are saved with the named file using Save at the top of this page.</p>
     </fieldset>
+    {busy && <div role="status" className="flex items-center gap-3 text-xs">
+      <span>{reviewStage}</span>
+      <button type="button" className={button} onClick={() => reviewController.current?.abort("cancelled")}>Cancel review</button>
+    </div>}
     {notes.map((note, i) => <p className="text-xs" key={i}>{note}</p>)}
     {preview.length > 0 && <div className="space-y-2 rounded border border-hairline p-3 text-xs">
       <p className="font-medium">Ready to export these exact versions:</p>

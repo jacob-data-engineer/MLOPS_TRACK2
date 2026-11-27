@@ -93,7 +93,10 @@ def verify_central(version, *, check_cancel=False):
             if not head or head['ETag'] != member[f'central_{kind}_etag']:
                 raise ValueError(f'The preserved {kind} is missing or changed: {uri}')
     with ThreadPoolExecutor(max_workers=16) as pool:
-        list(pool.map(one, members))
+        # Do not submit the entire dataset: executor shutdown would wait for
+        # thousands of HEADs even after the first missing file was found.
+        for start in range(0, len(members), 16):
+            list(pool.map(one, members[start:start + 16]))
 
 
 @decay_locked
