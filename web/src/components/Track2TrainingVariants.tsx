@@ -75,7 +75,7 @@ export function Track2TrainingVariants({active=true,expectedClasses,detector,arc
   <h3 className="font-semibold">Save training setups as variants</h3>
   <p className="text-xs">Pick a model and baseline above, choose newly prepared data or a saved SQL dataset, then adjust Training Settings below and save each setup here. Every variant starts from the same starting model and uses the same train/validation images.</p>
   {!ready&&<p role="status" className="text-xs">You can enter names now. To save or run variants, choose a registered starting version and either newly prepared data or a saved SQL dataset above.</p>}
-  <BaselineClassWarning key={comparisonBaseline} arns={comparisonBaseline?[comparisonBaseline]:[]} expected={expectedClasses} onChecked={setClassBlocked}/>
+  <BaselineClassWarning validationOnly key={comparisonBaseline} arns={comparisonBaseline?[comparisonBaseline]:[]} expected={expectedClasses} onChecked={setClassBlocked}/>
   {classBlocked&&comparisonBaseline&&<p role="status" className="text-xs">Add to Queue is unavailable until baseline comparison classes are verified and compatible.</p>}
   <button type="button" disabled={busy} className="underline text-xs" onClick={()=>void refreshDraft()}>Refresh saved variants</button>
   <fieldset disabled={busy} className="min-w-0 space-y-3">

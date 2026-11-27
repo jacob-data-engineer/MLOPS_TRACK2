@@ -16,12 +16,12 @@ export function classDifferences(expected:Record<string,string>,actual:Classes){
  for(const c of actual)if(!names.has(c.name))rows.push({name:c.name,expected:'Not in dataset',actual:String(c.id),status:'Extra model class'});
  return rows;
 }
-export function BaselineClassWarning({arns,expected,onChecked}:{arns:string[];expected?:Record<string,string>;onChecked?:(blocked:boolean)=>void}){
+export function BaselineClassWarning({arns,expected,onChecked,validationOnly=false}:{arns:string[];expected?:Record<string,string>;onChecked?:(blocked:boolean)=>void;validationOnly?:boolean}){
  const [results,setResults]=useState<Record<string,{classes?:Classes;error?:string}>>({});
  const key=JSON.stringify(arns);
  useEffect(()=>{let active=true;setResults({});for(const arn of arns)void classesFor(arn).then(classes=>{if(active)setResults(r=>({...r,[arn]:{classes}}));}).catch(e=>{if(active)setResults(r=>({...r,[arn]:{error:e instanceof ApiError?e.detail:'Could not inspect checkpoint classes.'}}));});return()=>{active=false;};},[key]);
  useEffect(()=>{onChecked?.(!expected||!Object.keys(expected).length||!arns.length||arns.some(arn=>{const r=results[arn];return !r?.classes||classDifferences(expected,r.classes).some(d=>d.status!=='Matches'&&d.status!=='Different ID (remapped)');}));},[key,JSON.stringify(expected),results,onChecked]);
- if(!arns.length)return null;
+ if(validationOnly||!arns.length)return null;
  if(!expected||!Object.keys(expected).length)return <p className="text-xs">Select training classes to check baseline compatibility.</p>;
  return <div className="space-y-2">{arns.map(arn=>{
   const result=results[arn];const label=arn.split('/').slice(-2).join(' / ');
