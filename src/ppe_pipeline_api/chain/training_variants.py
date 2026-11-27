@@ -22,15 +22,34 @@ def now():
 def table():
     return record_store.Table(pc.TABLE_NAME)
 
+class LoadedExperiment(dict):
+    """Keep a local change fingerprint; never serialize it into SQL."""
+    pass
+
+
+def record_fingerprint(item):
+    return hashlib.sha256(json.dumps({k:v for k,v in item.items() if k != 'updated_at'},
+                                    sort_keys=True, default=str).encode()).hexdigest()
+
+
 def read(ident):
     item = table().get_item(Key={'kind': KIND, 'sort': ident}).get('Item')
     if not item:
         raise ValueError('Variant batch not found.')
-    return record_store.native_numbers(item)
+    result = LoadedExperiment(record_store.native_numbers(item))
+    result.saved_fingerprint = record_fingerprint(result)
+    return result
+
 
 def save(item):
+    fingerprint = record_fingerprint(item)
+    if isinstance(item, LoadedExperiment) and item.saved_fingerprint == fingerprint:
+        return
+
     item['updated_at'] = now()
-    table().put_item(Item=item)
+    table().put_item(Item=dict(item))
+    if isinstance(item, LoadedExperiment):
+        item.saved_fingerprint = fingerprint
 
 def all_records(kind=KIND):
     rows=[]
@@ -423,12 +442,27 @@ def advance_current(ident):
     return record_store.exclusive('training_variant:'+ident)(owned)()
 
 
+def worker_candidates():
+    """Poll scheduling fields only; load one full experiment after taking ownership."""
+    if not record_store.enabled():
+        return all_records()
+    with contextlib.closing(record_store.connection()) as conn:
+        cur = conn.cursor()
+        cur.execute(f"SELECT jsonb_build_object('id',payload->'id','state',payload->'state',"
+                    "'error',coalesce(payload->'error','{\"S\":\"\"}'::jsonb),"
+                    "'retry_at',coalesce(payload->'retry_at','{\"S\":\"\"}'::jsonb)) "
+                    f"FROM {table().sql} WHERE pk=%s "
+                    "AND (expires_at IS NULL OR expires_at>extract(epoch from now())) "
+                    "ORDER BY payload->'created_at'->>'S' DESC", (KIND,))
+        return [record_store.native_numbers(record_store.plain(row[0])) for row in cur.fetchall()]
+
+
 @record_store.exclusive('training_variants')
 def tick():
     if control.state().get('halted'): return
     if not record_store.enabled():
         return
-    for job in reversed(all_records()):
+    for job in reversed(worker_candidates()):
         if not recoverable(job) or not retry_due(job):
             continue
         try:

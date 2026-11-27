@@ -279,6 +279,7 @@ def test_remove_pending_preserves_history_and_prevents_execution(store,monkeypat
     assert e.remove_pending(j['id'])['state']=='Cancelled'
     with pytest.raises(ValueError,match='removed'):e.retry(j['id'])
     monkeypatch.setattr(e.record_store,'enabled',lambda:True)
+    monkeypatch.setattr(e,'worker_candidates',e.all_records)
     monkeypatch.setattr(e,'advance',lambda j:pytest.fail('Cancelled experiment executed'))
     e.tick.__wrapped__()
 
@@ -450,6 +451,7 @@ def test_permanent_error_still_requires_attention(store,monkeypatch):
 def test_failed_error_save_does_not_write_stale_snapshot_from_tick(store,monkeypatch):
     j=job(store)
     monkeypatch.setattr(e.record_store,'enabled',lambda:True)
+    monkeypatch.setattr(e,'worker_candidates',e.all_records)
     monkeypatch.setattr(e,'advance_current',lambda ident:(_ for _ in ()).throw(TimeoutError('SQL unavailable')))
     monkeypatch.setattr(e,'save',lambda item:pytest.fail('outer tick must not overwrite newer state'))
     e.tick.__wrapped__()
@@ -531,3 +533,39 @@ def test_reconciliation_preserves_real_failures_and_missing_evidence(store):
     store[1].put_item(Item={'id':'run-a','status':'Succeeded','model':{'model_package_arn':ARN}})
     assert not e.reconcile_queue_failure(j)
     assert all(v['state']=='Failed' for v in j['variants'])
+
+def test_unchanged_poll_does_not_rewrite_experiment(store,monkeypatch):
+    j=job(store)
+    writes=[]
+    original=store[0].put_item
+    monkeypatch.setattr(store[0],'put_item',lambda **kw:(writes.append(kw),original(**kw))[1])
+    e.save(j)
+    assert not writes
+    j['variants'][0]['state']='Queued'
+    e.save(j)
+    assert len(writes)==1
+    e.save(j)
+    assert len(writes)==1
+    assert not any('fingerprint' in k for k in writes[0]['Item'])
+
+
+def test_failed_save_keeps_changes_retryable(store,monkeypatch):
+    j=job(store);j['stage']='Changed'
+    original=store[0].put_item
+    monkeypatch.setattr(store[0],'put_item',lambda **kw:(_ for _ in ()).throw(TimeoutError()))
+    with pytest.raises(TimeoutError):e.save(j)
+    monkeypatch.setattr(store[0],'put_item',original)
+    e.save(j)
+    assert e.read(j['id'])['stage']=='Changed'
+
+
+def test_worker_candidates_load_only_schedule_fields(store,monkeypatch):
+    from types import SimpleNamespace
+    queries=[]
+    cur=SimpleNamespace(execute=lambda sql,args:queries.append((sql,args)),fetchall=lambda:[(e.record_store.typed({'id':'a','state':'Training','retry_at':'','error':''}),)])
+    monkeypatch.setattr(e.record_store,'enabled',lambda:True)
+    monkeypatch.setattr(e.record_store,'connection',lambda:SimpleNamespace(cursor=lambda:cur,close=lambda:None))
+    monkeypatch.setattr(e,'table',lambda:SimpleNamespace(sql='records_test'))
+    assert e.worker_candidates()==[{'id':'a','state':'Training','retry_at':'','error':''}]
+    assert 'jsonb_build_object' in queries[0][0]
+    assert "payload->'dataset'" not in queries[0][0]
