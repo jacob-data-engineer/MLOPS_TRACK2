@@ -1,3 +1,4 @@
+export interface PendingPreparation {id:string;state:string;stage:string;created_at:string;trigger:string;error?:string}
 import {experimentIdentity,displayRun} from "./experimentIdentity";
 import { beginPageRequest } from "./loadingActivity";
 /**
@@ -26,7 +27,7 @@ export interface VariantRunRecord {
 }
 export function listTrainingVariantDrafts():Promise<{drafts:TrainingVariantDraft[]}>{return apiGet('/track2/training-variants/drafts');}
 export function saveTrainingVariantDraft(payload:Omit<TrainingVariantDraft,'id'>):Promise<TrainingVariantDraft>{return apiPut('/track2/training-variants/drafts',payload);}
-export function listVariantRuns():Promise<{runs:VariantRunRecord[]}>{return apiGet('/track2/training-variants');}
+export function listVariantRuns():Promise<{runs:VariantRunRecord[];preparations?:PendingPreparation[]}>{return apiGet('/track2/training-variants');}
 export function startVariantRun(payload:unknown):Promise<VariantRunRecord>{return apiPost('/track2/training-variants',payload);}
 export function removePendingVariantRun(id:string):Promise<VariantRunRecord>{return apiDelete(`/track2/training-variants/${encodeURIComponent(id)}`);}
 export function retryVariantRun(id:string,index?:number):Promise<VariantRunRecord>{return apiPost(`/track2/training-variants/${encodeURIComponent(id)}/retry`,{index});}

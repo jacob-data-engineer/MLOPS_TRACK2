@@ -168,3 +168,21 @@ def test_scheduled_experiment_dispatch_is_frozen_and_does_not_queue_single_run(w
     assert dispatched[0][0]['variants'][0]['overrides']['epochs']==10
     assert dispatched[0][1]['trigger']=='schedule'
     assert jobs.latest()['experiment_id']==response['job']['id']
+
+def test_pending_summaries_excludes_created_experiments_and_private_config(monkeypatch):
+    statements = []
+    rows = [({'id': 'waiting', 'state': 'pending', 'created_at': '2026-11-27T03:40:00Z', 'trigger': 'schedule', 'config': {'private': 1}},),
+            ({'id': 'materialized', 'state': 'running', 'experiment_id': 'experiment'},)]
+    cursor = SimpleNamespace(execute=lambda sql, args: statements.append((sql, args)), fetchall=lambda: rows)
+    connection = SimpleNamespace(cursor=lambda: cursor, close=lambda: None)
+    monkeypatch.setattr(jobs.record_store, 'connection', lambda: connection)
+    monkeypatch.setattr(jobs, 'table', lambda: SimpleNamespace(sql='safe_table'))
+    rows = [(jobs.record_store.typed(r[0]),) for r in rows]
+    monkeypatch.setattr(jobs.record_store, 'enabled', lambda: True)
+    result = jobs.pending_summaries()
+    assert [r['id'] for r in result] == ['waiting']
+    assert result[0]['trigger'] == 'schedule'
+    assert 'config' not in result[0]
+    assert "IN ('pending','running')" in statements[0][0]
+    assert "ORDER BY payload->'created_at'->>'S' ASC" in statements[0][0]
+    assert statements[0][1] == (jobs.KIND,)

@@ -60,7 +60,8 @@ def save_draft(payload:Draft,session=Depends(require_session)):
     return call(lambda:e.save_draft(payload.model_dump(mode='json')))
 @router.get('')
 def listing(session=Depends(require_session)):
-    return {'runs':e.list_summaries()}
+    from ..chain.preparation_jobs import pending_summaries
+    return {'runs':e.list_summaries(), 'preparations':pending_summaries()}
 @router.post('')
 def create(payload:VariantBatch,session=Depends(require_session)):
     return call(lambda:e.create(payload.model_dump(mode='json')))

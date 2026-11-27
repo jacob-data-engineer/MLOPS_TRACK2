@@ -36,6 +36,19 @@ def jobs(*, active=False):
     return record_store.native_numbers(table().query(**query)['Items'])
 
 
+def pending_summaries():
+    """Queue display only; never load captured preparation configs."""
+    if not record_store.enabled():
+        return []
+    with contextlib.closing(record_store.connection()) as conn:
+        cur=conn.cursor()
+        cur.execute(f"SELECT payload - 'config' - 'experiment_payload' - 'overrides' FROM {table().sql} "
+                    "WHERE pk=%s AND payload->'state'->>'S' IN ('pending','running') "
+                    "ORDER BY payload->'created_at'->>'S' ASC", (KIND,))
+        rows=[record_store.native_numbers(record_store.plain(r[0])) for r in cur.fetchall()]
+    return [{**public(row),'created_at':row.get('created_at'),'trigger':row.get('trigger','manual')}
+            for row in rows if not row.get('experiment_id')]
+
 def latest():
     found = jobs(active=True) or jobs()
     return public(found[0]) if found else None
