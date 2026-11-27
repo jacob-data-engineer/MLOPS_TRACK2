@@ -77,7 +77,7 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
 
   return (
     <div className="mt-4">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">History</p><p className="mb-2 text-xs text-ink-muted">The latest 3 runs load first, with their variants grouped under one run number. Load 5 more runs to see older history.</p>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">History</p><p className="mb-2 text-xs text-ink-muted">The latest 3 runs are loaded.</p>
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
       {audits === null ? (
         <p className="text-sm text-ink-muted">Loading...</p>
