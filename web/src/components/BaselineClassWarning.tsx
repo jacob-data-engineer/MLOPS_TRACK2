@@ -26,14 +26,16 @@ export function BaselineClassWarning({arns,expected,onChecked}:{arns:string[];ex
  return <div className="space-y-2">{arns.map(arn=>{
   const result=results[arn];const label=arn.split('/').slice(-2).join(' / ');
   if(!result)return <p key={arn} role="status" className="text-xs">Checking checkpoint classes: {label}…</p>;
-  if(result.error)return <div key={arn} role="alert" className="border-2 border-amber-500 bg-amber-50 p-3 text-xs">Class compatibility not verified for {label}: {result.error}</div>;
+  if(result.error)return <div key={arn} role="alert" className="border-2 border-red-500 bg-red-50 p-2 text-xs">Class compatibility not verified for {label}: {result.error}</div>;
   const rows=classDifferences(expected,result.classes!);const differences=rows.filter(r=>r.status!=='Matches');
-  if(!differences.length)return <p key={arn} className="text-xs">Classes match: {label}</p>;
   const blocked=differences.some(r=>r.status!=='Different ID (remapped)');
-  return <div key={arn} role="alert" className="border-2 border-amber-500 bg-amber-50 p-3 text-ink">
-   <p className="font-semibold">{blocked?'Warning: comparison classes do not match':'Class IDs differ — names can be remapped'}</p>
-   <p className="my-1 break-all text-xs">{label}. {blocked?'This model cannot be compared with these validation classes. Choose a model with the same class names.':'The evaluator remaps IDs by class name; this does not prevent comparison.'}</p>
-   <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="p-2">Class name</th><th>Dataset ID</th><th>Model ID</th><th>Difference</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i} className={r.status!=='Matches'?'bg-amber-200 font-semibold':'border-t border-hairline'}><td className="p-2">{r.name}</td><td>{r.expected}</td><td>{r.actual}</td><td>{r.status}</td></tr>)}</tbody></table></div>
+  return <div key={arn} role={blocked?'alert':'status'} className={`border-2 p-2 text-ink ${blocked?'border-red-500 bg-red-50':'border-green-600 bg-green-50'}`}>
+   <p className="text-xs font-semibold">{blocked?'Warning: comparison classes do not match':differences.length?'Classes compatible — IDs will be remapped':'Classes match'}</p>
+   <p className="my-1 break-all text-xs">{label}. {blocked?'Choose a model with the same class names.':differences.length?'The evaluator remaps IDs by class name.':'All dataset and model classes match.'}</p>
+   <div className="max-h-60 overflow-auto"><table className="w-full table-fixed text-left text-xs"><thead className="sticky top-0 bg-surface"><tr><th className="w-[35%] px-2 py-1">Data Set Class ID</th><th className="w-[35%] px-2 py-1">Model Class ID / Class Name</th><th className="px-2 py-1">Difference</th></tr></thead><tbody>{rows.map((r,i)=>{
+    const missing=r.status==='Missing from model'||r.status==='Extra model class';
+    return <tr key={i} className={`border-t border-black/10 ${missing?'bg-[#fff0f3]':''}`}><td className="break-words px-2 py-1">{r.expected==='Not in dataset'?'Missing':`${r.expected} / ${r.name}`}</td><td className="break-words px-2 py-1">{r.actual==='Missing'?'Missing':`${r.actual} / ${r.name}`}</td><td className="break-words px-2 py-1">{r.status}</td></tr>;
+   })}</tbody></table></div>
   </div>;
  })}</div>;
 }
