@@ -6,8 +6,6 @@ import { Card } from "../components/Card";
 import { Track2ExportSettingsBar } from "../components/Track2ExportSettingsBar";
 import { Track2MetricsExportCard } from "../components/Track2MetricsExportCard";
 import { Track2ComparisonSummary } from "../components/Track2ComparisonSummary";
-import { Track2RunComparisons } from "../components/Track2RunComparisons";
-import { Track2ComparisonExport } from "../components/Track2ComparisonExport";
 import { Track2ModelPicker, modelLabel, rowKey } from "../components/Track2ModelPicker";
 import {
   ApiError,
@@ -237,8 +235,6 @@ export function Track2MetricsPage() {
     useState<Track2ExportSettings>(EXPORT_DEFAULTS);
   const [restoringSettings, setRestoringSettings] = useState(true);
   const [comparisonView, setComparisonView] = useState<'baseline' | 'models'>('models');
-  const [baselineRun, setBaselineRun] = useState('');
-  const [baselineSource,setBaselineSource]=useState<'single'|'experiment'>('single');
   const selectedVersions = exportSettings.comparison_versions ?? [];
   const selectedMetrics = new Set<MetricKey>((exportSettings.comparison_metrics ?? [...DEFAULT_METRIC_KEYS])
     .filter((key): key is MetricKey => METRICS.some(m => m.key === key)));
@@ -247,7 +243,7 @@ export function Track2MetricsPage() {
   // no way to tell a page from five minutes ago from one from five hours
   // ago -- which on a page about which model is best is the difference
   // between a decision and a guess.
-  usePageSnapshot('comparison-view',{comparisonView,baselineRun,baselineSource},v=>{setComparisonView(v.comparisonView);setBaselineRun(v.baselineRun);setBaselineSource(v.baselineSource??'single');});
+  usePageSnapshot('comparison-view',{comparisonView},v=>{setComparisonView(v.comparisonView);});
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [reloading, setReloading] = useState(false);
   // The audits are a second read: their own loading and failure, never
@@ -511,23 +507,7 @@ export function Track2MetricsPage() {
         </div>
       )}
 
-      {comparisonView === 'baseline' && <>
-        <fieldset aria-label="Baseline comparison source" className="my-4 flex gap-4"><label><input type="radio" name="baseline-source" checked={baselineSource==='single'} onChange={()=>setBaselineSource('single')}/> Single training run</label><label><input type="radio" name="baseline-source" checked={baselineSource==='experiment'} onChange={()=>setBaselineSource('experiment')}/> Experiment (all variants)</label></fieldset>
-        {baselineSource==='experiment'?<Track2ExperimentRuns/>:<>
-        <Track2RunComparisons initialRun={baselineRun} onRunChange={setBaselineRun} />
-        {!baselineRun.startsWith('experiment:') && <>        <Card title="Model export">
-          <p className="mb-3 text-xs">Export the selected training run's model, data and metadata. Choose the package contents and destination below.</p>
-          {!baselineRun ? <p className="text-sm">Choose a training run above to export.</p> :
-            !rows?.some(row => runsByArn[row.model_package_arn]?.run_id === baselineRun) ?
-              <p role="status" className="text-sm">No registered model is available for this run, or its model details are still loading.</p> :
-              <Track2ComparisonExport
-                key={baselineRun} stateKey={`baseline/${baselineRun}`}
-                rows={rows.filter(row => runsByArn[row.model_package_arn]?.run_id === baselineRun)}
-                runs={runsByArn} settings={exportSettings} onChange={setExportSettings} autoSelect
-              />}
-        </Card></>}
-        </>}
-      </>}
+      {comparisonView === 'baseline' && <Track2ExperimentRuns/>}
       <fieldset hidden={comparisonView !== 'models'} className="min-w-0 w-full" disabled={restoringSettings} aria-busy={restoringSettings}>
       {rows && (
         <Track2ModelPicker

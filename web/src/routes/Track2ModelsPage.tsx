@@ -985,8 +985,8 @@ export function TrainingForm({
  */
 export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard" | "multi" } = {}) {
   const multi = variant === "multi";
-  const [trainingMode,setTrainingMode]=useState<TrainingMode>("single");
-  usePageSnapshot("training-mode",{trainingMode},v=>setTrainingMode(v.trainingMode==="experiments"?"experiments":"single"));
+  const trainingMode:TrainingMode=multi?"experiments":"single";
+  usePageSnapshot("training-mode",{trainingMode},()=>{});
   const [data, setData] = useState<Track2ModelsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // `message` went with the queue buttons that were its only writer --
@@ -1362,7 +1362,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                 the single GPU slot everything here queues behind.
                 Importing is neither mode -- it moved up beside "Define a
                 new Model Name". */}
-            <Track2BaseModelPicker modeControl={multi ? <Track2TrainingMode value={trainingMode} onChange={setTrainingMode}/> : undefined}
+            <Track2BaseModelPicker modeControl={multi ? <Track2TrainingMode/> : undefined}
               detectorSlug={modelChoice.slug}
               detectorLabel={modelChoice.slug || "this Model Name"}
               architecture={modelChoice.architecture}
