@@ -5,8 +5,8 @@ import {formatDayTime} from '../lib/format';
 const display=(v:unknown)=>v==null?'—':typeof v==='object'?JSON.stringify(v):String(v);
 function RunStatus({status}:{status:string}){
  const state=status.toLowerCase();
- const color=['succeeded','completed','evaluated'].includes(state)?'border-green-600 bg-green-100 text-green-900':/fail|stop|cancel|attention/.test(state)?'border-red-600 bg-red-100 text-red-900':'border-yellow-600 bg-yellow-100 text-yellow-900';
- return <span className={`inline-block rounded border px-2 py-0.5 font-semibold ${color}`}>{status}</span>;
+ const color=['succeeded','completed','evaluated'].includes(state)?'border-green-700 bg-green-700 text-white':/fail|stop|cancel|attention/.test(state)?'border-red-600 bg-red-600 text-white':'border-yellow-700 bg-yellow-700 text-white';
+ return <span className={`inline-block rounded-md border px-2.5 py-1 font-semibold ${color}`}>{status}</span>;
 }
 function imageCount(audits:Track2TrainingAudit[],role:'train_dataset'|'eval_dataset'){
  const counts=[...new Set(audits.map(a=>a[role]?.file_count).filter((n):n is number=>typeof n==='number'))];
@@ -17,7 +17,7 @@ function imageCount(audits:Track2TrainingAudit[],role:'train_dataset'|'eval_data
  const baseline=run.comparison?.result?.rows?.find(row=>row.role==='baseline');
  const datasets=[...new Map(audits.map(a=>[a.dataset_version_id||a.id,a])).values()];
  return <details className="rounded border border-hairline bg-surface p-3 text-xs">
-  <summary className="cursor-pointer font-semibold"><RunStatus status={run.state}/> Run {run.run_number??'pending'} · {run.name} · {run.variants.length} models · {formatDayTime(run.created_at)}<span className="ml-3 font-normal">Training: {imageCount(audits,'train_dataset')} images · Validation: {imageCount(audits,'eval_dataset')} images</span></summary>
+  <summary className="cursor-pointer font-semibold"><span className="inline-flex w-[calc(100%-1rem)] items-center justify-between gap-3 align-middle"><span>Run {run.run_number??'pending'} · {run.name} · {run.variants.length} models · {formatDayTime(run.created_at)}<span className="ml-3 font-normal">Training: {imageCount(audits,'train_dataset')} images · Validation: {imageCount(audits,'eval_dataset')} images</span></span><span className="shrink-0"><RunStatus status={run.state}/></span></span></summary>
   <p className="my-2 break-all">Starting model: {run.baseline_arn.split('/').slice(-2).join(' / ')} · Comparison: {run.comparison?.status??'Not available'}</p>
   {run.comparison?.error&&<p className="text-critical">{run.comparison.error}</p>}
   <div className="my-3 rounded border border-hairline p-2"><strong>Common training parameters</strong><div className="mt-2 grid gap-2 sm:grid-cols-3 lg:grid-cols-5">{Object.entries(common).map(([k,v])=><span key={k}>{k.replace('hyperparams.','')}: <b>{display(v)}</b></span>)}</div></div>
