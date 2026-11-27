@@ -41,6 +41,23 @@ def all_records(kind=KIND):
             return sorted(record_store.native_numbers(rows),key=lambda r:r['created_at'],reverse=True)
         kwargs['ExclusiveStartKey']=page['LastEvaluatedKey']
 
+def list_summaries():
+    """Exclude file manifests in SQL before decoding; full records remain intact."""
+    if record_store.enabled():
+        with contextlib.closing(record_store.connection()) as conn:
+            cur = conn.cursor()
+            cur.execute(f"SELECT payload - 'dataset' - 'preparation_config' - 'request_digest' "
+                        f"FROM {table().sql} WHERE pk=%s "
+                        "AND (expires_at IS NULL OR expires_at>extract(epoch from now())) "
+                        "ORDER BY payload->>'created_at' DESC", (KIND,))
+            rows = [record_store.native_numbers(record_store.plain(r[0])) for r in cur.fetchall()]
+    else:
+        rows = [{k:v for k,v in row.items() if k not in ('dataset','preparation_config','request_digest')}
+                for row in all_records()]
+    ids = list({v['run_id'] for row in rows for v in row['variants'] if v.get('run_id')})
+    numbers = catalog_view.run_numbers(ids) if ids else {}
+    return [public(row, numbers=numbers) for row in rows]
+
 def save_draft(payload):
     """Save configurations only. No queue, S3 preparation or AWS job calls."""
     data.require_training_sql()
@@ -145,11 +162,12 @@ def create(payload, *, preparation_config=None, trigger="manual"):
         job=existing
     return public(job)
 
-def public(job):
+def public(job, numbers=None):
     value=copy.deepcopy(job)
     value.pop('request_digest',None)
     ids=[v['run_id'] for v in value['variants'] if v.get('run_id')]
-    numbers=catalog_view.run_numbers(ids)
+    if numbers is None:
+        numbers=catalog_view.run_numbers(ids)
     value['run_number']=value.get('run_number') or max(numbers.values(),default=None)
     for v in value['variants']:
         v['training_job_number']=numbers.get(v.get('run_id'))

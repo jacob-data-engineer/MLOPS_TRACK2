@@ -485,3 +485,16 @@ def test_legacy_experiment_uses_latest_existing_number_without_renumbering(store
     got=e.public(j)
     assert got['run_number']==2
     assert [v['run_number'] for v in got['variants']]==[2,2]
+
+def test_list_summaries_omits_manifests_but_preserves_full_records(store, monkeypatch):
+    p=payload(); e.create(p)
+    saved=e.read(p['id']); saved['dataset']={'file_provenance':['large manifest']}; saved['preparation_config']={'private':'settings'}
+    saved['variants'][0]['run_id']='child';e.save(saved)
+    calls=[]
+    monkeypatch.setattr(e.catalog_view,'run_numbers',lambda ids:calls.append(ids) or {'child':77})
+    result=e.list_summaries()
+    assert len(calls)==1
+    assert 'dataset' not in result[0] and 'preparation_config' not in result[0]
+    assert result[0]['variants'][0]['training_job_number']==77
+    assert e.read(p['id'])['dataset']['file_provenance']==['large manifest']
+    assert 'dataset' in e.public(e.read(p['id']))
