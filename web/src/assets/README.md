@@ -1,1 +1,0 @@
-Jurong Port logo extracted unchanged from the embedded image in the official Manual Handling document: https://www.jp.com.sg/downloads/2021-OMC/JPPL-EHS-19-03-SWP-10.pdf (retrieved 2026-11-27). Trademark belongs to Jurong Port. Bundled locally for the login page.
