@@ -140,16 +140,23 @@ def get_models(
 
 
 @router.get("/audit")
-def training_audit(limit: int = 50, session=Depends(require_session)) -> dict:
+def training_audit(limit: int = 50, session=Depends(require_session), order: str = "date") -> dict:
     """Full record of every submitted run: the exact folders and file names
     on both sides, every parameter, the notes, which model version came out
     of it, and when it started and ended."""
-    audits = t2.scan_training_audits(limit=min(max(limit, 1), 200))
+    audits = t2.scan_training_audits(limit=200 if order == "run_number" else min(max(limit, 1), 200))
     try:
         numbers = catalog_view.run_numbers([a["id"] for a in audits])
     except Exception:
         logging.getLogger(__name__).warning("Could not load catalog run numbers", exc_info=True)
         numbers = {}
+    if order == "run_number":
+        from ..chain.training_variants import list_summaries
+        owners = {v['run_id']:r.get('run_number') for r in list_summaries()
+                  for v in r['variants'] if v.get('run_id')}
+        audits.sort(key=lambda a: (owners.get(a['id']) or numbers.get(a['id']) or -1,
+                                   str(a.get('submitted_at') or '')), reverse=True)
+        audits = audits[:min(max(limit, 1), 200)]
     from ..training.comparison import status_for
     return {"audits": [{**a, "run_number": numbers.get(a["id"]),
                         "comparison_status": status_for(a)} for a in audits]}

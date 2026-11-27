@@ -8,7 +8,7 @@ export function groupTrainingHistory(audits:Track2TrainingAudit[],runs:VariantRu
   if(seen.has(run.id))return [];seen.add(run.id);
   const ids=new Set(run.variants.map(v=>v.run_id));
   return [{id:run.id,run,audits:audits.filter(a=>ids.has(a.id))}];
- });
+ }).sort((a,b)=>(b.run?.run_number??b.audits[0]?.run_number??-1)-(a.run?.run_number??a.audits[0]?.run_number??-1));
 }
 export function splitCommonSettings(settings:Record<string,unknown>[]){
  const flat=settings.map(s=>Object.fromEntries(Object.entries(s).flatMap(([key,value])=>key==='hyperparams'&&value&&typeof value==='object'?Object.entries(value).map(([k,v])=>[`hyperparams.${k}`,v]):[[key,value]])));

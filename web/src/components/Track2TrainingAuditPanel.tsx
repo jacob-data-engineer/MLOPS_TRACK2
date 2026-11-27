@@ -53,11 +53,11 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
       const experimentsRequest=listVariantRuns();
       const experiments=await experimentsRequest;
       let requested=limit;
-      let res=await getTrack2TrainingAudit(requested,experimentsRequest);
+      let res=await getTrack2TrainingAudit(requested,experimentsRequest,"run_number");
       let grouped=groupTrainingHistory(res.audits,experiments.runs);
       while(requested<200&&res.audits.length===requested&&(grouped.length<=limit||grouped.slice(0,limit).some(g=>g.run?.variants.some(v=>v.run_id&&!g.audits.some(a=>a.id===v.run_id))))){
         requested=Math.min(200,requested+5);
-        res=await getTrack2TrainingAudit(requested,experimentsRequest);
+        res=await getTrack2TrainingAudit(requested,experimentsRequest,"run_number");
         grouped=groupTrainingHistory(res.audits,experiments.runs);
       }
       setHasMore(grouped.length>limit);
