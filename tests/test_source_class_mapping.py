@@ -44,7 +44,7 @@ def test_only_prepared_copies_written_and_originals_read():
     reads, writes = [], []
     def get(**kw):
         reads.append(kw)
-        return {'Body': BytesIO(b'0 .1 .2 .3 .4\n')}
+        return {'Body': BytesIO(b'0 .1 .2 .3 .4\n'), 'Metadata': {'captured_at': '2026-09-03T12:00:00+00:00'}}
     s3 = SimpleNamespace(get_object=get, put_object=lambda **kw: writes.append(kw))
     args = dict(config=config(), bucket='dest', decayed='store_decay',
         pairs=[('dest', 'store/golden/labels/train/a.txt', 'store_decay/golden/labels/train/a.txt')],
@@ -54,6 +54,7 @@ def test_only_prepared_copies_written_and_originals_read():
     assert reads[0]['Key'] == 'store/golden/labels/train/a.txt'
     assert all(w['Key'].startswith('store_decay/') for w in writes)
     assert writes[0]['Body'].startswith(b'1 ')
+    assert writes[0]['Metadata']['captured_at'] == '2026-09-03T12:00:00+00:00'
     assert any(w['Key'].endswith('class_mapping.json') for w in writes)
     m.apply(**args)
     assert writes[4]['Body'].startswith(b'1 ')  # no cumulative remapping

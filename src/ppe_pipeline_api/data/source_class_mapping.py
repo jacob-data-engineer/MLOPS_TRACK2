@@ -99,18 +99,20 @@ def apply(config, bucket, decayed, pairs, train, val, *, s3, checkpoint, progres
     def prepare(item):
         checkpoint()
         src_bucket, src, dest, root, record = item
-        body = s3.get_object(Bucket=src_bucket, Key=src)['Body'].read().decode('utf-8')
+        source = s3.get_object(Bucket=src_bucket, Key=src)
+        body = source['Body'].read().decode('utf-8')
         try:
             rewritten, counts = rewrite(body, record['ids'])
         except ValueError as exc:
             raise ValueError(f'{src}: {exc}') from exc
-        return dest, rewritten, root, counts
+        return dest, rewritten, root, counts, source.get('Metadata', {})
     # Validate all used IDs before writing any rewritten labels or metadata.
     with ThreadPoolExecutor(max_workers=8) as pool:
         prepared = list(pool.map(prepare, labels))
-    for i, (dest, body, _, _) in enumerate(prepared):
+    for i, (dest, body, _, _, metadata) in enumerate(prepared):
         checkpoint()
-        s3.put_object(Bucket=bucket, Key=dest, Body=body, ContentType='text/plain')
+        s3.put_object(Bucket=bucket, Key=dest, Body=body, ContentType='text/plain',
+                      **({'Metadata': metadata} if metadata else {}))
         progress('class_mapping', i + 1, len(prepared))
     for root, record in targets.items():
         checkpoint()

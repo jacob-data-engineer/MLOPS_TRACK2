@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import datetime as dt
 import io
 import json
 import math
@@ -159,8 +160,13 @@ def export(key, sql, *, bucket="", folder="", dest_bucket, dest_folder,
         errors, records, sides = [], [], {"train": 0, "val": 0}
         def copy(entry):
             image, row, item, side, target, identity = entry
+            moment = sx.capture_moment(row, image['key'])
+            captured_at = moment.astimezone(dt.timezone.utc).isoformat() if moment else ''
+            metadata = {'Metadata': {'captured_at': captured_at}} if captured_at else {}
             try:
                 already = exists(dest_bucket, target)
+                if already:
+                    sx._stamp_existing_capture(dest_bucket, target, captured_at)
                 if mode == "classification":
                     if not already:
                         raw = s3.get_object(Bucket=image["bucket"], Key=image["key"])["Body"].read()
@@ -169,12 +175,12 @@ def export(key, sql, *, bucket="", folder="", dest_bucket, dest_folder,
                                 raise ValueError("Recorded frame dimensions do not match the image.")
                             out = io.BytesIO()
                             im.convert("RGB").crop(item["crop"]).save(out, format="JPEG", quality=95)
-                        s3.put_object(Bucket=dest_bucket, Key=target, Body=out.getvalue(), ContentType="image/jpeg")
+                        s3.put_object(Bucket=dest_bucket, Key=target, Body=out.getvalue(), ContentType="image/jpeg", **metadata)
                 else:
                     s3.put_object(Bucket=dest_bucket, Key=f"{dest_folder}/labels/{side}/{identity}.txt",
-                                  Body=item["labels"].encode(), ContentType="text/plain")
+                                  Body=item["labels"].encode(), ContentType="text/plain", **metadata)
                     if not already:
-                        s3.copy_object(Bucket=dest_bucket, Key=target, CopySource={"Bucket": image["bucket"], "Key": image["key"]})
+                        sx._copy_with_capture(image["bucket"], image["key"], dest_bucket, target, captured_at)
                 return already, side, {"target": target, "source": image["uri"], "case_key": row.get("case_key"), **item}, None
             except Exception as exc:
                 return False, side, None, f"{image['uri']}: {exc}"

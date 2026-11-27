@@ -2604,3 +2604,27 @@ def test_an_empty_folder_reads_as_empty_and_a_missing_one_does_not(monkeypatch):
     assert (rows["week_2"]["state"], rows["week_2"]["exists"]) == ("empty", True)
     # week_3 was never created at all.
     assert (rows["week_3"]["state"], rows["week_3"]["exists"]) == ("missing", False)
+
+@pytest.mark.parametrize('mode', ['capture_time', 'file_time'])
+def test_sql_metadata_clock_wins_over_later_upload_and_filename(monkeypatch, config, mode):
+    class MetadataS3:
+        calls = 0
+        def head_object(self, **kwargs):
+            self.calls += 1
+            return {'Metadata': {'captured_at': '2026-09-03T20:00:00+08:00'}}
+    fake = MetadataS3()
+    monkeypatch.setattr(pc, 's3', fake)
+    for key in ('drop/images/20260924T120000Z.jpg', 'drop/labels/20260924T120000Z.txt'):
+        obj = {'Key': key, 'LastModified': _at(24), 'ETag': 'a'}
+        when, clock = pc.file_moment(obj, {**config, 'week_by': mode}, 'source')
+        assert when == _at(3) and clock == 'capture'
+        week, _ = pc.project_week(when, list(WEEKS), config)
+        assert week['name'] == 'week_1'
+        pc.file_moment(obj, config, 'source')
+    assert fake.calls == 2  # polling reuses metadata for unchanged objects
+
+
+def test_invalid_capture_metadata_does_not_silently_use_upload_time():
+    with pytest.raises(ValueError, match='Invalid captured_at'):
+        pc.file_moment({'Key': 'a.jpg', 'LastModified': _at(24),
+                        'Metadata': {'captured_at': 'invalid'}}, {'week_by': 'file_time'})

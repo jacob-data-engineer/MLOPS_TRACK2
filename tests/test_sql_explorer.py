@@ -172,23 +172,26 @@ class _S3:
     def __init__(self, objects):
         self.objects = dict(objects)          # (bucket, key) -> bytes
         self.copies = []
+        self.metadata = {}
 
     def head_object(self, Bucket, Key):
         if (Bucket, Key) not in self.objects:
             raise Exception("404")
-        return {}
+        return {"Metadata": self.metadata.get((Bucket, Key), {})}
 
-    def copy_object(self, Bucket, Key, CopySource):
+    def copy_object(self, Bucket, Key, CopySource, **kwargs):
         self.objects[(Bucket, Key)] = self.objects[(CopySource["Bucket"], CopySource["Key"])]
         self.copies.append(Key)
+        self.metadata[(Bucket, Key)] = kwargs.get("Metadata", self.metadata.get((CopySource["Bucket"], CopySource["Key"]), {}))
 
     def get_object(self, Bucket, Key):
         if (Bucket, Key) not in self.objects:
             raise Exception("404")
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
 
-    def put_object(self, Bucket, Key, Body, ContentType=""):
+    def put_object(self, Bucket, Key, Body, ContentType="", **kwargs):
         self.objects[(Bucket, Key)] = Body
+        self.metadata[(Bucket, Key)] = kwargs.get("Metadata", {})
 
 
 def _pull_setup(monkeypatch, rows, objects):
@@ -599,3 +602,37 @@ def test_manual_pull_runs_without_browser_consuming_progress(monkeypatch):
     finally:
         release.set()
     assert finished.wait(1)
+
+def test_sql_capture_is_preserved_on_image_and_label_and_repeat(monkeypatch):
+    fake = _Lambda({'ok': True, 'columns': ['image', 'case_key'],
+                    'rows': [['s3://src/set/images/train/a.jpg', 'camera/frame_20260903T120000Z']],
+                    'truncated': False})
+    monkeypatch.setattr(sx, '_client', lambda kind: fake)
+    s3 = _S3({('src', 'set/images/train/a.jpg'): b'A',
+              ('src', 'set/labels/train/a.txt'): b'0 .5 .5 .1 .1'})
+    s3.metadata[('src', 'set/images/train/a.jpg')] = {'origin': 'camera'}
+    monkeypatch.setattr(sx.storage, 's3', s3)
+    args = dict(dest_bucket='d', dest_folder='p', train_percent=100)
+    result = sx.pull('violation-review', 'q', **args)
+    assert result['failed'] == 0
+    for key in ('p/images/train/a.jpg', 'p/labels/train/a.txt'):
+        assert s3.metadata[('d', key)]['captured_at'] == '2026-09-03T12:00:00+00:00'
+    assert s3.metadata[('d', 'p/images/train/a.jpg')]['origin'] == 'camera'
+    # An explicit repeat repairs metadata on older copied files without changing bytes.
+    s3.metadata[('d', 'p/images/train/a.jpg')] = {}
+    again = sx.pull('violation-review', 'q', **args)
+    assert again['failed'] == 0 and again['copied'] == 0
+    assert s3.metadata[('d', 'p/images/train/a.jpg')]['captured_at'].startswith('2026-09-03')
+
+
+def test_generated_sql_labels_receive_same_capture_date(monkeypatch):
+    fake = _Lambda({'ok': True, 'columns': ['image', 'width', 'height', 'people', 'drawn_box', 'captured_at'],
+                    'rows': [['s3://src/f/a.jpg', 1000, 500, _ROW['people'], None, '2026-09-03T20:00:00+08:00']],
+                    'truncated': False})
+    monkeypatch.setattr(sx, '_client', lambda kind: fake)
+    s3 = _S3({('src', 'f/a.jpg'): b'A'})
+    monkeypatch.setattr(sx.storage, 's3', s3)
+    result = sx.pull('violation-review', 'q', dest_bucket='d', dest_folder='p', train_percent=100)
+    assert result['failed'] == 0
+    assert s3.metadata[('d', 'p/images/train/a.jpg')] == s3.metadata[('d', 'p/labels/train/a.txt')]
+    assert s3.metadata[('d', 'p/labels/train/a.txt')]['captured_at'] == '2026-09-03T12:00:00+00:00'

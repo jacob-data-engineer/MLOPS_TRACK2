@@ -9,13 +9,11 @@ trainer needs:
     retraining_evaluation/
       week_1/  images/  labels/
 
-Which week a file belongs to comes from its S3 LastModified -- which is
-when it was WRITTEN TO THE BUCKET, not when it was captured. S3 keeps no
-capture time, and a JPEG's EXIF date is not read here. So a batch of
-last month's photos uploaded today is filed under today's week. That is
-the right answer when the drop folder is fed by a pipeline that uploads
-as it goes, and the wrong one when someone uploads a backlog by hand --
-in which case give it its own week and set that week's start date.
+SQL-pulled files carry captured_at metadata on both image and label. That
+clock takes precedence over upload time for per-file week routing. Other
+files use the configured filename capture clock or S3 LastModified fallback.
+Scan mode intentionally groups a sweep together. Retention ages the resulting
+week folders, so copying an image does not make its capture week younger.
 
 This module is the single source of truth for that routing. It is also
 the Lambda's handler file -- Terraform zips this exact file -- so it
@@ -27,6 +25,8 @@ goes is how the drop folder and the trainer end up disagreeing.
 from __future__ import annotations
 
 import datetime as _dt
+from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import itertools
 import json
@@ -894,7 +894,32 @@ def capture_time(key: str) -> _dt.datetime | None:
         return None
 
 
-def file_moment(obj: dict, config: dict) -> tuple:
+@lru_cache(maxsize=16384)
+def _capture_metadata(client, bucket, key, etag, modified):
+    # ListObjects omits custom metadata. Cache by object revision so polling
+    # does not repeat a HEAD for every unchanged image and label.
+    return client.head_object(Bucket=bucket, Key=key).get("Metadata", {}).get("captured_at", "")
+
+
+def _dated_objects(prefix, bucket, config):
+    """Bounded concurrent metadata reads; ordinary inventories remain list-only."""
+    objects = iter(_list_objects(prefix, bucket))
+    if not bucket or config.get("week_by") == "scan":
+        yield from objects
+        return
+
+    def dated(obj):
+        if obj["Key"].lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp", ".txt")):
+            stamp = _capture_metadata(s3, bucket, obj["Key"], obj.get("ETag", ""), obj.get("LastModified"))
+            return {**obj, "Metadata": {"captured_at": stamp}}
+        return obj
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        while batch := list(itertools.islice(objects, 128)):
+            yield from pool.map(dated, batch)
+
+
+def file_moment(obj: dict, config: dict, bucket: str = "") -> tuple:
     """`(moment, source)` -- when a file counts as having happened.
 
     One place, so the preview, the sweep and the waiting count cannot
@@ -907,6 +932,17 @@ def file_moment(obj: dict, config: dict) -> tuple:
     convention, and the count of fallbacks is reported so a source that
     does not use the convention is visible rather than merely tolerated.
     """
+    stamp = obj.get("Metadata", {}).get("captured_at", "")
+    if bucket and "Metadata" not in obj:
+        stamp = _capture_metadata(s3, bucket, obj["Key"], obj.get("ETag", ""), obj.get("LastModified"))
+    if stamp:
+        try:
+            taken = _dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            if taken.tzinfo is None:
+                raise ValueError("timezone required")
+        except ValueError as exc:
+            raise ValueError(f"Invalid captured_at metadata for {obj['Key']}: {stamp}") from exc
+        return taken.astimezone(_dt.timezone.utc), "capture"
     if str(config.get("week_by") or "") == "capture_time":
         taken = capture_time(obj["Key"])
         if taken is not None:
@@ -1179,7 +1215,7 @@ def plan_routing(*, config: dict | None = None, limit: int | None = None) -> dic
         if not prefix or not str(source.get("destination") or "").strip("/"):
             continue
         bucket = source_bucket(source)
-        for obj in _list_objects(prefix + "/", bucket):
+        for obj in _dated_objects(prefix + "/", bucket, config):
             # No cap by default, like the sweep it previews.
             if limit and len(planned) >= limit:
                 break
@@ -1190,7 +1226,7 @@ def plan_routing(*, config: dict | None = None, limit: int | None = None) -> dic
                 skipped.append({"key": key, "reason": "not an image or a label"})
                 continue
             root, sub = where
-            when, _clock = file_moment(obj, config)
+            when, _clock = file_moment(obj, config, bucket)
 
             if by_scan:
                 # The same single week the sweep would choose. Projected,
@@ -1591,7 +1627,7 @@ def route_pending(*, config: dict | None = None, limit: int | None = None,
             continue
         action = _action_of(source)
         bucket = source_bucket(source)
-        for obj in _list_objects(prefix + "/", bucket):
+        for obj in _dated_objects(prefix + "/", bucket, config):
             # NO CAP by default (2026-10-26): a sweep files everything
             # waiting. The old 5,000 stopped a 5,240-file pull short and
             # left the last 240 -- the val labels, last in the source
@@ -1634,7 +1670,7 @@ def route_pending(*, config: dict | None = None, limit: int | None = None,
                     scan_week, weeks = week_for_scan(weeks, config)
                 week = scan_week
             else:
-                when, clock = file_moment(obj, config)
+                when, clock = file_moment(obj, config, bucket)
                 if clock == "fallback":
                     fell_back += 1
                 week, weeks = ensure_week_covering(when, weeks, config)
@@ -2079,7 +2115,7 @@ def pending_summary(*, config: dict | None = None, limit: int | None = None) -> 
         if not prefix or not str(source.get("destination") or "").strip("/"):
             continue
         bucket = source_bucket(source)
-        for obj in _list_objects(prefix + "/", bucket):
+        for obj in _dated_objects(prefix + "/", bucket, config):
             scanned += 1
             if limit and scanned > limit:
                 capped = True
@@ -2099,7 +2135,7 @@ def pending_summary(*, config: dict | None = None, limit: int | None = None) -> 
                         pending_weeks = pending_weeks + [made]
                 week = scan_week
             else:
-                when, clock = file_moment(obj, config)
+                when, clock = file_moment(obj, config, bucket)
                 if clock == "fallback":
                     fell_back += 1
                 week, projected = project_week(when, pending_weeks, config)

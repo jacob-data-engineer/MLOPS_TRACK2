@@ -814,6 +814,27 @@ def copy_plan(images: list[dict], train_percent: int) -> list:
     return plan
 
 
+def _copy_with_capture(source_bucket, source_key, dest_bucket, dest_key, captured_at):
+    """Preserve source metadata while attaching the SQL capture clock."""
+    options = {}
+    if captured_at:
+        head = storage.s3.head_object(Bucket=source_bucket, Key=source_key)
+        options = {key: head[key] for key in (
+            "ContentType", "CacheControl", "ContentDisposition", "ContentEncoding",
+            "ContentLanguage", "Expires") if key in head}
+        options.update(MetadataDirective="REPLACE", Metadata={
+            **head.get("Metadata", {}), "captured_at": captured_at})
+    storage.s3.copy_object(Bucket=dest_bucket, Key=dest_key,
+                          CopySource={"Bucket": source_bucket, "Key": source_key}, **options)
+
+
+def _stamp_existing_capture(bucket, key, captured_at):
+    if captured_at:
+        head = storage.s3.head_object(Bucket=bucket, Key=key)
+        if head.get("Metadata", {}).get("captured_at") != captured_at:
+            _copy_with_capture(bucket, key, bucket, key, captured_at)
+
+
 #: Columns read as a frame's capture moment, in order. A query that names
 #: one of these outright wins over the stamp inside `case_key`.
 CAPTURE_COLUMNS = ("captured_at", "capture_time", "capture_at")
@@ -1044,16 +1065,17 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
 
     def copy(entry):
         image, side, name, week = entry
+        moment = capture_moment({"captured_at": image.get("captured_at")}, image["key"])
+        captured_at = moment.astimezone(_dt.timezone.utc).isoformat() if moment else ""
         target, label_target = target_keys(dest_folder, side, name, week)
         out = {"image": image["uri"], "target": target, "side": side, "week": week,
                "copied": False, "label": "", "error": ""}
         try:
             if _exists(dest_bucket, target):
+                _stamp_existing_capture(dest_bucket, target, captured_at)
                 out["skipped"] = True
             else:
-                storage.s3.copy_object(
-                    Bucket=dest_bucket, Key=target,
-                    CopySource={"Bucket": image["bucket"], "Key": image["key"]})
+                _copy_with_capture(image["bucket"], image["key"], dest_bucket, target, captured_at)
                 out["copied"] = True
             if not with_labels:
                 return out
@@ -1061,15 +1083,18 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
                 if not _exists(dest_bucket, label_target):
                     storage.s3.put_object(Bucket=dest_bucket, Key=label_target,
                                           Body=yolo_text(image["labels"]).encode(),
-                                          ContentType="text/plain")
+                                          ContentType="text/plain",
+                                          **({"Metadata": {"captured_at": captured_at}} if captured_at else {}))
+                else:
+                    _stamp_existing_capture(dest_bucket, label_target, captured_at)
                 out["label"] = "database"
                 return out
             source_label = label_key_for(image["key"])
             if source_label and _exists(image["bucket"], source_label):
                 if not _exists(dest_bucket, label_target):
-                    storage.s3.copy_object(
-                        Bucket=dest_bucket, Key=label_target,
-                        CopySource={"Bucket": image["bucket"], "Key": source_label})
+                    _copy_with_capture(image["bucket"], source_label, dest_bucket, label_target, captured_at)
+                else:
+                    _stamp_existing_capture(dest_bucket, label_target, captured_at)
                 out["label"] = f"s3://{image['bucket']}/{source_label}"
         except Exception as exc:                                    # noqa: BLE001
             out["error"] = str(exc)
