@@ -27,6 +27,7 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
   const [error, setError] = useState<string | null>(null);
   const [limit,setLimit]=useState(3);
   const [loading,setLoading]=useState(false);
+  const [hasMore,setHasMore]=useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const [historyHeight, setHistoryHeight] = useState<number>();
 
@@ -50,9 +51,18 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
     setLoading(true);
     try {
       const experimentsRequest=listVariantRuns();
-      const [res,experiments] = await Promise.all([getTrack2TrainingAudit(limit,experimentsRequest),experimentsRequest]);
+      const experiments=await experimentsRequest;
+      let requested=limit;
+      let res=await getTrack2TrainingAudit(requested,experimentsRequest);
+      let grouped=groupTrainingHistory(res.audits,experiments.runs);
+      while(requested<200&&res.audits.length===requested&&(grouped.length<=limit||grouped.slice(0,limit).some(g=>g.run?.variants.some(v=>v.run_id&&!g.audits.some(a=>a.id===v.run_id))))){
+        requested=Math.min(200,requested+5);
+        res=await getTrack2TrainingAudit(requested,experimentsRequest);
+        grouped=groupTrainingHistory(res.audits,experiments.runs);
+      }
+      setHasMore(grouped.length>limit);
       setRuns(experiments.runs);
-      setAudits(res.audits);
+      setAudits(grouped.slice(0,limit).flatMap(group=>group.audits));
       setError(null);
     } catch {
       setError("Could not load the training history.");
@@ -67,7 +77,7 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
 
   return (
     <div className="mt-4">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">History</p><p className="mb-2 text-xs text-ink-muted">The latest 3 training records load first. Load 5 more to see older records. Records from the same experiment are grouped together.</p>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">History</p><p className="mb-2 text-xs text-ink-muted">The latest 3 runs load first, with their variants grouped under one run number. Load 5 more runs to see older history.</p>
       {error && <p className="mb-2 text-xs text-critical">{error}</p>}
       {audits === null ? (
         <p className="text-sm text-ink-muted">Loading...</p>
@@ -80,7 +90,7 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
             <AuditRow key={group.id} audit={group.audits[0]} onDeleted={load}/>)}
         </div>
       )}
-      {audits!==null&&<div className="mt-3 flex items-center gap-3 text-xs"><span>{audits.length} training records loaded{limit>=200?' (200-record limit)':''}.</span>{audits.length>=limit&&limit<200&&<button type="button" className="rounded border border-hairline px-3 py-1" disabled={loading} onClick={()=>setLimit(current=>Math.min(200,current+5))}>{loading?'Loading...':'Load 5 more'}</button>}{error&&<button type="button" disabled={loading} onClick={()=>void load()}>Retry</button>}</div>}
+      {audits!==null&&<div className="mt-3 flex items-center gap-3 text-xs"><span>{groupTrainingHistory(audits,runs).length} runs loaded.</span>{hasMore&&<button type="button" className="rounded border border-hairline px-3 py-1" disabled={loading} onClick={()=>setLimit(current=>current+5)}>{loading?'Loading...':'Load 5 more runs'}</button>}{error&&<button type="button" disabled={loading} onClick={()=>void load()}>Retry</button>}</div>}
     </div>
   );
 }
