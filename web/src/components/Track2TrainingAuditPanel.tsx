@@ -3,7 +3,7 @@ import {groupTrainingHistory} from "../lib/trainingHistory";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCardOpen } from "../lib/cardState";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, type BadgeTone } from "./Badge";
+import {RunStatusBadge} from "./RunStatusBadge";
 import {
   getTrack2TrainingAudit, listVariantRuns, type VariantRunRecord,
   type Track2TrainingAudit,
@@ -95,12 +95,6 @@ export function Track2TrainingHistory({ reloadKey = 0 }: { reloadKey?: number })
   );
 }
 
-function statusTone(status: string): BadgeTone {
-  if (status === "Succeeded") return "confirmed";
-  if (status === "Failed" || status === "Stopped") return "rejected";
-  return "pending";
-}
-
 /** Local time, and the date too -- a bare clock time is ambiguous on a
  * record that can be weeks old. */
 function formatTime(value: string | null): string {
@@ -163,7 +157,7 @@ export function AuditRow({ audit }: { audit: Track2TrainingAudit; onDeleted?: ()
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
           {open ? <ChevronDown size={14} className="shrink-0 text-ink-muted" /> : <ChevronRight size={14} className="shrink-0 text-ink-muted" />}
-          <Badge tone={statusTone(audit.status)} label={audit.status} />
+          <RunStatusBadge status={audit.status} />
           <span className="text-xs text-ink-muted">{audit.comparison_status || 'No comparisons'}</span>
           <span className="tabular shrink-0 text-sm font-semibold text-ink"
                 title={audit.run_number == null ? "A run number appears after the catalog syncs." : "Experiment run number"}>
