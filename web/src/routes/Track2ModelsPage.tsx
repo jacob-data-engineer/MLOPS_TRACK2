@@ -988,6 +988,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
   const multi = variant === "multi";
   const trainingMode:TrainingMode=multi?"experiments":"single";
   usePageSnapshot("training-mode",{trainingMode},()=>{});
+  const [experimentActivity,setExperimentActivity]=useState<boolean|null>(null);
   const [data, setData] = useState<Track2ModelsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // `message` went with the queue buttons that were its only writer --
@@ -1438,7 +1439,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
                 ? `1 running, ${data.queue.pending.length} queued (max ${data.queue.max_size})`
                 : `${data.queue.pending.length} of ${data.queue.max_size} max`
             }
-            action={<TrainingStopAll />}
+            action={<TrainingStopAll running={Boolean(data.queue.running||data.queue.pending.length||data.pending_message||experimentActivity)} loaded={experimentActivity!==null} />}
           >
             {/* Run status lives here rather than in its own card. The old
                 "Latest training run" panel read from training_progress,
@@ -1468,7 +1469,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
             {data.queue.last_error && (
               <p className="mb-2 text-xs text-critical">{data.queue.last_error}</p>
             )}
-            <Track2ExperimentRuns queue progress={data.training_progress}/>
+            <Track2ExperimentRuns queue progress={data.training_progress} onActivity={setExperimentActivity}/>
             <Track2RecordingProgress progress={data.queue.submission_progress}/>
             <div className="mb-3">
               <StatTile label="Completed" value={data.queue.completed_count} />
