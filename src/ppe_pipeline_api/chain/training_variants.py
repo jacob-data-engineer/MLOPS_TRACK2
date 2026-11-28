@@ -212,6 +212,9 @@ def public(job, numbers=None):
         value['starting_model_arn']=value['baseline_arn']
         value['baseline_arn']=value['comparison_baseline_arn'] or ''
         value['baseline']=value.get('comparison_baseline')
+    # The registered comparison name is the display identity, not its source.
+    if value.get('baseline_label') and value.get('baseline'):
+        value['baseline']['label'] = value['baseline_label']
     ids=[v['run_id'] for v in value['variants'] if v.get('run_id')]
     if numbers is None:
         numbers=catalog_view.run_numbers(ids)

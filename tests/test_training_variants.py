@@ -650,3 +650,15 @@ def test_named_comparison_label_is_retained(store,monkeypatch):
     saved=e.read(p['id'])
     saved['comparison']={'result':{'rows':[{'id':ARN,'role':'baseline','label':'technical-name'}]}}
     assert e.public(saved)['comparison']['result']['rows'][0]['label']=='Fake Cad IT Baseline'
+
+
+def test_public_baseline_identity_does_not_leak_source_label():
+    job={'id':'identity','variants':[], 'baseline_arn':'source',
+         'comparison_baseline_arn':'registered-baseline', 'baseline_label':'MY BASELINE',
+         'comparison_baseline':{'label':'Original source model','uri':'s3://b/model'},
+         'comparison':{'result':{'rows':[{'role':'baseline','label':'Original source model'}]}}}
+    result=e.public(job,numbers={})
+    assert result['baseline']['label']=='MY BASELINE'
+    assert result['comparison']['result']['rows'][0]['label']=='MY BASELINE'
+    assert result['baseline_arn']=='registered-baseline'
+    assert job['comparison_baseline']['label']=='Original source model'

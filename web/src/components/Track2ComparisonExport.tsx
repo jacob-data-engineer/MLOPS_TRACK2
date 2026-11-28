@@ -262,7 +262,7 @@ export function Track2ComparisonExport({ rows, runs, browseAll = false, autoSele
               <td className="font-medium text-ink">v{row.version}</td>
               <td title={run?.version_id || ""}>{run?.version_number ? `${run.version_kind === "snapshot" ? "Snapshot" : "Version"} ${run.version_number}` : "--"}</td>
               <td>{run?.images?.toLocaleString() ?? "--"}</td>
-              <td>{row.group_name}</td>
+              <td title={row.group_name}>{row.status==='Comparison baseline' ? (variantLabels[row.model_package_arn]||row.registry) : row.group_name}</td>
               <td>{row.metrics?.[metric]?.toFixed(4) ?? "Not measured"}</td>
               <td>{row.metrics?.dataset?.validation_count?.toLocaleString() ?? "--"}</td>
             </tr>;

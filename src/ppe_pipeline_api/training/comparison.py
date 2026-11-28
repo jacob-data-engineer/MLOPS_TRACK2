@@ -67,7 +67,7 @@ def upload_baseline(fileobj, filename, label):
             'SupportedContentTypes': ['image/jpeg'], 'SupportedResponseMIMETypes': ['application/json'],
             'SupportedRealtimeInferenceInstanceTypes': ['ml.g4dn.xlarge'],
             'SupportedTransformInstanceTypes': ['ml.g4dn.xlarge']},
-        CustomerMetadataProperties={'model_role': 'comparison-baseline', 'base_model_source': 'direct-upload',
+        CustomerMetadataProperties={'baseline_name': label, 'model_role': 'comparison-baseline', 'base_model_source': 'direct-upload',
             'checkpoint_classes': t2.metadata_value(' / '.join(names.values()))})
     return {'arn': created['ModelPackageArn'], 'classes': list(names.values()), 'bytes': size}
 
@@ -90,7 +90,8 @@ def baseline_label(arn):
     if not is_baseline_group(arn.split('/')[-2]):
         return arn.split('model-package/')[-1]
     package = t2.sm.describe_model_package(ModelPackageName=_arn(arn))
-    return package.get('ModelPackageDescription') or arn.split('model-package/')[-1]
+    return (package.get('CustomerMetadataProperties', {}).get('baseline_name')
+            or package.get('ModelPackageDescription') or arn.split('model-package/')[-1])
 
 
 def baseline_registry_table():
@@ -170,7 +171,7 @@ def register_baseline(source_arn, label):
     created = t2.sm.create_model_package(ModelPackageGroupName=group_name(label),
         ModelPackageDescription=label, InferenceSpecification=spec,
         ModelApprovalStatus='PendingManualApproval',
-        CustomerMetadataProperties={'model_role': 'comparison-baseline', 'source_package': source_arn})
+        CustomerMetadataProperties={'baseline_name': label, 'model_role': 'comparison-baseline', 'source_package': source_arn})
     return {'arn': created['ModelPackageArn']}
 
 
