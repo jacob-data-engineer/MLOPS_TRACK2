@@ -1,0 +1,7 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid": "NamedDevBaselineGroups", "Effect": "Allow", "Action": ["sagemaker:CreateModelPackageGroup", "sagemaker:DescribeModelPackageGroup", "sagemaker:ListModelPackages"], "Resource": "arn:aws:sagemaker:ap-southeast-1:125192671932:model-package-group/baseline-track2-dev-*"},
+    {"Sid": "NamedDevBaselineVersions", "Effect": "Allow", "Action": ["sagemaker:CreateModelPackage", "sagemaker:DescribeModelPackage", "sagemaker:DeleteModelPackage"], "Resource": "arn:aws:sagemaker:ap-southeast-1:125192671932:model-package/baseline-track2-dev-*"}
+  ]
+}
