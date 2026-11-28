@@ -898,7 +898,8 @@ def capture_time(key: str) -> _dt.datetime | None:
 def _capture_metadata(client, bucket, key, etag, modified):
     # ListObjects omits custom metadata. Cache by object revision so polling
     # does not repeat a HEAD for every unchanged image and label.
-    return client.head_object(Bucket=bucket, Key=key).get("Metadata", {}).get("captured_at", "")
+    metadata = client.head_object(Bucket=bucket, Key=key).get("Metadata", {})
+    return "__undated_sql__" if metadata.get("capture_date_status") == "missing" else metadata.get("captured_at", "")
 
 
 def _dated_objects(prefix, bucket, config):
@@ -935,6 +936,8 @@ def file_moment(obj: dict, config: dict, bucket: str = "") -> tuple:
     stamp = obj.get("Metadata", {}).get("captured_at", "")
     if bucket and "Metadata" not in obj:
         stamp = _capture_metadata(s3, bucket, obj["Key"], obj.get("ETag", ""), obj.get("LastModified"))
+    if stamp == "__undated_sql__" or obj.get("Metadata", {}).get("capture_date_status") == "missing":
+        return None, "missing"
     if stamp:
         try:
             taken = _dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
@@ -1227,6 +1230,9 @@ def plan_routing(*, config: dict | None = None, limit: int | None = None) -> dic
                 continue
             root, sub = where
             when, _clock = file_moment(obj, config, bucket)
+            if when is None and not by_scan:
+                skipped.append({"key": key, "reason": "SQL capture date missing; review before filing into weeks"})
+                continue
 
             if by_scan:
                 # The same single week the sweep would choose. Projected,
@@ -1671,6 +1677,9 @@ def route_pending(*, config: dict | None = None, limit: int | None = None,
                 week = scan_week
             else:
                 when, clock = file_moment(obj, config, bucket)
+                if when is None:
+                    skipped.append({"key": key, "reason": "SQL capture date missing; review before filing into weeks"})
+                    continue
                 if clock == "fallback":
                     fell_back += 1
                 week, weeks = ensure_week_covering(when, weeks, config)
@@ -2136,6 +2145,9 @@ def pending_summary(*, config: dict | None = None, limit: int | None = None) -> 
                 week = scan_week
             else:
                 when, clock = file_moment(obj, config, bucket)
+                if when is None:
+                    ignored += 1
+                    continue
                 if clock == "fallback":
                     fell_back += 1
                 week, projected = project_week(when, pending_weeks, config)

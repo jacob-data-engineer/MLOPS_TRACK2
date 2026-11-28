@@ -210,7 +210,17 @@ def execute(config, run_id):
         def pending(entry):
             image, side, name, week = entry
             image_key, label_key = sx.target_keys(destination, side, name, week)
-            return not exists(dest_bucket, image_key) or (settings.with_labels and not exists(dest_bucket, label_key))
+            if not exists(dest_bucket, image_key) or (settings.with_labels and not exists(dest_bucket, label_key)):
+                return True
+            # Existing bytes may predate capture-date support. Do not call an
+            # export unchanged until both image and label carry the SQL date.
+            stamp = image.get("captured_at")
+            if "captured_at" not in image:
+                return False
+            keys = [image_key, label_key] if settings.with_labels else [image_key]
+            return any(any(sx.storage.s3.head_object(Bucket=dest_bucket, Key=key)
+                           .get("Metadata", {}).get(k) != v
+                           for k, v in sx.capture_metadata(stamp).items()) for key in keys)
         with ThreadPoolExecutor(max_workers=8) as pool:
             pending_count = sum(pool.map(pending, placed["entries"]))
         if placed["undated"]:

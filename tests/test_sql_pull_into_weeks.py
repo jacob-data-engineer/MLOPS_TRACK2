@@ -93,7 +93,7 @@ class _S3:
             raise Exception("404")
         return {}
 
-    def copy_object(self, Bucket, Key, CopySource):
+    def copy_object(self, Bucket, Key, CopySource, **kwargs):
         self.objects[(Bucket, Key)] = self.objects[(CopySource["Bucket"], CopySource["Key"])]
 
     def get_object(self, Bucket, Key):

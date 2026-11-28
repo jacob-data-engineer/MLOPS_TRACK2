@@ -2628,3 +2628,8 @@ def test_invalid_capture_metadata_does_not_silently_use_upload_time():
     with pytest.raises(ValueError, match='Invalid captured_at'):
         pc.file_moment({'Key': 'a.jpg', 'LastModified': _at(24),
                         'Metadata': {'captured_at': 'invalid'}}, {'week_by': 'file_time'})
+
+
+def test_sql_missing_capture_is_not_treated_as_upload_date():
+    when, clock = pc.file_moment({"Key": "a.jpg", "Metadata": {"capture_date_status": "missing"}}, {"week_by": "file_time"})
+    assert when is None and clock == "missing"

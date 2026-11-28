@@ -162,7 +162,7 @@ def export(key, sql, *, bucket="", folder="", dest_bucket, dest_folder,
             image, row, item, side, target, identity = entry
             moment = sx.capture_moment(row, image['key'])
             captured_at = moment.astimezone(dt.timezone.utc).isoformat() if moment else ''
-            metadata = {'Metadata': {'captured_at': captured_at}} if captured_at else {}
+            metadata = {'Metadata': sx.capture_metadata(captured_at)}
             try:
                 already = exists(dest_bucket, target)
                 if already:

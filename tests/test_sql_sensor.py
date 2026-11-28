@@ -118,6 +118,22 @@ def test_unchanged_destination_does_not_pull(env, monkeypatch):
     monkeypatch.setattr(ss.sx, "pull", lambda *a, **kw: pytest.fail("should not copy"))
     ss.execute(cfg, "test")
     assert ss.status()["last_run"]["status"] == "unchanged"
+
+
+@pytest.mark.parametrize('missing_label_metadata', [False, True])
+def test_existing_files_need_capture_metadata_before_unchanged(env, monkeypatch, missing_label_metadata):
+    from types import SimpleNamespace
+    cfg = config()
+    result = setup_execution(monkeypatch, cfg, present=True, label_present=True)
+    stamp = '2026-03-18T00:00:00+00:00'
+    result['images'][0]['captured_at'] = stamp
+    monkeypatch.setattr(ss.sx.storage, 's3', SimpleNamespace(head_object=lambda **kw:
+        {'Metadata': {} if missing_label_metadata and '/labels/' in kw['Key'] else {'captured_at': stamp}}))
+    calls=[]
+    monkeypatch.setattr(ss.sx,'pull',lambda *a,**kw: calls.append(kw) or {'failed':0})
+    ss.execute(cfg,'test')
+    assert len(calls) == int(missing_label_metadata)
+    assert ss.status()['last_run']['status'] == ('complete' if missing_label_metadata else 'unchanged')
     assert ss.read()["seen"] == ["s3://src/a.jpg"]
 
 
@@ -192,7 +208,7 @@ def test_real_pull_path_copies_once_then_discovers_new_image(env, monkeypatch):
             return {"Body": io.BytesIO(objects[Bucket, Key])}
         def put_object(self, Bucket, Key, Body, **kwargs):
             objects[Bucket, Key] = Body
-        def copy_object(self, Bucket, Key, CopySource):
+        def copy_object(self, Bucket, Key, CopySource, **kwargs):
             objects[Bucket, Key] = objects[CopySource["Bucket"], CopySource["Key"]]
         def list_objects_v2(self, Bucket, Prefix, **kwargs):
             return {"Contents": [{"Key": k} for b, k in objects if b == Bucket and k.startswith(Prefix)]}

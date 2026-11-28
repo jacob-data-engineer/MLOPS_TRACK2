@@ -36,7 +36,7 @@ class S3:
             raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
         self.objects[Bucket, Key] = Body
 
-    def copy_object(self, Bucket, Key, CopySource):
+    def copy_object(self, Bucket, Key, CopySource, **kwargs):
         self.objects[Bucket, Key] = self.objects[CopySource["Bucket"], CopySource["Key"]]
 
     def list_objects_v2(self, Bucket, Prefix, MaxKeys):

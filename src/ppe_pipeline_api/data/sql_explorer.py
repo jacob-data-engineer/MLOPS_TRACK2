@@ -816,23 +816,27 @@ def copy_plan(images: list[dict], train_percent: int) -> list:
 
 def _copy_with_capture(source_bucket, source_key, dest_bucket, dest_key, captured_at):
     """Preserve source metadata while attaching the SQL capture clock."""
-    options = {}
-    if captured_at:
-        head = storage.s3.head_object(Bucket=source_bucket, Key=source_key)
-        options = {key: head[key] for key in (
-            "ContentType", "CacheControl", "ContentDisposition", "ContentEncoding",
-            "ContentLanguage", "Expires") if key in head}
-        options.update(MetadataDirective="REPLACE", Metadata={
-            **head.get("Metadata", {}), "captured_at": captured_at})
+    head = storage.s3.head_object(Bucket=source_bucket, Key=source_key)
+    options = {key: head[key] for key in (
+        "ContentType", "CacheControl", "ContentDisposition", "ContentEncoding",
+        "ContentLanguage", "Expires") if key in head}
+    metadata = {k: v for k, v in head.get("Metadata", {}).items()
+                if k not in ("captured_at", "capture_date_status")}
+    metadata.update(capture_metadata(captured_at))
+    options.update(MetadataDirective="REPLACE", Metadata=metadata)
     storage.s3.copy_object(Bucket=dest_bucket, Key=dest_key,
                           CopySource={"Bucket": source_bucket, "Key": source_key}, **options)
 
 
+def capture_metadata(captured_at):
+    # An undated SQL frame must not silently become a new frame on upload.
+    return {"captured_at": captured_at} if captured_at else {"capture_date_status": "missing"}
+
+
 def _stamp_existing_capture(bucket, key, captured_at):
-    if captured_at:
-        head = storage.s3.head_object(Bucket=bucket, Key=key)
-        if head.get("Metadata", {}).get("captured_at") != captured_at:
-            _copy_with_capture(bucket, key, bucket, key, captured_at)
+    head = storage.s3.head_object(Bucket=bucket, Key=key)
+    if any(head.get("Metadata", {}).get(k) != v for k, v in capture_metadata(captured_at).items()):
+        _copy_with_capture(bucket, key, bucket, key, captured_at)
 
 
 #: Columns read as a frame's capture moment, in order. A query that names
@@ -1084,7 +1088,7 @@ def pull(key: str, sql: str, *, bucket: str = "", folder: str = "",
                     storage.s3.put_object(Bucket=dest_bucket, Key=label_target,
                                           Body=yolo_text(image["labels"]).encode(),
                                           ContentType="text/plain",
-                                          **({"Metadata": {"captured_at": captured_at}} if captured_at else {}))
+                                          Metadata=capture_metadata(captured_at))
                 else:
                     _stamp_existing_capture(dest_bucket, label_target, captured_at)
                 out["label"] = "database"
