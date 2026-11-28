@@ -188,8 +188,9 @@ def test_register_baseline_copies_artifact_without_approval_or_deployment(monkey
             'ModelDataSource':{'S3DataSource':{'S3Uri':'s3://b/original.tar.gz','ETag':'original-etag'}},
             'Environment':{'MODEL_NAME':'detector'}}]}},
         create_model_package=lambda **kw:created.append(kw) or {'ModelPackageArn':arn(c.group_name())}))
+    monkeypatch.setattr(c,'remember_baseline_group',lambda *a:None)
     c.register_baseline(arn(),'Reference')
-    assert created[0]['ModelPackageGroupName'] == c.group_name()
+    assert created[0]['ModelPackageGroupName'] == c.group_name('Reference')
     assert created[0]['ModelApprovalStatus'] == 'PendingManualApproval'
     assert created[0]['InferenceSpecification']['Containers'][0]['ModelDataUrl'] == 's3://b/preserved/model.tar.gz'
     assert created[0]['InferenceSpecification']['Containers'][0] == {
@@ -253,7 +254,7 @@ def test_direct_upload_only_registers_in_baseline_registry(monkeypatch):
     import tarfile
     uploaded, registered = [], []
     monkeypatch.setattr(c,'_inspect_uploaded_baseline',lambda path:{0:'helmet'})
-    monkeypatch.setattr(c.t2,'ensure_model_package_group',lambda group,description:group==c.group_name())
+    monkeypatch.setattr(c.t2,'ensure_model_package_group',lambda group,description:group==c.group_name('Reference'))
     def upload_file(path,bucket,key):
         with tarfile.open(path) as archive:
             assert archive.getnames() == ['model.pt']
@@ -262,11 +263,12 @@ def test_direct_upload_only_registers_in_baseline_registry(monkeypatch):
     monkeypatch.setattr(c.t2,'s3',SimpleNamespace(upload_file=upload_file))
     monkeypatch.setattr(c.t2,'sm',SimpleNamespace(create_model_package=lambda **kw:
         registered.append(kw) or {'ModelPackageArn':arn(c.group_name())}))
+    monkeypatch.setattr(c,'remember_baseline_group',lambda *a:None)
     result=c.upload_baseline(io.BytesIO(b'checkpoint'),'../../uploaded.PT','Reference')
     assert result['classes']==['helmet'] and result['bytes']==10
     assert len(uploaded)==len(registered)==1
-    assert uploaded[0].startswith('baseline-models/'+c.group_name()+'/') and '..' not in uploaded[0]
-    assert registered[0]['ModelPackageGroupName']==c.group_name()
+    assert uploaded[0].startswith('baseline-models/'+c.group_name('Reference')+'/') and '..' not in uploaded[0]
+    assert registered[0]['ModelPackageGroupName']==c.group_name('Reference')
     assert registered[0]['ModelApprovalStatus']=='PendingManualApproval'
     assert registered[0]['CustomerMetadataProperties']['base_model_source']=='direct-upload'
 
@@ -300,3 +302,25 @@ def test_upload_api_requires_auth_and_passes_multipart_file(monkeypatch):
         return {'arn':'baseline-v1','classes':['helmet'],'bytes':7}
     monkeypatch.setattr(c,'upload_baseline',upload)
     assert client.post(route,files={'file':('model.pt',b'weights')},data={'label':'Reference'}).json()['arn']=='baseline-v1'
+
+
+def test_baseline_registry_is_separate_for_each_exact_name():
+    assert c.group_name('Fake Cad IT Baseline') != c.group_name('Another baseline')
+    assert c.group_name('A B') != c.group_name('A-B')
+    assert len(c.group_name('X'*200)) <= 63
+    assert c.is_baseline_group(c.group_name('Fake Cad IT Baseline'))
+    assert c.normalize({'enabled':True,'baseline_arn':arn(c.group_name('Reference'))})['enabled']
+
+def test_named_registry_listing_paginates_and_keeps_legacy_versions(monkeypatch):
+    named=c.group_name('Fake Cad IT Baseline')
+    calls=[]
+    def groups(**kw):
+        calls.append(kw)
+        return {'Items':[], 'LastEvaluatedKey':{'sort':'next'}} if 'ExclusiveStartKey' not in kw else {'Items':[{'sort':named}]}
+    def packages(**kw):
+        return {'ModelPackageSummaryList':[{'ModelPackageArn':arn(kw['ModelPackageGroupName']), 'ModelPackageVersion':1, 'ModelPackageDescription':'Fake Cad IT Baseline'}]}
+    monkeypatch.setattr(c,'baseline_registry_table',lambda:SimpleNamespace(query=groups))
+    monkeypatch.setattr(c.t2,'sm',SimpleNamespace(list_model_packages=packages))
+    rows=c.baseline_versions()
+    assert {r['arn'] for r in rows}=={arn(named),arn(c.group_name())}
+    assert calls[1]['ExclusiveStartKey']=={'sort':'next'}

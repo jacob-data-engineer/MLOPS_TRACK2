@@ -18,7 +18,7 @@ export type VariantSettingsSnapshot = {notes?:string;epochs:number;img_size:numb
 export type SavedTrainingVariant = {id:string;name:string;settings:VariantSettingsSnapshot;selected:boolean};
 export type TrainingVariantDraft = {batch_name?:string;id:string;revision:number;detector_slug:string;architecture:string;baseline_arn:string;dataset_version_id:string;data_mode?:"saved"|"prepared";variants:SavedTrainingVariant[]};
 export interface VariantRunRecord {
-  starting_model_arn?:string;
+  starting_model_arn?:string; baseline_label?:string;
   run_number?:number|null;
   trigger?:string; pull_done?:boolean; working_dataset_version_id?:string;
   id:string; name:string; state:string; stage?:string; error?:string; created_at:string;
@@ -56,8 +56,8 @@ export interface RunComparisonSummary {
 export function listBaselineModels(): Promise<{versions: BaselineVersion[]}> {
   return apiGet('/track2/comparisons/baselines');
 }
-export function deleteBaselineModel(version:number):Promise<{deleted:boolean;version:number}> {
-  return apiDelete(`/track2/comparisons/baselines/${version}`);
+export function deleteBaselineModel(version:number, arn:string):Promise<{deleted:boolean;version:number}> {
+  return apiDelete(`/track2/comparisons/baselines/${version}?arn=${encodeURIComponent(arn)}`);
 }
 export function registerBaselineModel(source_arn: string, label: string): Promise<{arn: string}> {
   return apiPost('/track2/comparisons/baselines', {source_arn, label});

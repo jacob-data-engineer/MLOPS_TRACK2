@@ -189,6 +189,7 @@ def create(payload, *, preparation_config=None, trigger="manual"):
            'created_at':now(),'updated_at':now(),'state':'Pending','detector':detector,
            'run_number':catalog_view.reserve_experiment_number(ident),
            'architecture':payload['architecture'],'baseline_arn':baseline,
+           'baseline_label':cmp.baseline_label(comparison_arn) if comparison_arn else '',
            **({'comparison_baseline_arn':comparison_arn} if 'comparison_baseline_arn' in payload else {}),
            'data_mode':mode,'preparation_config':config,'trigger':trigger,
            'dataset_version_id':payload['dataset_version_id'] if mode=='saved' else '', 'dataset':check,'shared':shared,
@@ -214,12 +215,14 @@ def public(job, numbers=None):
     ids=[v['run_id'] for v in value['variants'] if v.get('run_id')]
     if numbers is None:
         numbers=catalog_view.run_numbers(ids)
-    value['run_number']=value.get('run_number') or max(numbers.values(),default=None)
+    value['run_number']=value.get('run_number') or max((numbers[i] for i in ids if i in numbers),default=None)
     for v in value['variants']:
         v['training_job_number']=numbers.get(v.get('run_id'))
         v['run_number']=value['run_number']
     variants_by_arn={v['model_package_arn']:v for v in value['variants'] if v.get('model_package_arn')}
     for row in ((value.get('comparison') or {}).get('result') or {}).get('rows',[]):
+        if row.get('role') == 'baseline' and value.get('baseline_label'):
+            row['label'] = value['baseline_label']
         variant=variants_by_arn.get(row.get('id'))
         if variant:
             row['label']=variant['name'] + (f" · Run {variant['run_number']}" if variant.get('run_number') else '')
@@ -241,6 +244,7 @@ def publish(job, variant, entry):
     job.update(state='Training',stage=f"Queued {variant['name']}",updated_at=now())
     with contextlib.closing(record_store.connection()) as conn:
         cur=conn.cursor()
+        catalog_view.link_experiment_run(cur, variant['run_id'], job['run_number'])
         for tab,row in ((queue,{**entry,'record_type':'queue_entry'}),
                         (queue,{'id':'queue-state','record_type':'queue_state','started':True,'at':now()}),
                         (table(),job)):
@@ -319,7 +323,7 @@ def compare(job, successful):
         models=[]
         if comparison_arn:
             if 'comparison_baseline' not in job:
-                job['comparison_baseline']=pin(comparison_arn,'baseline','Comparison baseline: '+comparison_arn.split('/')[-2]+'/'+comparison_arn.split('/')[-1]) if 'comparison_baseline_arn' in job else job['baseline']
+                job['comparison_baseline']=pin(comparison_arn,'baseline',job.get('baseline_label') or cmp.baseline_label(comparison_arn)) if 'comparison_baseline_arn' in job else job['baseline']
                 save(job)
             models.append({k:job['comparison_baseline'][k] for k in ('id','uri','etag','role','label')})
         for variant in successful[1:]:
@@ -370,7 +374,7 @@ def advance(job):
     reconcile_queue_failure(job)
     if job.get('comparison_baseline_arn') and not job.get('comparison_baseline'):
         arn=job['comparison_baseline_arn']
-        job['comparison_baseline']=pin(arn,'baseline','Comparison baseline: '+arn.split('/')[-2]+'/'+arn.split('/')[-1])
+        job['comparison_baseline']=pin(arn,'baseline',job.get('baseline_label') or cmp.baseline_label(arn))
         save(job)
     if not job.get('baseline'):
         job['baseline']=pin(job['baseline_arn'],'baseline','Baseline: '+job['baseline_arn'].split('/')[-2]+'/'+job['baseline_arn'].split('/')[-1])

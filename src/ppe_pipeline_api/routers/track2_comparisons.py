@@ -41,9 +41,9 @@ def register(payload: BaselineRequest, session=Depends(require_session)):
 
 
 @router.delete('/baselines/{version}')
-def delete_baseline(version: int = Path(ge=1), session=Depends(require_session)):
+def delete_baseline(version: int = Path(ge=1), arn: str | None = None, session=Depends(require_session)):
     try:
-        return c.delete_baseline(version)
+        return c.delete_baseline(version, arn)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     except ClientError as exc:

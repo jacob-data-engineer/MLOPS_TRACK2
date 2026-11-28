@@ -50,7 +50,7 @@ CA_BUNDLE = pathlib.Path(__file__).with_name("rds-ca-bundle.pem")
 
 #: The schema's version: SCHEMA is version 1, and each entry in MIGRATIONS
 #: takes it one step further. Recorded in `schema_version`.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 11
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS schema_version (
@@ -264,6 +264,22 @@ MIGRATIONS = {
         """CREATE TRIGGER training_run_number_assignment AFTER INSERT ON training_runs
              FOR EACH ROW EXECUTE FUNCTION assign_permanent_run_number()""",
     ],
+    11: [
+        """CREATE TABLE training_run_groups (
+             run_id text PRIMARY KEY,
+             public_run_number bigint NOT NULL REFERENCES run_number_registry(run_number))""",
+        """CREATE OR REPLACE FUNCTION assign_permanent_run_number() RETURNS trigger AS $$
+             BEGIN
+                 IF NOT EXISTS (SELECT 1 FROM training_run_groups WHERE run_id=NEW.run_id)
+                    AND NOT EXISTS (SELECT 1 FROM run_number_registry WHERE run_id=NEW.run_id) THEN
+                     INSERT INTO run_number_registry (run_id) VALUES (NEW.run_id)
+                     ON CONFLICT (run_id) DO NOTHING;
+                 END IF;
+                 RETURN NEW;
+             END;
+             $$ LANGUAGE plpgsql""",
+    ],
+
 }
 
 TABLES = ("files", "file_sources", "labels", "dataset_versions",

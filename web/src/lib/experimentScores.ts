@@ -1,6 +1,6 @@
 import type {Track2MetricsRow,Track2TrainingAudit,VariantRunRecord} from './api';
 export function experimentScores(run:VariantRunRecord,models:Track2MetricsRow[],audits:Track2TrainingAudit[]){
- const items=[...(run.baseline_arn?[{arn:run.baseline_arn,runId:undefined as string|undefined,label:'Original baseline'}]:[]),...run.variants.map(v=>({arn:v.model_package_arn,runId:v.run_id,label:v.name}))];
+ const items=[...(run.baseline_arn?[{arn:run.baseline_arn,runId:undefined as string|undefined,label:run.baseline_label||'Original baseline'}]:[]),...run.variants.map(v=>({arn:v.model_package_arn,runId:v.run_id,label:v.name}))];
  return items.map((item,index)=>{
   const audit=audits.find(a=>item.runId?a.id===item.runId:!!item.arn&&a.model?.model_package_arn===item.arn);
   const arn=item.arn||audit?.model?.model_package_arn;

@@ -54,8 +54,9 @@ def chronological_runs_sql(sql: str) -> str:
         SELECT r.run_id,version_id,started_at,detector,execution_arn,
                model_package_arn,detail,status,submitted_at,ended_at,
                architecture,files_synced,record,
-               n.run_number
-        FROM training_runs r JOIN run_number_registry n ON n.run_id=r.run_id
+               coalesce(g.public_run_number,n.run_number) AS run_number
+        FROM training_runs r LEFT JOIN run_number_registry n ON n.run_id=r.run_id
+        LEFT JOIN training_run_groups g ON g.run_id=r.run_id
     ) """ + re.sub(r"\btraining_runs\b", "chronological_training_runs", sql)
 
 
@@ -88,13 +89,22 @@ def reserve_experiment_number(ident):
     conn = catalog.connect()
     try:
         cur = conn.cursor()
-        cur.execute("INSERT INTO run_number_registry(run_id) VALUES (%s) ON CONFLICT(run_id) DO NOTHING", ('experiment-'+ident,))
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('experiment-'+ident,))
+        cur.execute("INSERT INTO run_number_registry(run_id) SELECT %s WHERE NOT EXISTS "
+                    "(SELECT 1 FROM run_number_registry WHERE run_id=%s)", ('experiment-'+ident, 'experiment-'+ident))
         cur.execute("SELECT run_number FROM run_number_registry WHERE run_id=%s", ('experiment-'+ident,))
         number = cur.fetchone()[0]
         conn.commit()
         return number
     finally:
         conn.close()
+
+
+def link_experiment_run(cur, run_id, number):
+    """Bind a child before publication, in the queue's transaction. No new number."""
+    cur.execute("INSERT INTO training_run_groups(run_id,public_run_number) VALUES (%s,%s) "
+                "ON CONFLICT(run_id) DO UPDATE SET public_run_number=EXCLUDED.public_run_number",
+                (run_id, number))
 
 
 def run_numbers(run_ids: list[str]) -> dict[str, int]:

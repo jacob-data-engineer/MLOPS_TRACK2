@@ -31,7 +31,7 @@ def metadata(ident, arn):
         'dataset_version_id': c['dataset'], 'selected_model': arn,
         'role': 'variant' if c['member'] else 'baseline',
         'variant': c['member'], 'comparison': c['job'].get('comparison'),
-        'baseline_arn': c['job']['baseline_arn'],
+        'baseline_arn': c['job']['baseline_arn'], 'baseline_name': c['job'].get('baseline_label'),
         'notice': 'Dataset belongs to this experiment; it is not the baseline original training dataset.'})
     if c['member']:
         trained = cm.describe('run', c['member']['run_id'])

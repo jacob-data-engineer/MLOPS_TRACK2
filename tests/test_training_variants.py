@@ -28,6 +28,7 @@ def store(monkeypatch):
     monkeypatch.setattr(e.t2,'get_detector',lambda slug:{'slug':slug,'classes':{'0':'helmet'}})
     monkeypatch.setattr(e.t2,'detector_group_name',lambda *a:'yolo26s-helmet-detector')
     monkeypatch.setattr(e.t2.sm,'describe_model_package',lambda **kw:{'ModelPackageStatus':'Completed'})
+    monkeypatch.setattr(e.catalog_view,'link_experiment_run',lambda *a:None)
     monkeypatch.setattr(e.catalog_view,'reserve_experiment_number',lambda ident:101)
     monkeypatch.setattr(e.catalog_view,'run_numbers',lambda ids:{i:n+1 for n,i in enumerate(ids)})
     monkeypatch.setattr(e.record_store,'enabled',lambda:False)
@@ -633,3 +634,19 @@ def test_schedule_preserves_separate_comparison_selection():
     assert e.scheduled_payload(config,str(uuid.uuid4()))['comparison_baseline_arn']==selected
     pages[prefix+'scheduled-experiment']['comparison_baseline_arn']=None
     assert e.scheduled_payload(config,str(uuid.uuid4()))['comparison_baseline_arn'] is None
+
+
+def test_legacy_number_fallback_uses_only_own_variants():
+    job={'id':'old','variants':[{'run_id':'own'}]}
+    assert e.public(job, numbers={'own':75,'unrelated':91})['run_number']==75
+    assert e.public({'id':'empty','variants':[]}, numbers={'unrelated':91})['run_number'] is None
+
+
+def test_named_comparison_label_is_retained(store,monkeypatch):
+    monkeypatch.setattr(e.cmp,'baseline_label',lambda arn:'Fake Cad IT Baseline')
+    p=payload();p['comparison_baseline_arn']=ARN
+    result=e.create(p)
+    assert result['baseline_label']=='Fake Cad IT Baseline'
+    saved=e.read(p['id'])
+    saved['comparison']={'result':{'rows':[{'id':ARN,'role':'baseline','label':'technical-name'}]}}
+    assert e.public(saved)['comparison']['result']['rows'][0]['label']=='Fake Cad IT Baseline'

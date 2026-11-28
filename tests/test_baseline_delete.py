@@ -18,7 +18,7 @@ def test_delete_only_registered_baseline_preserves_files_and_audits(monkeypatch)
 def test_delete_refuses_training_registry_and_invalid_version(monkeypatch):
     monkeypatch.setattr(c,'baseline_versions',lambda:[{'version':3,'arn':'arn:aws:sagemaker:ap-southeast-1:123456789012:model-package/yolo26s-training-detector/3'}])
     monkeypatch.setattr(c.t2.sm,'delete_model_package',lambda **kw:pytest.fail('Wrong registry'))
-    with pytest.raises(ValueError,match='Baseline Model registry'):c.delete_baseline(3)
+    with pytest.raises(ValueError,match='Baseline Model registry'):c.delete_baseline(3, 'arn:aws:sagemaker:ap-southeast-1:123456789012:model-package/yolo26s-training-detector/3')
     for value in (0,-1,True,'3'):
         with pytest.raises(ValueError):c.delete_baseline(value)
 
@@ -38,10 +38,20 @@ def test_delete_api_requires_auth_and_valid_version(monkeypatch):
     from fastapi.testclient import TestClient
     from ppe_pipeline_api.routers import track2_comparisons as r
     app=FastAPI();app.include_router(r.router,prefix='/track2/comparisons');client=TestClient(app)
-    calls=[];monkeypatch.setattr(c,'delete_baseline',lambda version:calls.append(version) or {'deleted':True})
+    calls=[];monkeypatch.setattr(c,'delete_baseline',lambda version,arn=None:calls.append(version) or {'deleted':True})
     assert client.delete('/track2/comparisons/baselines/3').status_code==401
     assert calls==[]
     app.dependency_overrides[r.require_session]=lambda:{}
     assert client.delete('/track2/comparisons/baselines/0').status_code==422
     assert client.delete('/track2/comparisons/baselines/3').status_code==200
     assert calls==[3]
+
+
+def test_delete_exact_named_registry_when_version_numbers_overlap(monkeypatch):
+    a=f'arn:aws:sagemaker:ap-southeast-1:123456789012:model-package/{c.group_name("First")}/1'
+    b=f'arn:aws:sagemaker:ap-southeast-1:123456789012:model-package/{c.group_name("Second")}/1'
+    monkeypatch.setattr(c,'baseline_versions',lambda:[{'version':1,'arn':a},{'version':1,'arn':b}])
+    calls=[]
+    monkeypatch.setattr(c.t2.sm,'delete_model_package',lambda **kw:calls.append(kw))
+    c.delete_baseline(1,b)
+    assert calls==[{'ModelPackageName':b}]

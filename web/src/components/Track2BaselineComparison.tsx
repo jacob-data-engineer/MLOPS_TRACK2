@@ -28,7 +28,7 @@ export function Track2BaselineComparison({value, onChange, disabled = false, com
     if (!deleteTarget) return;
     setBusy(true);setDeleteError('');setNotice('');
     try {
-      await deleteBaselineModel(deleteTarget.version);
+      await deleteBaselineModel(deleteTarget.version,deleteTarget.arn);
       setVersions(rows=>rows.filter(row=>row.arn!==deleteTarget.arn));
       setModels(rows=>rows.filter(row=>row.model_package_arn!==deleteTarget.arn));
       onChange({...value,baseline_arn:value.baseline_arn===deleteTarget.arn?'':value.baseline_arn,

@@ -1,5 +1,6 @@
 """Versioned baseline registry and durable, endpoint-free run comparisons."""
 import json
+import hashlib
 import os
 import re
 import tarfile
@@ -51,14 +52,15 @@ def upload_baseline(fileobj, filename, label):
         if not size:
             raise ValueError('The checkpoint file is empty.')
         names = _inspect_uploaded_baseline(checkpoint)
-        if not t2.ensure_model_package_group(group_name(), 'Baseline Model: comparison only, never auto-deployed.'):
+        if not t2.ensure_model_package_group(group_name(label), 'Baseline Model: comparison only, never auto-deployed.'):
             raise ValueError('The Baseline Model registry could not be created.')
+        remember_baseline_group(group_name(label), label)
         artifact = Path(folder) / 'model.tar.gz'
         with tarfile.open(artifact, 'w:gz') as archive:
             archive.add(checkpoint, arcname='model.pt')
-        key = f'baseline-models/{group_name()}/{uuid.uuid4().hex}/model.tar.gz'
+        key = f'baseline-models/{group_name(label)}/{uuid.uuid4().hex}/model.tar.gz'
         t2.s3.upload_file(str(artifact), t2.BUCKET, key)
-    created = t2.sm.create_model_package(ModelPackageGroupName=group_name(),
+    created = t2.sm.create_model_package(ModelPackageGroupName=group_name(label),
         ModelPackageDescription=label, ModelApprovalStatus='PendingManualApproval',
         InferenceSpecification={
             'Containers': [{'Image': t2.SERVE_IMAGE, 'ModelDataUrl': f's3://{t2.BUCKET}/{key}'}],
@@ -70,30 +72,75 @@ def upload_baseline(fileobj, filename, label):
     return {'arn': created['ModelPackageArn'], 'classes': list(names.values()), 'bytes': size}
 
 
-def group_name():
+def group_name(label=None):
     # Outside production's approval/deployment event rule, isolated by environment.
     scope = os.getenv('CATALOG_SCHEMA', 'production').replace('_', '-')
-    return f'yolo-baseline-{scope}-detector'
+    if label is None:
+        return f'yolo-baseline-{scope}-detector'  # historical versions remain readable
+    prefix = f'baseline-{scope}-'
+    slug = re.sub(r'[^a-z0-9]+', '-', label.lower()).strip('-') or 'model'
+    digest = hashlib.sha256(label.encode('utf-8')).hexdigest()[:10]
+    return prefix + slug[:63-len(prefix)-11] + '-' + digest
+
+def is_baseline_group(group):
+    return group == group_name() or group.startswith('baseline-' + os.getenv('CATALOG_SCHEMA', 'production').replace('_', '-') + '-')
+
+def baseline_label(arn):
+    _arn(arn)
+    if not is_baseline_group(arn.split('/')[-2]):
+        return arn.split('model-package/')[-1]
+    package = t2.sm.describe_model_package(ModelPackageName=_arn(arn))
+    return package.get('ModelPackageDescription') or arn.split('model-package/')[-1]
+
+
+def baseline_registry_table():
+    from .. import pull_control as pc
+    return record_store.Table(pc.TABLE_NAME)
+
+
+def remember_baseline_group(group, label):
+    # Persist discovery in the existing SQL record store. The dev role does not
+    # need the account-wide SageMaker ListModelPackageGroups permission.
+    baseline_registry_table().put_item(Item={'kind':'comparison_baseline_registry',
+        'sort':group, 'label':label})
+
+
+def baseline_groups():
+    groups, token = [group_name()], None
+    while True:
+        args = {'KeyConditionExpression':'kind = :kind',
+                'ExpressionAttributeValues':{':kind':'comparison_baseline_registry'}}
+        if token:
+            args['ExclusiveStartKey'] = token
+        page = baseline_registry_table().query(**args)
+        groups.extend(p['sort'] for p in page.get('Items', []) if is_baseline_group(p['sort']))
+        token = page.get('LastEvaluatedKey')
+        if not token:
+            return list(dict.fromkeys(groups))
 
 
 def baseline_versions():
-    items, token = [], None
-    while True:
-        args = {'ModelPackageGroupName': group_name(), 'SortBy': 'CreationTime', 'SortOrder': 'Descending'}
-        if token:
-            args['NextToken'] = token
-        try:
-            page = t2.sm.list_model_packages(**args)
-        except ClientError as exc:
-            if exc.response['Error']['Code'] == 'ValidationException' and 'exist' in str(exc).lower():
-                return []
-            raise
-        for p in page.get('ModelPackageSummaryList', []):
-            items.append({'arn': p['ModelPackageArn'], 'version': p['ModelPackageVersion'],
-                          'label': p.get('ModelPackageDescription', '')})
-        token = page.get('NextToken')
-        if not token:
-            return items
+    groups = baseline_groups()
+    items = []
+    for group in dict.fromkeys(groups):
+        token = None
+        while True:
+            args = {'ModelPackageGroupName': group, 'SortBy': 'CreationTime', 'SortOrder': 'Descending'}
+            if token:
+                args['NextToken'] = token
+            try:
+                page = t2.sm.list_model_packages(**args)
+            except ClientError as exc:
+                if exc.response['Error']['Code'] == 'ValidationException' and 'exist' in str(exc).lower():
+                    break
+                raise
+            for p in page.get('ModelPackageSummaryList', []):
+                items.append({'arn': p['ModelPackageArn'], 'version': p['ModelPackageVersion'],
+                              'label': p.get('ModelPackageDescription', group)})
+            token = page.get('NextToken')
+            if not token:
+                break
+    return sorted(items, key=lambda p: (p['label'].casefold(), -p['version']))
 
 
 def register_baseline(source_arn, label):
@@ -108,8 +155,9 @@ def register_baseline(source_arn, label):
     # Preserve the artifact as well as its registry identity. Deleting the source
     # version later must not silently change this baseline.
     artifact = data.preserve_training_base(containers[0]['ModelDataUrl'])
-    if not t2.ensure_model_package_group(group_name(), 'Baseline Model: comparison only, never auto-deployed.'):
+    if not t2.ensure_model_package_group(group_name(label), 'Baseline Model: comparison only, never auto-deployed.'):
         raise ValueError('The Baseline Model registry could not be created.')
+    remember_baseline_group(group_name(label), label)
     spec = dict(description['InferenceSpecification'])
     # DescribeModelPackage includes artifact ETags and resolved data sources.
     # They identify the original object, not our preserved copy. Build a fresh
@@ -119,22 +167,25 @@ def register_baseline(source_arn, label):
         'FrameworkVersion', 'NearestModelName') if key in containers[0]}
     container['ModelDataUrl'] = artifact['uri']
     spec['Containers'] = [container]
-    created = t2.sm.create_model_package(ModelPackageGroupName=group_name(),
+    created = t2.sm.create_model_package(ModelPackageGroupName=group_name(label),
         ModelPackageDescription=label, InferenceSpecification=spec,
         ModelApprovalStatus='PendingManualApproval',
         CustomerMetadataProperties={'model_role': 'comparison-baseline', 'source_package': source_arn})
     return {'arn': created['ModelPackageArn']}
 
 
-def delete_baseline(version):
+def delete_baseline(version, arn=None):
     """Delete only this environment's baseline registration, retaining replay files."""
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         raise ValueError('Choose a valid baseline version.')
-    target = next((row for row in baseline_versions() if row['version'] == version), None)
+    if arn and not is_baseline_group(_arn(arn).split('/')[-2]):
+        raise ValueError('Only versions in this environment Baseline Model registry can be deleted.')
+    target = next((row for row in baseline_versions() if row['version'] == version and
+                   (row['arn'] == arn if arn else row['arn'].split('/')[-2] == group_name())), None)
     if not target:
         return {'deleted': True, 'version': version, 'already_absent': True}
     arn = _arn(target['arn'])
-    if arn.split('/')[-2] != group_name():
+    if not is_baseline_group(arn.split('/')[-2]):
         raise ValueError('Only versions in this environment\'s Baseline Model registry can be deleted.')
     try:
         t2.sm.delete_model_package(ModelPackageName=arn)
@@ -164,7 +215,7 @@ def normalize(value):
     if not value['enabled']:
         return {'enabled': False}
     baseline = _arn(value.get('baseline_arn'))
-    if baseline.split('/')[-2] != group_name():
+    if not is_baseline_group(baseline.split('/')[-2]):
         raise ValueError('Select a version from the Baseline Model registry.')
     others = value.get('other_arns', [])
     if not isinstance(others, list) or len(others) > 4:
@@ -185,7 +236,7 @@ def pin_selection(value):
         etag = t2.s3.head_object(Bucket=bucket, Key=key)['ETag']
         models.append({'id': arn, 'uri': pinned['uri'], 'etag': etag,
                        'role': 'baseline' if arn == selection['baseline_arn'] else 'other',
-                       'label': arn.split('model-package/')[-1]})
+                       'label': baseline_label(arn)})
     return {**selection, 'models': models}
 
 
