@@ -1429,6 +1429,7 @@ export function Track2ModelsPage({ variant = "standard" }: { variant?: "standard
 
           <Card
             title="Training queue"
+            actionBeforeAsk
             titleAside={<span className="text-xs font-normal text-ink-muted">Starts automatically</span>}
             caption={
               // Counts the running entry too. Counting only `pending` made

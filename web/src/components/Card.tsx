@@ -35,6 +35,7 @@ export function Card({
   titleAside,
   caption,
   action,
+  actionBeforeAsk = false,
   children,
   collapsible = true,
   defaultOpen = true,
@@ -55,6 +56,7 @@ export function Card({
   titleAside?: ReactNode;
   caption?: string;
   action?: ReactNode;
+  actionBeforeAsk?: boolean;
   children: ReactNode;
   /** False for a card that renders its own Show/Hide. */
   collapsible?: boolean;
@@ -108,6 +110,7 @@ export function Card({
             </h3>
           )}
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            {actionBeforeAsk && action}
             {title && (
               <button
                 type="button"
@@ -131,7 +134,7 @@ export function Card({
                 {helpOpen ? "Close help" : "?"}
               </button>
             )}
-            {action}
+            {!actionBeforeAsk && action}
             {collapsible && (
               <button
                 type="button"
